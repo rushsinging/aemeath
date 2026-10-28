@@ -323,11 +323,20 @@ impl RsiTask for HarnessRsiCycleTask {
         }
         // #2065 A：周期 Compose 汇总块——纵观全部采纳仲裁矛盾/合并/精炼
         if !all_adoptions.is_empty() {
+            let active_lessons = match self.lesson_store.load_active() {
+                Ok(lessons) => lessons,
+                Err(error) => {
+                    log::warn!(target: crate::LOG_TARGET, "Compose Active lesson 读取失败（按空经验继续）：{error}");
+                    Vec::new()
+                }
+            };
             if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
                 registry,
                 self.llm.as_ref(),
                 &self.lesson_store,
                 &all_adoptions,
+                &active_lessons,
+                self.stream_port.as_ref(),
                 self.dry_run,
                 &mut preview_lines,
                 self.recorder.as_deref(),

@@ -1,6 +1,7 @@
 //! session scanner 契约测试：真实 dataset 形态 fixture → 事件流提取。
 
 use crate::adapters::session_scanner::SessionDatasetScanner;
+use crate::domain::evidence::EvidenceSourceRef;
 
 /// 构造一个 dataset 目录（含两条 step 成员 + 一条非 step 成员 + 一条损坏成员）。
 fn make_dataset(root: &std::path::Path) -> std::path::PathBuf {
@@ -120,6 +121,88 @@ fn scan_extracts_paired_tool_events_and_outcomes() {
         .all(|event| event.session_id.contains("0199abcd") && event.run_id == "run-1"));
 }
 
+/// 回读来源 step 的相邻上下文：包含前后 step、用户/assistant/tool 摘要。
+#[test]
+fn read_step_context_includes_neighbor_steps_and_tool_facts() {
+    let root = tempfile::tempdir().unwrap();
+    let dataset = make_dataset(root.path());
+    let source = EvidenceSourceRef {
+        session_id: "0199abcd-0000-7000-8000-000000000001".into(),
+        run_id: "run-1".into(),
+        step_id: "step-2".into(),
+    };
+    let excerpt = SessionDatasetScanner::read_step_context(&dataset, &source)
+        .expect("来源 step 上下文必须可回读");
+    assert_eq!(excerpt.source, source);
+    assert!(
+        excerpt.text.contains("[step-1]"),
+        "必须包含前一步：{}",
+        excerpt.text
+    );
+    assert!(excerpt.text.contains("[step-2]"));
+    assert!(excerpt.text.contains("cargo test"));
+    assert!(excerpt.text.contains("old_string found 2 times"));
+    assert!(excerpt.text.chars().count() <= 1200, "单来源上下文必须有界");
+}
+
+/// 来源 step 不存在或 run 不匹配时返回 None，NEVER 拼凑无关上下文。
+#[test]
+fn read_step_context_returns_none_for_missing_source() {
+    let root = tempfile::tempdir().unwrap();
+    let dataset = make_dataset(root.path());
+    let missing_step = EvidenceSourceRef {
+        session_id: "0199abcd-0000-7000-8000-000000000001".into(),
+        run_id: "run-1".into(),
+        step_id: "missing".into(),
+    };
+    assert!(SessionDatasetScanner::read_step_context(&dataset, &missing_step).is_none());
+    let wrong_run = EvidenceSourceRef {
+        session_id: "0199abcd-0000-7000-8000-000000000001".into(),
+        run_id: "other-run".into(),
+        step_id: "step-1".into(),
+    };
+    assert!(SessionDatasetScanner::read_step_context(&dataset, &wrong_run).is_none());
+}
+
+/// 超长 step 上下文按来源预算截断，NEVER 无界注入 prompt。
+#[test]
+fn read_step_context_is_bounded_for_large_steps() {
+    let root = tempfile::tempdir().unwrap();
+    let dataset = root.path().join("large.dataset");
+    let members = dataset.join("members");
+    std::fs::create_dir_all(&members).unwrap();
+    for step_index in 0..3 {
+        let member = serde_json::json!({
+            "cursor": {"run_id": "run-1", "step_id": format!("step-{step_index}")},
+            "step": {
+                "step_id": format!("step-{step_index}"),
+                "outcome": {
+                    "committed_revision": step_index,
+                    "messages": [
+                        {"role": "assistant", "content": [
+                            {"type": "text", "text": "长".repeat(2000)}
+                        ]}
+                    ]
+                }
+            }
+        });
+        std::fs::write(
+            members.join(format!("m{step_index}.json")),
+            member.to_string(),
+        )
+        .unwrap();
+    }
+    let source = EvidenceSourceRef {
+        session_id: "large.dataset".into(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    let excerpt =
+        SessionDatasetScanner::read_step_context(&dataset, &source).expect("上下文必须可回读");
+    assert!(excerpt.text.chars().count() <= 1200);
+    assert!(excerpt.text.ends_with('…'));
+}
+
 /// 缺 members 目录：空报告 NEVER 报错。
 #[test]
 fn scan_missing_members_dir_yields_empty() {
@@ -149,4 +232,56 @@ fn scan_then_aggregate_yields_repeated_failure() {
         .signals
         .iter()
         .any(|signal| signal.kind == crate::domain::evidence::SignalKind::RetryPattern));
+}
+
+/// 真 corpus 冒烟：对真实 session dataset 扫描并回读来源上下文。
+/// 默认忽略（依赖本机运行数据）；用 AEMEATH_TEST_SESSIONS 指定目录后
+/// `cargo test -p harness read_real_session_context_smoke -- --ignored` 运行。
+#[test]
+#[ignore = "依赖本机真实 session dataset"]
+fn read_real_session_context_smoke() {
+    let root = std::env::var_os("AEMEATH_TEST_SESSIONS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var("HOME").expect("HOME")).join(".agents/session")
+        });
+    let dataset = find_dataset_with_members(&root, 2).expect("真实 session dataset");
+    let report = SessionDatasetScanner::scan_dataset(&dataset);
+    let event = report.events.first().expect("dataset 至少有一条事件");
+    let source = EvidenceSourceRef {
+        session_id: event.session_id.clone(),
+        run_id: event.run_id.clone(),
+        step_id: event.step_id.clone(),
+    };
+    let excerpt = SessionDatasetScanner::read_step_context(&dataset, &source)
+        .expect("真实来源必须可回读上下文");
+    assert!(!excerpt.text.trim().is_empty());
+    assert!(excerpt.text.chars().count() <= 1200);
+}
+
+fn find_dataset_with_members(root: &std::path::Path, depth: usize) -> Option<std::path::PathBuf> {
+    if depth == 0 {
+        return None;
+    }
+    for entry in std::fs::read_dir(root).ok()?.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".dataset"))
+            && path
+                .join("members")
+                .read_dir()
+                .is_ok_and(|mut members| members.next().is_some())
+        {
+            return Some(path);
+        }
+        if let Some(found) = find_dataset_with_members(&path, depth - 1) {
+            return Some(found);
+        }
+    }
+    None
 }

@@ -9,7 +9,7 @@ use crate::constants::ERROR_DOMAIN;
 use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet};
 use crate::domain::component::{ComponentContent, ComponentId};
 use crate::domain::errors::HarnessError;
-use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore, SignalKind};
+use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
 use crate::domain::task::CycleOutcome;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -39,9 +39,11 @@ pub struct ImprovementMaterials {
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum BlockProposal {
     /// 采纳提案（omitted-is-inherited：只携带要改的组件）。
-    /// `reason` 为提案依据（证据绑定的摘录来源）。
+    /// `reason` 为提案依据；`signal_ids` 是结构化证据引用（Block 路径非空）。
     Propose {
         reason: String,
+        #[serde(default)]
+        signal_ids: Vec<String>,
         change_set: ChangeSet,
     },
     /// 无变更：证据不支持任何编辑（合法结果）。
@@ -324,9 +326,9 @@ pub fn build_block_prompt(
 
 任务：基于执行证据判断组件是否存在值得改进的问题（缺失、冗余、错误、
 空壳占位、重复失败未覆盖的规则）。空壳占位（TODO、无实际内容的正文）
-视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 指出它回应
-证据中的哪条信号（reason 中引用其 signal id，如 repeated_failure:Bash:…）；
-无法对应任何信号的编辑是投机，NEVER 提出。证据与组件现状都不足时选择
+视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 在 signal_ids
+中结构化列出它回应的证据信号 id（如 repeated_failure:Bash:…）；无法对应
+任何信号的编辑是投机，NEVER 提出。证据与组件现状都不足时选择
 no_change——那是一个正当答案，比牵强的编辑更好。
 
 写规则的质量标准（每次落笔先自检）：
@@ -357,10 +359,11 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
+- signal_ids 必须非空，且每个 id 都来自上方证据块；未知引用会作废整份提案
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","reason":"<提案依据，一句话>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<提案依据，一句话>","signal_ids":["<证据块中的 signal id>"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -389,6 +392,50 @@ pub fn parse_block_proposal(response_text: &str) -> Result<BlockProposal, Harnes
     }
 }
 
+/// 校验 Block 提案的结构化证据引用：非空、无重复且全部来自本块证据。
+fn validate_block_proposal_signals(
+    proposal: &BlockProposal,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Result<(), HarnessError> {
+    let BlockProposal::Propose { signal_ids, .. } = proposal else {
+        return Ok(());
+    };
+    if signal_ids.is_empty() {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            "提案缺少 signal_ids：无法绑定执行证据",
+        ));
+    }
+    let mut seen: Vec<&str> = Vec::with_capacity(signal_ids.len());
+    for signal_id in signal_ids {
+        if seen.contains(&signal_id.as_str()) {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("提案 signal_ids 重复引用：{signal_id}"),
+            ));
+        }
+        seen.push(signal_id);
+        if !evidence
+            .signals
+            .iter()
+            .any(|signal| &signal.signal_id == signal_id)
+        {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("提案引用了本块不存在的 signal id：{signal_id}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 单块成功采纳后的材料（每个 edit 共享本次提案的证据绑定）。
+struct AcceptedBlock {
+    edits: Vec<AppliedEdit>,
+    reason: String,
+    evidence: Vec<EvidenceBinding>,
+}
+
 /// 单块执行：LLM 提案 → 解析 → registry 预检/落盘。
 /// 返回 (applied, outcome_label)；解析失败或校验作废都只作废该块。
 #[allow(clippy::too_many_arguments)]
@@ -405,20 +452,20 @@ async fn run_block(
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     block_index: usize,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
-) -> (Vec<(AppliedEdit, String)>, &'static str) {
+) -> (Option<AcceptedBlock>, &'static str) {
     // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
     // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
     let prompt = build_block_prompt(chunk, lessons, evidence);
     let Ok(response) = llm.complete(&prompt).await else {
-        return (Vec::new(), "作废（LLM 调用失败）");
+        return (None, "作废（LLM 调用失败）");
     };
     let proposal = match parse_block_proposal(&response) {
         Ok(proposal) => {
             if let Some(recorder) = recorder {
                 let (reason, edits) = match &proposal {
-                    BlockProposal::Propose { reason, change_set } => {
-                        (reason.clone(), change_set.edits.len())
-                    }
+                    BlockProposal::Propose {
+                        reason, change_set, ..
+                    } => (reason.clone(), change_set.edits.len()),
                     BlockProposal::NoChange { reason } => (reason.clone(), 0),
                 };
                 recorder.record(&crate::domain::events::RsiCycleEvent::ProposalParsed {
@@ -440,12 +487,32 @@ async fn run_block(
             log::warn!(target: crate::LOG_TARGET,
                 "提案应答解析失败（前 200 字符）：{}…；错误：{}",
                 response.chars().take(200).collect::<String>(), error.message());
-            return (Vec::new(), "作废（应答解析失败）");
+            return (None, "作废（应答解析失败）");
+        }
+    };
+    let proposal = match validate_block_proposal_signals(&proposal, evidence) {
+        Ok(()) => proposal,
+        Err(error) => {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "signals".to_string(),
+                    message: error.message().chars().take(120).collect(),
+                });
+            }
+            log::warn!(target: crate::LOG_TARGET,
+                "提案证据引用校验失败：{}", error.message());
+            return (None, "作废（证据引用无效）");
         }
     };
     match proposal {
-        BlockProposal::NoChange { .. } => (Vec::new(), "无变更"),
-        BlockProposal::Propose { reason, change_set } => {
+        BlockProposal::NoChange { .. } => (None, "无变更"),
+        BlockProposal::Propose {
+            reason,
+            signal_ids,
+            change_set,
+        } => {
+            let evidence_bindings = evidence_bindings_for(&signal_ids, evidence, cycle_ref);
             if dry_run {
                 // 预演（#2050）：逐条校验（含整份作废预检）但不落盘、
                 // 不写 lesson、不推游标；预览行供 preview 文件。
@@ -475,9 +542,9 @@ async fn run_block(
                     }
                 }
                 return if valid {
-                    (Vec::new(), "预演（将采纳）")
+                    (None, "预演（将采纳）")
                 } else {
-                    (Vec::new(), "预演（将作废）")
+                    (None, "预演（将作废）")
                 };
             }
             // #2074：采纳前逐 edit 快照旧内容（回滚依据；失败仅 warn——NEVER
@@ -529,18 +596,48 @@ async fn run_block(
                         &reason,
                         cycle_ref,
                         recorder,
-                        evidence,
+                        evidence_bindings.clone(),
                     );
-                    let adoption: Vec<(AppliedEdit, String)> = applied
-                        .into_iter()
-                        .map(|edit| (edit, reason.clone()))
-                        .collect();
-                    (adoption, "采纳")
+                    (
+                        Some(AcceptedBlock {
+                            edits: applied,
+                            reason,
+                            evidence: evidence_bindings,
+                        }),
+                        "采纳",
+                    )
                 }
-                Err(_) => (Vec::new(), "作废（校验失败）"),
+                Err(_) => (None, "作废（校验失败）"),
             }
         }
     }
+}
+
+/// 从结构化 signal 引用构造 lesson/adoption 共用的证据绑定。
+fn evidence_bindings_for(
+    signal_ids: &[String],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+    cycle_ref: &str,
+) -> Vec<EvidenceBinding> {
+    signal_ids
+        .iter()
+        .filter_map(|signal_id| {
+            evidence
+                .signals
+                .iter()
+                .find(|signal| &signal.signal_id == signal_id)
+                .map(|signal| EvidenceBinding {
+                    run_ref: cycle_ref.to_string(),
+                    signal: signal.kind,
+                    excerpt: signal
+                        .excerpt
+                        .clone()
+                        .unwrap_or_else(|| signal.summary.clone()),
+                    signal_id: signal.signal_id.clone(),
+                    source: signal.sources.first().cloned(),
+                })
+        })
+        .collect()
 }
 
 /// 采纳回写：每条采纳的 edit MUST 产生带证据的 Active lesson。
@@ -551,8 +648,20 @@ fn record_adopted_lesson(
     reason: &str,
     cycle_ref: &str,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
-    evidence: &crate::domain::evidence::EvidenceBundle,
+    evidence_bindings: Vec<EvidenceBinding>,
 ) {
+    // Compose 仲裁可能不引入新执行证据；Block 采纳则 MUST 有结构化 signal 绑定。
+    let evidence_bindings = if evidence_bindings.is_empty() {
+        vec![EvidenceBinding {
+            run_ref: cycle_ref.to_string(),
+            signal: crate::domain::evidence::SignalKind::CycleObservation,
+            excerpt: reason.chars().take(200).collect(),
+            signal_id: String::new(),
+            source: None,
+        }]
+    } else {
+        evidence_bindings
+    };
     for edit in &change_set.edits {
         let (id, action) = match edit {
             crate::domain::changeset::ComponentEdit::Upsert { id, .. } => (id, "upsert"),
@@ -562,11 +671,7 @@ fn record_adopted_lesson(
             format!("{cycle_ref}:{id}"),
             id.kind.as_str(),
             format!("{action} {id}：{reason}"),
-            vec![EvidenceBinding {
-                run_ref: cycle_ref.to_string(),
-                signal: signal_kind_from_reason(reason),
-                excerpt: reason.chars().take(200).collect(),
-            }],
+            evidence_bindings.clone(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|duration| duration.as_secs())
@@ -575,10 +680,12 @@ fn record_adopted_lesson(
         match entry {
             Ok(entry) => {
                 let mut entry = entry;
-                // #2080：绑定本经验要解决的信号（验证阶段判定依据）——
-                // 从 reason 推断信号类别，再在证据里取同类完整 signal id。
-                let target_signal = resolve_target_signal(reason, evidence);
-                entry.verification.target_signal = target_signal;
+                // #2080：验证目标来自结构化 signal 绑定；Compose 仲裁无新证据时为空。
+                entry.verification.target_signal = entry
+                    .evidence
+                    .first()
+                    .map(|binding| binding.signal_id.clone())
+                    .unwrap_or_default();
                 let entry_id = entry.id.clone();
                 let entry_signal = entry
                     .evidence
@@ -822,13 +929,16 @@ pub async fn run_improvement_cycle(
             version_store,
         )
         .await;
-        for (edit, edit_reason) in &block_adoptions {
-            adoption_records.push(crate::domain::task::AdoptionRecord {
-                id: match edit {
-                    AppliedEdit::Upserted { id } | AppliedEdit::Deleted { id } => id.clone(),
-                },
-                reason: edit_reason.clone(),
-            });
+        if let Some(accepted) = block_adoptions {
+            for edit in &accepted.edits {
+                adoption_records.push(crate::domain::task::AdoptionRecord {
+                    id: match edit {
+                        AppliedEdit::Upserted { id } | AppliedEdit::Deleted { id } => id.clone(),
+                    },
+                    reason: accepted.reason.clone(),
+                    evidence: accepted.evidence.clone(),
+                });
+            }
         }
         match label {
             "采纳" => adopted += 1,
@@ -911,47 +1021,6 @@ fn render_evidence_block(evidence: &crate::domain::evidence::EvidenceBundle) -> 
         .join("\n")
 }
 
-/// 解析本经验要解决的完整 signal id（#2080）：reason 推断信号类别 →
-/// 在证据中取同类首个 signal id；无匹配返回空（不参与验证）。
-fn resolve_target_signal(
-    reason: &str,
-    evidence: &crate::domain::evidence::EvidenceBundle,
-) -> String {
-    let kind = signal_kind_from_reason(reason);
-    // 优先取 reason 引用类别的信号；模型未引用（兜底 CycleObservation）时
-    // 退回证据中优先级最高的信号——确保 lesson 总能进入验证（#2080），
-    // NEVER 因模型省了 signal id 就永久 pending。
-    let matched = evidence
-        .signals
-        .iter()
-        .find(|signal| signal.kind == kind)
-        .or_else(|| {
-            evidence
-                .signals
-                .iter()
-                .min_by_key(|signal| signal.kind.render_priority())
-        });
-    matched
-        .map(|signal| signal.signal_id.clone())
-        .unwrap_or_default()
-}
-
-/// 从提案 reason 提取引用的信号类别（v1 启发：signal id 前缀匹配；
-/// 无引用时兜底 CycleObservation——模型自述）。
-pub(crate) fn signal_kind_from_reason(reason: &str) -> SignalKind {
-    for (prefix, kind) in [
-        ("repeated_failure:", SignalKind::RepeatedFailure),
-        ("retry_pattern:", SignalKind::RetryPattern),
-        ("oversized_result:", SignalKind::OversizedResult),
-        ("run_outcome:", SignalKind::RunOutcome),
-    ] {
-        if reason.contains(prefix) {
-            return kind;
-        }
-    }
-    SignalKind::CycleObservation
-}
-
 /// dry-run 单条编辑的实在总结：动作 + 前后规模对比 + 新内容要点
 /// （标题行；旧内容规模来自盘上版本，缺失标记新建）。
 pub(crate) fn render_dry_run_edit_summary(
@@ -1006,14 +1075,224 @@ pub(crate) fn render_dry_run_edit_summary(
     summary
 }
 
+/// Compose 相似候选对：相似度只用于召回，最终由模型结合上下文判断。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SimilarCandidatePair {
+    pub left_label: String,
+    pub left_text: String,
+    pub right_label: String,
+    pub right_text: String,
+    pub left_context: Option<String>,
+    pub right_context: Option<String>,
+    pub score: f64,
+}
+
+struct SimilarItem {
+    label: String,
+    text: String,
+    signal_id: String,
+    source: Option<crate::domain::evidence::EvidenceSourceRef>,
+}
+
+/// 从本周期提案与 Active lesson 中召回可能相似的对，并回读有界 session 上下文。
+pub(crate) fn select_similar_candidate_pairs(
+    adoptions: &[crate::domain::task::AdoptionRecord],
+    lessons: &[LessonEntry],
+    limit: usize,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+) -> Vec<SimilarCandidatePair> {
+    let mut proposals: Vec<SimilarItem> = Vec::new();
+    for adoption in adoptions {
+        let binding = adoption.evidence.first();
+        let signal_id = binding
+            .map(|binding| binding.signal_id.clone())
+            .unwrap_or_default();
+        let text = format!("{} {}", adoption.reason, signal_id);
+        if proposals.iter().any(|existing| existing.text == text) {
+            continue;
+        }
+        proposals.push(SimilarItem {
+            label: format!("本周期提案：{}", adoption.id),
+            text,
+            signal_id,
+            source: binding.and_then(|binding| binding.source.clone()),
+        });
+    }
+    let mut lesson_items: Vec<SimilarItem> = Vec::new();
+    for lesson in lessons {
+        let binding = lesson.evidence.first();
+        let signal_id = if !lesson.verification.target_signal.is_empty() {
+            lesson.verification.target_signal.clone()
+        } else {
+            binding
+                .map(|binding| binding.signal_id.clone())
+                .unwrap_or_default()
+        };
+        let text = format!("{} {} {}", lesson.lesson, lesson.component_kind, signal_id);
+        if lesson_items.iter().any(|existing| existing.text == text) {
+            continue;
+        }
+        lesson_items.push(SimilarItem {
+            label: format!("Active lesson：{}", lesson.id),
+            text,
+            signal_id,
+            source: binding.and_then(|binding| binding.source.clone()),
+        });
+    }
+
+    let mut scored: Vec<(f64, SimilarItem, SimilarItem)> = Vec::new();
+    for left_index in 0..proposals.len() {
+        for right_index in (left_index + 1)..proposals.len() {
+            push_scored_pair(&mut scored, &proposals[left_index], &proposals[right_index]);
+        }
+        for lesson in &lesson_items {
+            push_scored_pair(&mut scored, &proposals[left_index], lesson);
+        }
+    }
+    scored.sort_by(|left, right| {
+        right
+            .0
+            .partial_cmp(&left.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scored.truncate(limit.max(1));
+
+    let mut remaining_context_chars = crate::constants::COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS;
+    let mut context_cache: std::collections::HashMap<
+        String,
+        Option<crate::domain::evidence::SessionContextExcerpt>,
+    > = std::collections::HashMap::new();
+    scored
+        .into_iter()
+        .map(|(score, left, right)| {
+            let left_context = take_source_context(
+                &left.source,
+                context_reader,
+                &mut context_cache,
+                &mut remaining_context_chars,
+            );
+            let right_context = take_source_context(
+                &right.source,
+                context_reader,
+                &mut context_cache,
+                &mut remaining_context_chars,
+            );
+            SimilarCandidatePair {
+                left_label: left.label,
+                left_text: left.text,
+                right_label: right.label,
+                right_text: right.text,
+                left_context,
+                right_context,
+                score,
+            }
+        })
+        .collect()
+}
+
+fn push_scored_pair(
+    scored: &mut Vec<(f64, SimilarItem, SimilarItem)>,
+    left: &SimilarItem,
+    right: &SimilarItem,
+) {
+    let score = if !left.signal_id.is_empty() && left.signal_id == right.signal_id {
+        1.0
+    } else {
+        share::memory::dedup::jaccard_similarity(&left.text, &right.text)
+    };
+    if score < crate::constants::COMPOSE_SIMILARITY_CANDIDATE_THRESHOLD {
+        return;
+    }
+    scored.push((
+        score,
+        SimilarItem {
+            label: left.label.clone(),
+            text: left.text.clone(),
+            signal_id: left.signal_id.clone(),
+            source: left.source.clone(),
+        },
+        SimilarItem {
+            label: right.label.clone(),
+            text: right.text.clone(),
+            signal_id: right.signal_id.clone(),
+            source: right.source.clone(),
+        },
+    ));
+}
+
+fn take_source_context(
+    source: &Option<crate::domain::evidence::EvidenceSourceRef>,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    cache: &mut std::collections::HashMap<
+        String,
+        Option<crate::domain::evidence::SessionContextExcerpt>,
+    >,
+    remaining: &mut usize,
+) -> Option<String> {
+    let source = source.as_ref()?;
+    let key = format!("{}:{}:{}", source.session_id, source.run_id, source.step_id);
+    let context = cache
+        .entry(key)
+        .or_insert_with(|| context_reader.read_context(source))
+        .clone()?;
+    if *remaining == 0 {
+        return None;
+    }
+    let text: String = context.text.chars().take(*remaining).collect();
+    let used = text.chars().count();
+    *remaining = remaining.saturating_sub(used);
+    if text.chars().count() < context.text.chars().count() {
+        Some(format!("{text}…"))
+    } else {
+        Some(text)
+    }
+}
+
+/// 渲染 Compose 的候选相似对材料与判定规则。
+pub(crate) fn render_compose_similarity_block(pairs: &[SimilarCandidatePair]) -> String {
+    let mut lines = vec![
+        "判定规则：".to_string(),
+        "- 初筛相似度只是召回线索，NEVER 直接据此合并。".to_string(),
+        "- 必须比较双方 session 上下文中的任务目标、工具行为、失败原因与约束。".to_string(),
+        "- 上下文不同或缺失时不得判定为同类：保留各自规则，不得合并。".to_string(),
+        "- 只有同一根因、同一场景、同一约束才可合并；合并 NEVER 丢语义。".to_string(),
+        "- 与既有 lesson 语义重复时，优先保留既有规则，不重复新增条款。".to_string(),
+    ];
+    if pairs.is_empty() {
+        lines.push("（无候选相似对）".to_string());
+        return lines.join("\n");
+    }
+    for (index, pair) in pairs.iter().enumerate() {
+        lines.push(format!(
+            "\n候选 {}（初筛相似度 {:.2}）",
+            index + 1,
+            pair.score
+        ));
+        lines.push(format!("A｜{}：{}", pair.left_label, pair.left_text));
+        lines.push(format!(
+            "A 来源上下文：{}",
+            pair.left_context.as_deref().unwrap_or("上下文不可用")
+        ));
+        lines.push(format!("B｜{}：{}", pair.right_label, pair.right_text));
+        lines.push(format!(
+            "B 来源上下文：{}",
+            pair.right_context.as_deref().unwrap_or("上下文不可用")
+        ));
+    }
+    lines.join("\n")
+}
+
 /// 周期 Compose 汇总块（#2065 A，对齐 Harness² Compose）：全部数据源块
 /// 执行完后纵观本周期全部采纳——检测矛盾/合并/精炼，产出终版变更。
 /// 无采纳时跳过（NEVER 为凑 Compose 而造编辑）。
+#[allow(clippy::too_many_arguments)]
 pub async fn run_compose_phase(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
     lesson_store: &LessonStore,
     adoptions: &[crate::domain::task::AdoptionRecord],
+    active_lessons: &[LessonEntry],
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
     dry_run: bool,
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
@@ -1051,6 +1330,27 @@ pub async fn run_compose_phase(
         .map(|adoption| format!("- {}：{}", adoption.id, adoption.reason))
         .collect();
     let materials_block = serde_json::to_string(&components_json).expect("组件材料序列化不可失败");
+    let lessons_block = if active_lessons.is_empty() {
+        "（暂无 Active lesson）".to_string()
+    } else {
+        active_lessons
+            .iter()
+            .map(|entry| {
+                format!(
+                    "- [{}] {}（target_signal: {}）",
+                    entry.component_kind, entry.lesson, entry.verification.target_signal
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let similar_pairs = select_similar_candidate_pairs(
+        adoptions,
+        active_lessons,
+        crate::constants::COMPOSE_SIMILAR_PAIR_LIMIT,
+        context_reader,
+    );
+    let similar_block = render_compose_similarity_block(&similar_pairs);
     let prompt = format!(
         r#"你是 harness 仲裁器（Compose）。本周期多个证据块分别产生了以下采纳：
 
@@ -1060,27 +1360,38 @@ pub async fn run_compose_phase(
 
 {materials}
 
-任务：纵观全部采纳与终态——检测块间矛盾（同一问题不同规则、重复条款、
-相互冲突的指令）、可合并项（多块各写一半的同类规则）与可精炼项（冗余
-展开）。仅当发现真实矛盾或明确可合并/精炼时产出修正编辑；各块结论
-一致且终态良好时选择 no_change——那是一个正当答案。
+历史经验（Active lesson，供识别语义重复与既有覆盖）：
+
+{lessons}
+
+候选相似对与来源 session 上下文：
+
+{similar}
+
+任务：纵观全部采纳、终态与候选相似上下文——检测块间矛盾（同一问题不同
+规则、重复条款、相互冲突的指令）、可合并项（多块各写一半的同类规则）与
+可精炼项（冗余展开）。仅当发现真实矛盾或明确可合并/精炼时产出修正编辑；
+各块结论一致且终态良好时选择 no_change——那是一个正当答案。
 
 仲裁的判断标准（每次落笔先自检）：
 - **矛盾**：同一场景下两条规则给出相反指令 → 保留更具体、更接近证据的
   那条，删除另一条。
 - **合并**：多条规则讲同一主题的不同侧面 → 合成一条，**保留每条的独特
-  信息**（合并 NEVER 丢语义）。
+  信息**（合并 NEVER 丢语义）；合并前 MUST 依据候选对的来源上下文确认
+  同一根因、同一场景、同一约束，初筛相似度与文本相似 NEVER 作为依据。
 - **精炼**：只删重复表述与冗余展开，NEVER 删掉任何一条实质规则。
 - **不引入**：本阶段只仲裁现有采纳，NEVER 凭想象新增未被证据支持的规则。
 - **可执行优先**：合并/精炼后必须仍是「条件 + 动作」的可执行形态。
 
 编辑契约同改进块（omitted-is-inherited；upsert 的 content.body 为
 完整正文）。只输出一个 JSON 对象，格式二选一（NEVER 输出其他形态）：
-{{"decision":"propose","reason":"<仲裁依据，一句话>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<仲裁依据，一句话>","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#,
         adoptions = adoptions_block.join("\n"),
         materials = materials_block,
+        lessons = lessons_block,
+        similar = similar_block,
     );
     let Ok(response) = llm.complete(&prompt).await else {
         return Ok(Some(CycleOutcome {
@@ -1090,7 +1401,9 @@ pub async fn run_compose_phase(
     };
     let label = match parse_block_proposal(&response) {
         Ok(BlockProposal::NoChange { .. }) => "无变更（各块结论一致）",
-        Ok(BlockProposal::Propose { reason, change_set }) => {
+        Ok(BlockProposal::Propose {
+            reason, change_set, ..
+        }) => {
             if dry_run {
                 for edit in &change_set.edits {
                     let (id, content) = match edit {
@@ -1127,7 +1440,7 @@ pub async fn run_compose_phase(
                 }
                 match apply_change_set(registry, &change_set) {
                     Ok(_) => {
-                        // Compose 无新证据：传空 bundle（该 lesson 不参与
+                        // Compose 无新证据：传空绑定（该 lesson 不参与
                         // 信号级验证，#2080）
                         record_adopted_lesson(
                             lesson_store,
@@ -1135,7 +1448,7 @@ pub async fn run_compose_phase(
                             &reason,
                             &cycle_ref,
                             recorder,
-                            &crate::domain::evidence::EvidenceBundle::default(),
+                            Vec::new(),
                         );
                         "仲裁修正（已采纳）"
                     }

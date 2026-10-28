@@ -443,6 +443,16 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
         harness::aggregate_evidence(&events)
     }
 
+    fn read_context(
+        &self,
+        source: &harness::domain::evidence::EvidenceSourceRef,
+    ) -> Option<harness::domain::evidence::SessionContextExcerpt> {
+        harness::adapters::session_scanner::SessionDatasetScanner::read_step_context(
+            &self.datasets_root.join(&source.session_id),
+            source,
+        )
+    }
+
     fn cursor_summary(&self) -> Option<String> {
         harness::load_stream_state(&self.harness_dir)
             .ok()

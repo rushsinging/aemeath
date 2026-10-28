@@ -28,6 +28,21 @@ pub const OVERSIZED_RESULT_CHARS: usize = 3000;
 /// 证据摘录上限（对齐 lesson excerpt 常量族）。
 pub(crate) const EVIDENCE_EXCERPT_BOUND: usize = 200;
 
+/// 单条聚合信号保留的可回读来源上限。
+pub(crate) const EVIDENCE_SOURCE_REF_LIMIT: usize = 3;
+
+/// 单个来源 step 回读的上下文上限（含相邻 step）。
+pub(crate) const SESSION_CONTEXT_SOURCE_CHARS: usize = 1200;
+
+/// Compose 相似候选 pair 上限。
+pub(crate) const COMPOSE_SIMILAR_PAIR_LIMIT: usize = 8;
+
+/// Compose 相似候选文本召回阈值（仅召回，不作为合并判定）。
+pub(crate) const COMPOSE_SIMILARITY_CANDIDATE_THRESHOLD: f64 = 0.28;
+
+/// Compose 相似候选注入的 session 上下文总字符预算。
+pub(crate) const COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS: usize = 12_000;
+
 /// checkpoint 落盘文件名（`~/.agents/harness/checkpoint.json`，#2049）。
 pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";
 

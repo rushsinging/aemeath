@@ -245,7 +245,7 @@ async fn trigger_runs_cycle_and_writes_component_file() {
     impl RsiLlmPort for JsonLlm {
         async fn complete(&self, _prompt: &str) -> Result<String, HarnessError> {
             // 单阶段（#2078 修订）：daemon 默认 single_phase 模式直接提案
-            Ok(r#"{"decision":"propose","reason":"初始规则过于简略","change_set":{"edits":[{"action":"upsert","id":{"kind":"guardrails","name":"default"},"content":{"frontmatter":null,"body":"新规则：先读后写"}}]}}"#.to_string())
+            Ok(r#"{"decision":"propose","reason":"初始规则过于简略","signal_ids":["repeated_failure:Bash:read-before-write"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"guardrails","name":"default"},"content":{"frontmatter":null,"body":"新规则：先读后写"}}]}}"#.to_string())
         }
     }
 
@@ -262,6 +262,18 @@ async fn trigger_runs_cycle_and_writes_component_file() {
             }],
         }]),
         advanced: std::sync::Mutex::new(Vec::new()),
+        evidence: std::sync::Mutex::new(crate::domain::evidence::EvidenceBundle {
+            sessions_covered: 1,
+            signals: vec![crate::domain::evidence::EvidenceSignal {
+                kind: crate::domain::evidence::SignalKind::RepeatedFailure,
+                signal_id: "repeated_failure:Bash:read-before-write".to_string(),
+                summary: "工具 Bash 重复失败 ×2".to_string(),
+                excerpt: None,
+                occurrences: 2,
+                sources: Vec::new(),
+            }],
+        }),
+        contexts: std::sync::Mutex::new(Vec::new()),
     };
     tasks
         .register(

@@ -6,7 +6,7 @@
 //! （warn 可见）与 advance 记录块后基线。回退游标重处理的全语义
 //! 随 #2046 验收评估。
 
-use crate::domain::evidence::EvidenceBundle;
+use crate::domain::evidence::{EvidenceBundle, EvidenceSourceRef, SessionContextExcerpt};
 use crate::domain::stream::{EvidenceBlockPlan, StreamPlanParams};
 use std::sync::Mutex;
 
@@ -19,6 +19,12 @@ pub trait EvidenceStreamPort: Send + Sync {
 
     /// 扫描单块 sessions 并聚合证据（扫描失败降级空证据 NEVER 阻断）。
     fn block_evidence(&self, block: &EvidenceBlockPlan) -> EvidenceBundle;
+
+    /// 回读一个来源 step 的有界 session 上下文；默认不可用（测试桩可注入）。
+    fn read_context(&self, source: &EvidenceSourceRef) -> Option<SessionContextExcerpt> {
+        let _ = source;
+        None
+    }
 
     /// 推进游标到块尾（只在块处理完成后调用——输出存在不等于完成；
     /// 记录块执行后的组件树指纹作下一块基线）。
@@ -47,10 +53,24 @@ pub fn component_tree_fingerprint(
 }
 
 /// 测试桩：固定块计划与证据。
-#[derive(Default)]
 pub struct FakeEvidenceStream {
     pub plans: Mutex<Vec<EvidenceBlockPlan>>,
     pub advanced: Mutex<Vec<String>>,
+    /// 每块返回的固定证据（测试注入；空 = 无证据）。
+    pub evidence: Mutex<EvidenceBundle>,
+    /// 可注入的来源上下文（测试注入）。
+    pub contexts: Mutex<Vec<SessionContextExcerpt>>,
+}
+
+impl Default for FakeEvidenceStream {
+    fn default() -> Self {
+        Self {
+            plans: Mutex::new(Vec::new()),
+            advanced: Mutex::new(Vec::new()),
+            evidence: Mutex::new(EvidenceBundle::default()),
+            contexts: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 impl EvidenceStreamPort for FakeEvidenceStream {
@@ -59,7 +79,16 @@ impl EvidenceStreamPort for FakeEvidenceStream {
     }
 
     fn block_evidence(&self, _block: &EvidenceBlockPlan) -> EvidenceBundle {
-        EvidenceBundle::default()
+        self.evidence.lock().expect("evidence lock").clone()
+    }
+
+    fn read_context(&self, source: &EvidenceSourceRef) -> Option<SessionContextExcerpt> {
+        self.contexts
+            .lock()
+            .expect("contexts lock")
+            .iter()
+            .find(|context| &context.source == source)
+            .cloned()
     }
 
     fn advance(&self, block: &EvidenceBlockPlan, _fingerprint: String) {
