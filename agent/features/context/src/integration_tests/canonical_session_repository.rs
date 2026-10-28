@@ -180,39 +180,39 @@ fn accepted_input() -> AcceptedInputAppendData {
 /// 测试用固定文本 LLM 端口（#1863 反转后的 generator mock 替身）。
 struct FixedTextInvoker {
     text: String,
-    started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    release: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<()>>,
+    started: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    release: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<()>>>,
     fail_with_cancel: bool,
 }
 
-#[async_trait::async_trait]
-impl provider::composition::LlmTextInvokePort for FixedTextInvoker {
-    async fn invoke_text(
-        &self,
-        _model: &provider::ModelInfo,
-        _request: &provider::ProviderRequestData,
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
-        if let Some(started) = self.started.lock().unwrap().take() {
-            let _ = started.send(());
-        }
-        self.release.lock().await.recv().await;
-        if self.fail_with_cancel {
-            return Err(provider::ProviderError::cancelled());
-        }
-        Ok(provider::composition::LlmTextOutputData {
-            text: self.text.clone(),
-            completion_reason: Some("end_turn".to_string()),
-            text_delta_count: 1,
-            non_text_delta_count: 0,
-            stream_completed: true,
+impl FixedTextInvoker {
+    /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 异步脚本。
+    fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+        let text = self.text.clone();
+        let started = self.started.clone();
+        let release = self.release.clone();
+        let fail_with_cancel = self.fail_with_cancel;
+        provider::test_support::scripted_llm_async(move |_request| {
+            let text = text.clone();
+            let started = started.clone();
+            let release = release.clone();
+            Box::pin(async move {
+                if let Some(started) = started.lock().unwrap().take() {
+                    let _ = started.send(());
+                }
+                release.lock().await.recv().await;
+                if fail_with_cancel {
+                    return Err(provider::ProviderError::cancelled());
+                }
+                Ok(provider::test_support::text_stream(&text))
+            })
         })
     }
 }
 
 /// 构造测试 binding（fixed invoker）。
 fn test_llm_binding(
-    invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    invoker: std::sync::Arc<dyn provider::LlmInvokePort>,
 ) -> Option<crate::domain::CompactLlmBinding> {
     Some(crate::domain::CompactLlmBinding {
         invoker,
@@ -237,20 +237,18 @@ struct ProviderFailingInvoker {
     calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
-#[async_trait::async_trait]
-impl provider::composition::LlmTextInvokePort for ProviderFailingInvoker {
-    async fn invoke_text(
-        &self,
-        _model: &provider::ModelInfo,
-        _request: &provider::ProviderRequestData,
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+impl ProviderFailingInvoker {
+    /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本。
+    fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
         use std::sync::atomic::Ordering;
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Err(provider::ProviderError::fatal(
-            provider::ProviderErrorKind::UpstreamUnavailable,
-            "provider failed",
-        ))
+        let calls = Arc::clone(&self.calls);
+        provider::test_support::scripted_llm(move |_request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(provider::ProviderError::fatal(
+                provider::ProviderErrorKind::UpstreamUnavailable,
+                "provider failed",
+            ))
+        })
     }
 }
 
@@ -1555,12 +1553,15 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     let (started_sender, started_receiver) = oneshot::channel();
     let (release_sender, release_receiver) = mpsc::channel(1);
-    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
-        text: valid_fact_batch("generated"),
-        started: Mutex::new(Some(started_sender)),
-        release: tokio::sync::Mutex::new(release_receiver),
-        fail_with_cancel: false,
-    }));
+    let llm = test_llm_binding(
+        FixedTextInvoker {
+            text: valid_fact_batch("generated"),
+            started: Arc::new(Mutex::new(Some(started_sender))),
+            release: Arc::new(tokio::sync::Mutex::new(release_receiver)),
+            fail_with_cancel: false,
+        }
+        .port(),
+    );
     let repository = Arc::new(repository);
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
@@ -1622,12 +1623,15 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
     let session_id = SessionId::new("cancelled-compact-session");
     let (repository, holder) =
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
-    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
-        text: String::new(),
-        started: Mutex::new(None),
-        release: tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1),
-        fail_with_cancel: true,
-    }));
+    let llm = test_llm_binding(
+        FixedTextInvoker {
+            text: String::new(),
+            started: Arc::new(Mutex::new(None)),
+            release: Arc::new(tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1)),
+            fail_with_cancel: true,
+        }
+        .port(),
+    );
     let cancellation = CancellationToken::new();
     cancellation.cancel();
     let request = compact_request(session_id);
@@ -1679,9 +1683,12 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
         ten_step_session(&session_id, vec![], 0),
     );
     let calls = Arc::new(AtomicUsize::new(0));
-    let llm = test_llm_binding(Arc::new(ProviderFailingInvoker {
-        calls: Arc::clone(&calls),
-    }));
+    let llm = test_llm_binding(
+        ProviderFailingInvoker {
+            calls: Arc::clone(&calls),
+        }
+        .port(),
+    );
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
     request.config_snapshot = ConfigSnapshot::from_arc(Arc::new(Config {
@@ -1908,12 +1915,15 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
     let repository_under_test = base_repository;
-    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
-        text: valid_fact_batch("LLM 生成的语义摘要"),
-        started: Mutex::new(None),
-        release: tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1),
-        fail_with_cancel: false,
-    }));
+    let llm = test_llm_binding(
+        FixedTextInvoker {
+            text: valid_fact_batch("LLM 生成的语义摘要"),
+            started: Arc::new(Mutex::new(None)),
+            release: Arc::new(tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1)),
+            fail_with_cancel: false,
+        }
+        .port(),
+    );
 
     let mut generated_request = compact_request(session_id.clone());
     generated_request.context_size = 100_000;

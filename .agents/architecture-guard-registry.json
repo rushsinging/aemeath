@@ -944,7 +944,8 @@
         "ports.rs",
         "ports_tests.rs",
         "published_language.rs",
-        "published_language_tests.rs"
+        "published_language_tests.rs",
+        "test_support.rs"
       ],
       "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -1785,7 +1786,7 @@
       },
       "allowed_symbols": [
         "LlmClient",
-        "LlmTextInvokePort",
+        "LlmInvokePort",
         "LlmTextOutputData",
         "ModelInfo",
         "ProviderClientSpecData",
@@ -1818,12 +1819,11 @@
         "AgentRunnerAssemblyData",
         "AtomicBlobToolResultStore",
         "BoundMainRun",
-        "CancellationSignal",
-        "CompactLlmBindingFactory",
         "CompactModelResolver",
         "CompleteReflectionResult",
         "HookInstructionsNotifier",
         "InitialProviderAssemblyData",
+        "LlmInvokePort",
         "ModelRuntimeSettingsData",
         "OwnedSessionSharedPermit",
         "ParentRunContextSource",
@@ -1833,7 +1833,6 @@
         "ProviderBindingData",
         "ProviderBuildSpecData",
         "ProviderFactory",
-        "ProviderPort",
         "ReflectionTaskAdapter",
         "ReflectionTaskCompletionStatus",
         "ReflectionTaskRequest",

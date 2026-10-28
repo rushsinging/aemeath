@@ -13,39 +13,28 @@ use crate::application::reflection::test_support::RecordingHistory;
 use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
-use crate::ports::{
-    ProviderBindingData, ProviderError, ProviderPort, ProviderRequestData, ProviderResponseStream,
-};
+use crate::ports::{LlmInvokePort, ProviderBindingData};
 
-#[derive(Default)]
-struct RequestParameterRecorder {
-    requests: Mutex<Vec<(ReasoningLevel, u32)>>,
-}
+type ParameterRecorder = Arc<Mutex<Vec<(ReasoningLevel, u32)>>>;
 
-#[async_trait::async_trait]
-impl ProviderPort for RequestParameterRecorder {
-    async fn invoke(
-        &self,
-        request: ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<ProviderResponseStream, ProviderError> {
-        self.requests
+fn parameter_recording_port(recorder: ParameterRecorder) -> Arc<dyn LlmInvokePort> {
+    // #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本化端口。
+    provider::test_support::scripted_llm(move |request| {
+        recorder
             .lock()
             .unwrap()
             .push((request.reasoning, request.max_output_tokens));
-        Ok(
-            crate::application::model::test_support::text_completion_stream(
-                r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
-                1,
-                1,
-            ),
-        )
-    }
+        Ok(provider::test_support::text_stream_with_usage(
+            r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
+            1,
+            1,
+        ))
+    })
 }
 
-fn recording_binding(recorder: Arc<RequestParameterRecorder>) -> Arc<ProviderBindingData> {
+fn recording_binding(recorder: ParameterRecorder) -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
-        provider: recorder,
+        provider: parameter_recording_port(recorder),
         model: provider::ModelInfo {
             provider: "reflection-parameter-test".to_string(),
             model: "reflection-parameter-model".to_string(),
@@ -89,7 +78,7 @@ async fn invoke_and_record(
     config: MemoryConfig,
     dedicated_binding: bool,
 ) -> Vec<(ReasoningLevel, u32)> {
-    let recorder = Arc::new(RequestParameterRecorder::default());
+    let recorder: ParameterRecorder = Arc::new(Mutex::new(Vec::new()));
     let binding = recording_binding(Arc::clone(&recorder));
     let mut adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
     if dedicated_binding {
@@ -121,7 +110,7 @@ async fn invoke_and_record(
     wait_for_success(&history).await;
     assert_eq!(binding.max_tokens, 20_000, "主对话预算不能被反思配置改写");
     assert_eq!(binding.requested_reasoning, ReasoningLevel::Max);
-    let requests = recorder.requests.lock().unwrap().clone();
+    let requests = recorder.lock().unwrap().clone();
     requests
 }
 

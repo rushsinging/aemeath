@@ -21,7 +21,7 @@ Memory BC **不拥有**：记忆在 Context Window 中的注入位置、token �
 1. **Memory 是数据 BC，不是状态机**：Memory 没有执行生命周期状态机；它守护 MemoryEntry 聚合的局部不变量（id 唯一、layer 不可变、confirmation_count 单调递增、outdated 不可逆）。
 2. **双层记忆**：Global（跨项目通用偏好）+ Project（项目特定决策/模式/陷阱）。两层独立存储、独立检索、统一排序。
 3. **检索与注入分离**：Memory BC 负责 filtering、scoring 与 relevance ranking；Context Management 负责 render、注入时机、位置、预算与跨轮去重。
-4. **Reflection workflow 归 Memory，Provider 调用归 Runtime**：Memory-owned `ReflectionWorkflow` 统一构建 prompt、解析 output、应用当前 Run 的同一 `MemoryPort` 并提交 history；Runtime 只判定触发、调用 `ProviderPort` 和编排执行通道的终态。Memory BC **不依赖** ProviderPort，也不隐式选择 store。
+4. **Reflection workflow 归 Memory，Provider 调用归 Runtime**：Memory-owned `ReflectionWorkflow` 统一构建 prompt、解析 output、应用当前 Run 的同一 `MemoryPort` 并提交 history；Runtime 只判定触发、调用 `LlmInvokePort` 和编排执行通道的终态。Memory BC **不依赖** LlmInvokePort，也不隐式选择 store。
 5. **去重基于 Jaccard 相似度**：写入时与同 layer 条目比较，超过 `similarity_threshold` 则合并 tags + confirmation，不新增。
 6. **淘汰基于评分**：pinned 条目不可淘汰；其余按 `eviction_score`（recency + confirmation_count）排序，取最低分候选归档。
 7. **Archive 不删除**：归档条目移到 `_archive.json`，保留可审计性；search 可跨 active + archive 检索。
@@ -95,7 +95,7 @@ Slash `/memory` 命令（`list` / `add` / `delete` / `pin` / `search` / `compact
 
 ## 6. 设计边界
 
-- **NEVER** 让 Memory BC 依赖 ProviderPort——Reflection 的 LLM 调用由 Runtime 编排。
+- **NEVER** 让 Memory BC 依赖 LlmInvokePort——Reflection 的 LLM 调用由 Runtime 编排。
 - **NEVER** 让 Memory BC 决定注入位置或 token 预算——归 Context Management。
 - **NEVER** 让 Memory BC 直接操作文件系统——经 Storage adapter。
 - **NEVER** 把所有历史消息自动视为记忆——Memory Entry 是显式写入或 Reflection 产出的。

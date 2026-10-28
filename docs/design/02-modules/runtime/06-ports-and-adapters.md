@@ -104,7 +104,7 @@ Runtime-owned Port 只对应真实外部 seam：
 
 - `InputPort`：Session ingress 分类后的 Run 输入接纳端口，只接收 canonical `AcceptedUserInput`（`UserMessage` / `SkillRequest`），负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation，也不并行维护 event/message 两种 adopted payload；
 - `EventSink`：接收领域事件；跨 SDK 边界的纯值转换由 `sdk_event_mapper` 完成；
-- `ProviderPort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
+- `LlmInvokePort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
 - `InteractionPort`：一次 request/reply transport；reply/cancel 按 `run_id + request_id` 直接完成 pending interaction，**NEVER** 经普通输入队列排队；
 - `CommandScheduler`：接收已分类的 Runtime command，按 ImmediateControl、AtRunBoundary、SessionQuery 三类决定执行时机，不把命令伪装成 UserMessage；
 - `HookPort`：Hook BC 的 typed dispatch；
@@ -125,12 +125,12 @@ Runtime-owned Port 只对应真实外部 seam：
 | Workflow | 五个 `workflow_*` Tool（经既有 `ToolCatalogPort` / `ToolExecutionPort` 暴露与路由） | `workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update` **始终对 LLM 暴露**；普通 Tool 的 schema 在每次 Model Invocation 前按当前 Active Node 的 Node Role capability Profile 收缩，Profile 复用 Tools BC 的 capability vocabulary / `ToolProfile` / 父 ceiling，只收缩不放宽；Runtime 只做通用解析、Policy、Hook 与 Tool Result 回传，业务校验与 revision 提交归 Workflow Kernel；Runtime **不为 Workflow 装配专用查询端口**，每轮按 Session 最新状态组织上下文（Prompt 读取 / 注入协议待决）；真相源见 [Workflow](../workflow/01-workflow-design.md) |
 | Config | `ConfigSnapshot` PL | 本 Run 的只读配置快照；见 [Config](../config/01-config-layer.md) |
 
-`ProviderPort`、`InteractionPort`、`EventSink`、`UsageSink`、`InputPort`、`CommandScheduler` 与 `InteractionInbox` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有。它们的**唯一签名真相源**分别是：`ProviderPort` 见本文 §2.1；`InteractionPort` 及其 Published Language 见本文 §2.2；`EventSink` / `UsageSink` 见本文 §2.3。Provider 文档只登记 adapter 实现面，本文其余章节和其他供应方文档只登记使用面或 adapter 行为，**NEVER** 复制第二份 trait：
+`InteractionPort`、`EventSink`、`UsageSink`、`InputPort`、`CommandScheduler` 与 `InteractionInbox` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有；LLM 调用能力端口 `LlmInvokePort` 由 **Provider crate 定义**（#2146：流式 verb + 文本默认方法单端口）。它们的**唯一签名真相源**分别是：`LlmInvokePort` 见本文 §2.1；`InteractionPort` 及其 Published Language 见本文 §2.2；`EventSink` / `UsageSink` 见本文 §2.3。Provider 文档只登记 adapter 实现面，本文其余章节和其他供应方文档只登记使用面或 adapter 行为，**NEVER** 复制第二份 trait：
 
-### 2.1 Runtime-owned ProviderPort
+### 2.1 Provider-defined LlmInvokePort（#2146 收敛）
 
 ```rust
-trait ProviderPort: Send + Sync {
+trait LlmInvokePort: Send + Sync {
     fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError>;
     fn resolve_invocation_options(
         &self,
@@ -155,7 +155,7 @@ trait ProviderFactory: Send + Sync {
 }
 
 struct ProviderBinding {
-    provider: Arc<dyn ProviderPort>,
+    provider: Arc<dyn LlmInvokePort>,
     model: ModelId,
     max_tokens: u32,
     requested_reasoning: ReasoningLevel,
@@ -163,7 +163,7 @@ struct ProviderBinding {
 }
 ```
 
-Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 Provider Published Language，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`construction_symbols` 白名单锁定）。
+Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 Provider Published Language，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`construction_symbols` 白名单锁定）。
 
 > **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。#1142 仍延期，**NEVER** 冒充已完成。
 
@@ -443,7 +443,7 @@ Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的
 
 `InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建包装 run-scoped Dispatcher 的 `BoundaryHookPort`。该 adapter 以 Hook-owned `HookPointMetadata.class` 为唯一过滤真相：Boundary point（含 Stop 与 SubRun 生命周期）必须转发，Tool/Notification point 无副作用返回 Proceed。两者都必须在 factory 内完成，不能先返回完整 Port 再要求调用方自律过滤，也不能复制 HookPoint allow-list。
 
-`reasoning` 装配 **MUST** 在 Run 创建时冻结为静态 `ReasoningLevel`：`Fixed` 使用配置 / RunSpec / 用户命令声明值，`Inherit` 冻结父 Run requested value，`NoOp` 不携带 reasoning 请求。level 一经冻结，执行期间不再变化；装配 **NEVER** 接收具体 Provider client，也 **NEVER** 存在运行期改写 level 的端口。每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。RuntimeContext **不装配 Workflow 查询端口**：每轮上下文按 Session 最新状态组织，如何取得 Active Workflow 与刷新时机待决（见 workflow/01-workflow-design.md）。
+`reasoning` 装配 **MUST** 在 Run 创建时冻结为静态 `ReasoningLevel`：`Fixed` 使用配置 / RunSpec / 用户命令声明值，`Inherit` 冻结父 Run requested value，`NoOp` 不携带 reasoning 请求。level 一经冻结，执行期间不再变化；装配 **NEVER** 接收具体 Provider client，也 **NEVER** 存在运行期改写 level 的端口。每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `LlmInvokePort` 完成。RuntimeContext **不装配 Workflow 查询端口**：每轮上下文按 Session 最新状态组织，如何取得 Active Workflow 与刷新时机待决（见 workflow/01-workflow-design.md）。
 
 > **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但 Runtime **尚未**在生产链路调用 `resolve_invocation_options`；上述静态 ReasoningLevel 冻结与 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
@@ -459,7 +459,7 @@ session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing�
 
 - **唯一生产对象图入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 定义领域行为、应用用例、能力选择规则、Runtime-owned factory/port contracts 与转换；Composition 实例化具体实现并把 object graph 注入 Runtime。Runtime application 在业务时机调用统一 `RuntimeContextFactory`，但不触发供应 BC 的 concrete constructor。
 - `agent/composition` 持有各 Port 的具体实现或供应模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），并实现 Runtime-owned factory contracts。动态 Catalog 与 MCP lifecycle 仍由对应供应边界管理，不能泄漏 concrete wiring 给 Runtime。
-- **Provider 构造独占**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`），由 `construction_symbols` 白名单锁定。生产 factory 持有进程级 `TransportPool`（不可变 transport 缓存），Runtime 仍只见 `ProviderFactory` / `ProviderBinding` / `ProviderPort`，**NEVER** 直接持有 pool。
+- **Provider 构造独占**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`），由 `construction_symbols` 白名单锁定。生产 factory 持有进程级 `TransportPool`（不可变 transport 缓存），Runtime 仍只见 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort`，**NEVER** 直接持有 pool。
 - Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，其余代码按单一 `agent_execution` 能力的六边形职责归位。
 - `RuntimeContext` 属 application：它只传递本 Run 的活契约，**NEVER** 进入 domain 或通用 shared，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
 - Runtime 当前只有一个完整业务能力，因此 **NEVER** 添加单元素 `capabilities/agent_execution` 包装；没有真实跨 capability 复用内容时也 **NEVER** 创建 `shared/`。
@@ -512,7 +512,7 @@ session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing�
 | 2026-07-12 | 定义同步幂等 `cancel_run(run_id)`、per-Run cancellation scope 及 Provider/Tool/Compact/Hook 传播边界 | #700 |
 | 2026-07-15 | OHS 目标从旧 `cancel_run` 修正为 `cancel_run_step` + `terminate_run`，冻结 pure DTO、绝对 deadline 与迁移兼容边界 | [#700](https://github.com/rushsinging/aemeath/issues/700) / [PR #1036](https://github.com/rushsinging/aemeath/pull/1036) |
 | 2026-07-12 | ToolPort 拆为 Catalog/Execution 双端口，补 Skill/Command 独立端口边界与 Scope/Profile 装配 | #787 |
-| 2026-07-12 | ProviderPort 补能力查询、取消、结构化错误与单 attempt InvocationStream 契约 | #788 |
+| 2026-07-12 | LlmInvokePort 补能力查询、取消、结构化错误与单 attempt InvocationStream 契约 | #788 |
 | 2026-07-12 | ContextPort 签名收敛为 4 方法（build_window / needs_compaction / compact / append_and_persist），详见 context-management/02-compact.md | #786 |
 | 2026-07-12 | Policy 装配收缩为 AllowAll；Hook 收敛单 dispatch；Audit 出站收缩为非阻塞 UsageSink | #790 |
 | 2026-07-14 | 移除 Runtime Workspace 端口；由 active-session-slot CompositionWorkspaceScope 保留 Main wiring，Sub 在 AgentDispatch 内派生；Context / Runtime / Tool 共享同一 Task、Memory 与 Project view；补齐 Runtime-owned InteractionPort | [#972](https://github.com/rushsinging/aemeath/issues/972) |

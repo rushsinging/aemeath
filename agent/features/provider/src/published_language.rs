@@ -423,3 +423,103 @@ impl ProviderRequestData {
 #[cfg(test)]
 #[path = "published_language_tests.rs"]
 mod tests;
+
+// ─── LlmInvokePort（LLM 调用能力端口，#2146 收敛） ─────
+
+/// 一次性 LLM 文本调用的产出（流增量收口后的全量视图）。
+#[derive(Debug, Clone)]
+pub struct LlmTextOutputData {
+    pub text: String,
+    pub completion_reason: Option<String>,
+    pub text_delta_count: usize,
+    pub non_text_delta_count: usize,
+    pub stream_completed: bool,
+}
+
+/// LLM 调用能力端口（#2146 单端口收敛）：流式是唯一必须实现的 verb，
+/// 文本消费由默认方法 [`LlmInvokePort::invoke_text`] 收口提供——
+/// 非流式即流式的退化，不再作为独立 trait 存在，各实现免费获得文本能力。
+///
+/// 取消语义：唯一真相源是 `request.cancellation`（单通道）；
+/// 触发时返回 [`ProviderError`] 的 `Cancelled` 变体。
+#[async_trait::async_trait]
+pub trait LlmInvokePort: Send + Sync {
+    /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流
+    /// （`ProviderResponseChunk`，`Stop`/`Error` 终止帧）。
+    ///
+    /// # Errors
+    ///
+    /// 请求非法或上游失败时返回 [`ProviderError`]。
+    async fn invoke_stream(
+        &self,
+        model: &ModelInfo,
+        request: &ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError>;
+
+    /// 发送请求并收集全部文本增量直到 Stop（流式 verb 的默认收口）。
+    ///
+    /// # Errors
+    ///
+    /// 流内 `Error` 帧、取消或提前结束 → [`ProviderError`]。
+    async fn invoke_text(
+        &self,
+        model: &ModelInfo,
+        request: &ProviderRequestData,
+    ) -> Result<LlmTextOutputData, ProviderError> {
+        let stream = self.invoke_stream(model, request).await?;
+        collect_text(stream).await
+    }
+}
+
+/// 收口工具：把有序片段流聚合为全量文本视图（`invoke_text` 默认实现与
+/// 需要自行收口的调用方共用，单一实现点）。
+///
+/// # Errors
+///
+/// 流内 `Error` 帧透传；流在 `Stop` 帧前结束 → `UpstreamUnavailable`。
+pub async fn collect_text(
+    mut stream: ProviderResponseStream,
+) -> Result<LlmTextOutputData, ProviderError> {
+    use futures_util::StreamExt;
+
+    let mut text = String::new();
+    let mut text_delta_count = 0usize;
+    let mut non_text_delta_count = 0usize;
+    while let Some(event) = stream.next().await {
+        match event {
+            ProviderResponseChunk::Content(ProviderContentData::Text(part)) => {
+                text_delta_count += 1;
+                text.push_str(&part);
+            }
+            ProviderResponseChunk::Content(_) => non_text_delta_count += 1,
+            // Usage 帧不属于内容增量。
+            ProviderResponseChunk::Usage(_) => {}
+            ProviderResponseChunk::Stop(stop_reason) => {
+                return Ok(LlmTextOutputData {
+                    text,
+                    completion_reason: Some(stop_reason_label(&stop_reason)),
+                    text_delta_count,
+                    non_text_delta_count,
+                    stream_completed: true,
+                });
+            }
+            ProviderResponseChunk::Error(error) => return Err(error),
+        }
+    }
+    Err(ProviderError::fatal(
+        ProviderErrorKind::UpstreamUnavailable,
+        "Provider 流在完成事件前结束",
+    ))
+}
+
+/// Stop 原因的稳定标签（与调用方日志约定一致）。
+fn stop_reason_label(reason: &ResponseStopReason) -> String {
+    match reason {
+        ResponseStopReason::EndTurn => "end_turn".to_string(),
+        ResponseStopReason::ToolUse => "tool_use".to_string(),
+        ResponseStopReason::MaxOutputTokens => "max_output_tokens".to_string(),
+        ResponseStopReason::ContentFiltered => "content_filtered".to_string(),
+        ResponseStopReason::StopSequence => "stop_sequence".to_string(),
+        ResponseStopReason::Other(other) => format!("other:{other}"),
+    }
+}

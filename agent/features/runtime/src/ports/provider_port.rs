@@ -1,91 +1,50 @@
-//! ProviderPort — Provider BC 出站端口。
+//! Provider 出站能力（#2146 收敛后）。  
 //!
 //! 对应设计：
 //! - `docs/design/02-modules/runtime/06-ports-and-adapters.md` §2
 //! - `docs/design/02-modules/provider/02-ports-stream-and-client-scope.md`
 //!
-//! #901 冻结契约：
-//! - PL 类型（ModelInfo、ProviderError、ProviderResponse 等）
-//!   由 Provider crate 的 `published_language` 模块定义。
-//! - Runtime 定义 `ProviderPort` trait，引用 Provider PL 类型，
-//!   **NEVER** 引用 vendor wire DTO。
-//! - `invoke` 返回 pull-based 有序流，终结语义由 `ProviderResponseChunk`
-//!   （`Stop`/`Error` 终止帧）表达（#1880 v3 契约）。
-
-use async_trait::async_trait;
+//! #2146 契约变更（收敛 #901 的 runtime 自有 `ProviderPort` + #1863 的
+//! provider `LlmTextInvokePort`）：
+//! - LLM 调用能力端口 `LlmInvokePort` **由 provider crate 唯一定义**：
+//!   流式 `invoke_stream` 是唯一必须实现的 verb，文本 `invoke_text` 是
+//!   端口默认方法（非流式即流式收口，不再作为独立 trait）。
+//! - 取消真相源单通道：`ProviderRequestData.cancellation`
+//!   （runtime 不再经独立 `CancellationSignal` 参数传取消）。
+//! - 本模块只保留 PL re-export 与契约 harness；runtime 内部持有
+//!   `Arc<dyn LlmInvokePort>`（`ProviderBindingData.provider`）。
+//!
+//! #901 冻结的 PL 类型（ModelInfo、ProviderError、ProviderResponse 等）
+//! 仍由 provider crate 的 `published_language` 定义；Runtime **NEVER**
+//! 引用 vendor wire DTO。
 
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
 // 通过 provider:: 根导出访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ResponseStopReason 导出，此处还原为 StopReason。
 pub use provider::{
-    ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,
-    ResponseStopReason as StopReason, TokenUsageData,
+    LlmInvokePort, ModelInfo, ProviderError, ProviderRequestData, ResponseStopReason as StopReason,
+    TokenUsageData,
 };
 
 #[cfg(test)]
-pub use provider::{ProviderContentData, ProviderErrorKind, ProviderResponseChunk};
+pub use provider::{
+    ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderResponseStream,
+};
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
 pub use share::reasoning::ReasoningLevel;
-
-/// 取消信号（真相源在 runtime Run 生命周期；provider 只消费意图）。
-///
-/// 端口不暴露取消发起、child token 或 deadline；consumer drop 由私有
-/// stream owner 负责转为 invocation-local 取消。
-#[async_trait::async_trait]
-pub trait CancellationSignal: Send + Sync {
-    fn is_cancelled(&self) -> bool;
-    async fn cancelled(&self);
-}
-
-#[async_trait::async_trait]
-impl CancellationSignal for tokio_util::sync::CancellationToken {
-    fn is_cancelled(&self) -> bool {
-        tokio_util::sync::CancellationToken::is_cancelled(self)
-    }
-
-    async fn cancelled(&self) {
-        tokio_util::sync::CancellationToken::cancelled(self).await;
-    }
-}
-
-// ─── Port trait ───
-
-/// Provider BC 的出站端口（内部 ACL）。
-///
-/// Main/Sub 共享只读 transport；每次 invoke 创建独立 Invocation Scope，
-/// 隔离 model/reasoning/max tokens。
-///
-/// 一次 invoke 最多执行一次上游语义请求。
-/// 跨调用 retry、compact、fallback 由 Runtime 负责。
-#[async_trait]
-pub trait ProviderPort: Send + Sync {
-    // 能力查询 `capabilities()` 已删除（#1880）：binding 持全量
-    // ModelInfo，运行时零查询——unknown model 门禁在装配时（catalog/wire
-    // 阶段决定 ModelInfo），不再于调用侧查询。
-
-    /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流。
-    ///
-    /// 取消通过 `CancellationToken` 传播；取消后返回 `ProviderError::cancelled()`。
-    async fn invoke(
-        &self,
-        request: ProviderRequestData,
-        cancellation: &dyn CancellationSignal,
-    ) -> Result<ProviderResponseStream, ProviderError>;
-}
 
 // ─── Fake / Contract harness ───────────────────────────
 
 #[cfg(test)]
 pub(crate) mod fake {
-    //! FakeProvider —— 契约 harness，验证 ProviderPort PL 语义。
+    //! FakeProvider —— 契约 harness，验证 LLM 调用端口的 PL 语义。
     //!
     //! 不依赖真实 HTTP；用于 Runtime 各模块单元测试。
 
     use super::*;
     use futures::stream;
     use std::sync::Arc;
-    use tokio_util::sync::CancellationToken;
 
     /// 可编程的 fake provider：按预设事件列表依次产出。
     pub struct FakeProvider;
@@ -127,18 +86,16 @@ pub(crate) mod fake {
         }
     }
 
-    #[async_trait]
-    impl ProviderPort for FakeProvider {
-        async fn invoke(
-            &self,
-            _request: ProviderRequestData,
-            cancellation: &dyn CancellationSignal,
-        ) -> Result<ProviderResponseStream, ProviderError> {
-            if cancellation.is_cancelled() {
+    /// FakeProvider 的调用端口（#2146：实现归 provider test_support，
+    /// 契约 harness 只提供脚本与流构造）。
+    pub(crate) fn port() -> Arc<dyn LlmInvokePort> {
+        provider::test_support::scripted_llm(|request| {
+            // 契约 harness 的取消语义由脚本显式表达（回放器不拦截）。
+            if request.cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());
             }
-            Ok(Self::happy_path_stream("hello"))
-        }
+            Ok(FakeProvider::happy_path_stream("hello"))
+        })
     }
 
     pub struct FakeProviderFactory;
@@ -149,7 +106,7 @@ pub(crate) mod fake {
             spec: crate::ports::ProviderBuildSpecData,
         ) -> Result<crate::ports::ProviderBindingData, ProviderError> {
             Ok(crate::ports::ProviderBindingData {
-                provider: Arc::new(FakeProvider::new()),
+                provider: port(),
                 model: crate::ports::ModelInfo {
                     provider: spec.source_key.clone(),
                     model: spec.model.clone(),
@@ -170,8 +127,10 @@ pub(crate) mod fake {
     // ─── 契约测试 ───
     //
     // `fake_provider_capabilities_*` 两个查询契约测试已删除（#1880）：
-    // ProviderPort 不再暴露 capabilities()——unknown model 门禁语义移到
-    // 装配时（factory build 构造 ModelInfo），运行时零查询。
+    // 端口不再暴露 capabilities()——unknown model 门禁语义移到装配时
+    // （factory build 构造 ModelInfo），运行时零查询。
+    // `provider_port_accepts_object_safe_cancellation_signal` 已删除（#2146）：
+    // 端口不再有独立取消参数，取消单通道走 `request.cancellation`。
 
     #[tokio::test]
     async fn happy_path_stream_emits_content_then_usage_then_stop() {
@@ -216,20 +175,32 @@ pub(crate) mod fake {
         assert!(stream.next().await.is_none());
     }
 
-    #[tokio::test]
-    async fn invoke_returns_cancelled_error_when_already_cancelled() {
-        let provider = FakeProvider::new();
-        let cancel = CancellationToken::new();
-        cancel.cancel();
+    fn model() -> ModelInfo {
+        ModelInfo {
+            provider: "fake".to_string(),
+            model: "test-model".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            supported_reasoning: vec![ReasoningLevel::Off],
+            server_effort_map: Vec::new(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
+        }
+    }
 
+    #[tokio::test]
+    async fn invoke_stream_returns_cancelled_error_when_request_signal_fired() {
+        let provider = port();
         let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
             8192,
             ReasoningLevel::Off,
         );
+        request.cancellation.cancel();
 
-        let result = provider.invoke(request, &cancel).await;
+        let result = provider.invoke_stream(&model(), &request).await;
         match result {
             Err(e) => assert!(e.is_cancelled()),
             Ok(_) => panic!("expected cancelled error"),
@@ -237,9 +208,8 @@ pub(crate) mod fake {
     }
 
     #[tokio::test]
-    async fn invoke_returns_stream_with_correct_terminal_semantics() {
-        let provider = FakeProvider::new();
-        let cancel = CancellationToken::new();
+    async fn invoke_stream_returns_stream_with_correct_terminal_semantics() {
+        let provider = port();
         let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
@@ -247,7 +217,7 @@ pub(crate) mod fake {
             ReasoningLevel::Off,
         );
 
-        let mut stream = provider.invoke(request, &cancel).await.unwrap();
+        let mut stream = provider.invoke_stream(&model(), &request).await.unwrap();
         use futures::StreamExt;
 
         // 收集所有片段
@@ -265,19 +235,9 @@ pub(crate) mod fake {
     }
 
     #[tokio::test]
-    async fn provider_port_accepts_object_safe_cancellation_signal() {
-        struct AlwaysCancelled;
-
-        #[async_trait]
-        impl CancellationSignal for AlwaysCancelled {
-            fn is_cancelled(&self) -> bool {
-                true
-            }
-
-            async fn cancelled(&self) {}
-        }
-
-        let provider = FakeProvider::new();
+    async fn invoke_text_default_method_collects_stream_into_text_output() {
+        // #2146：文本是端口默认方法（收口）——任何 invoke_stream 实现免费获得。
+        let provider = port();
         let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
@@ -285,8 +245,11 @@ pub(crate) mod fake {
             ReasoningLevel::Off,
         );
 
-        let result = provider.invoke(request, &AlwaysCancelled).await;
-        assert!(matches!(result, Err(error) if error.is_cancelled()));
+        let output = provider.invoke_text(&model(), &request).await.unwrap();
+        assert_eq!(output.text, "hello");
+        assert_eq!(output.completion_reason.as_deref(), Some("end_turn"));
+        assert_eq!(output.text_delta_count, 1);
+        assert!(output.stream_completed);
     }
 
     #[test]

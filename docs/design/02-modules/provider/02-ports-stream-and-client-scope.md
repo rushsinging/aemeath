@@ -2,14 +2,14 @@
 
 > 层级：02-modules / provider（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#788（S2）
-> 本文定义 ProviderPort 调用契约、流式与取消语义、Runtime/Provider 重试边界，以及不可变 Transport + Invocation Scope 生命周期。签名用于表达职责，不锁定具体 Rust API。
+> 本文定义 `LlmInvokePort` 调用契约（#2146 单端口：流式 verb + 文本默认方法）、流式与取消语义、Runtime/Provider 重试边界，以及不可变 Transport + Invocation Scope 生命周期。签名用于表达职责，不锁定具体 Rust API。
 
-## 1. ProviderPort
+## 1. LlmInvokePort
 
-`ProviderPort` 是 Agent Runtime 拥有的出站端口（Runtime-owned），Provider adapter 只负责实现该签名。唯一权威 trait 定义在 [Runtime 端口与装配 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约)；本文 **NEVER** 复制第二份 trait 真相，只展开 Provider 侧调用语义、流事件类型与关联 Published Language：
+`LlmInvokePort` 由 Provider crate 唯一定义（#2146 收敛：流式 `invoke_stream` 是唯一必须实现的 verb，文本 `invoke_text` 是端口默认方法——取消真相源单通道 `request.cancellation`）。trait 真相源在 [Runtime 端口与装配 §2.1](../runtime/06-ports-and-adapters.md#21-provider-defined-lllminvokeport2146-收敛)；本文 **NEVER** 复制第二份 trait 真相，只展开 Provider 侧调用语义、流事件类型与关联 Published Language：
 
 ```rust
-// 权威签名见 ../runtime/06-ports-and-adapters.md §2（trait ProviderPort），
+// 权威签名见 runtime/06-ports-and-adapters.md §2.1（trait LlmInvokePort），
 // 本文不重复定义：capabilities / resolve_invocation_options / invoke 三个方法。
 
 enum InvocationEvent {
@@ -77,7 +77,7 @@ Created
 
 > **当前落地**：Provider 已用 crate-private `HttpAttemptExecutor`（`adapters/http_attempt.rs`）统一单 attempt 的机械发送、cancellation、status/error body 判定与单一 diagnostic 记录，driver 之间不再各自复制这段逻辑。跨调用 retry/backoff 与 stream→non-stream fallback 的所有权已迁至 Runtime，错误分类统一收口。Provider 生产 stream adapter 由引擎规则 `pattern.provider.no-pull-stream-retry-loop` 禁止恢复 retry loop、backoff sleep 或 fallback 发起逻辑。
 
-ProviderPort 的一次 invoke 只允许一次上游语义请求。Provider 不实现“stream 失败后自动 non-stream 重发”，因为第二次请求可能产生不同文本、工具调用或副作用意图，也会让 Runtime 无法准确记录 attempt 和 usage。
+`LlmInvokePort` 的一次 invoke 只允许一次上游语义请求。Provider 不实现“stream 失败后自动 non-stream 重发”，因为第二次请求可能产生不同文本、工具调用或副作用意图，也会让 Runtime 无法准确记录 attempt 和 usage。
 
 任何第二次调用（普通 retry 或 non-stream fallback）都必须由 Runtime 显式开始新的 attempt，并满足：
 
@@ -135,7 +135,7 @@ Runtime 负责：
 
 1. 创建 attempt 与 cancellation scope；
 2. 发出 `ModelInvocationStarted`；
-3. 调 ProviderPort 并把 delta 应用到本 attempt；
+3. 调 `LlmInvokePort` 并把 delta 应用到本 attempt；
 4. 跟踪本 attempt 的 delta 是否已提交到 EventSink；只有未提交或已原子回滚时，才根据 ProviderErrorKind、retryable、retry_after 决定重试；
 5. 退避期间保持可取消；
 6. 发出 `ModelInvocationRetrying{attempt}`；
@@ -171,7 +171,7 @@ Transport pool 的 key 至少能唯一标识 provider endpoint、认证域和 dr
 
 ## 7. Invocation Scope
 
-> **当前落地**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::invocation_stream`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已物理删除（引擎规则 `pattern.provider.no-mutable-invocation-state` 阻止回流）。不可变 Transport 已落地（见 §6 当前落地注记）；下方 `transport / capability_fingerprint / OutputTokenLimit` 字段中 `capability_fingerprint` 与 `OutputTokenLimit` 仍是后续完整 ProviderPort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
+> **当前落地**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::invocation_stream`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已物理删除（引擎规则 `pattern.provider.no-mutable-invocation-state` 阻止回流）。不可变 Transport 已落地（见 §6 当前落地注记）；下方 `transport / capability_fingerprint / OutputTokenLimit` 字段中 `capability_fingerprint` 与 `OutputTokenLimit` 仍是后续完整 LlmInvokePort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
 
 ```rust
 struct InvocationScope {
@@ -219,11 +219,11 @@ Main 与每个 Sub Run 都可共享同一个 `Arc<ProviderTransport>`，但不�
 5. 没有 finalize restore；
 6. panic、cancel 或提前 drop 不会污染其他调用。
 
-因此 Main/Sub 的隔离语义是**独立 invocation state**，而非复制 socket pool。目标装配可以返回同一 ProviderPort 实现，只要实现满足上述状态隔离不变量。
+因此 Main/Sub 的隔离语义是**独立 invocation state**，而非复制 socket pool。目标装配可以返回同一 LlmInvokePort 实现，只要实现满足上述状态隔离不变量。
 
 ## 9. Composition Root 与 Factory
 
-> **当前落地**：Composition Root 已通过 Runtime-owned `ProviderFactory` trait（`runtime::ports::provider_factory`）独占 provider 构造。`ProviderFactory::build(spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>` 接收纯值 spec 并返回 `ProviderBinding`（`Arc<dyn ProviderPort>` + model / max_tokens / reasoning / context_window）。Provider crate 的 `provider::composition` 模块是 Composition Root 专用构造面，重新导出 `LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` 等具体构造符号；非 Composition crate **NEVER** 引用 `provider::composition` 或构造符号，由 `construction_symbols` 白名单锁定。生产 factory（`DefaultProviderFactory`）持有进程级 `TransportPool` 并经 `from_config_with_pool` 构造，"构造和缓存不可变 ProviderTransport"职责随之落地（见 §6）。
+> **当前落地**：Composition Root 已通过 Runtime-owned `ProviderFactory` trait（`runtime::ports::provider_factory`）独占 provider 构造。`ProviderFactory::build(spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>` 接收纯值 spec 并返回 `ProviderBinding`（`Arc<dyn LlmInvokePort>` + model / max_tokens / reasoning / context_window）。Provider crate 的 `provider::composition` 模块是 Composition Root 专用构造面，重新导出 `LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` 等具体构造符号；非 Composition crate **NEVER** 引用 `provider::composition` 或构造符号，由 `construction_symbols` 白名单锁定。生产 factory（`DefaultProviderFactory`）持有进程级 `TransportPool` 并经 `from_config_with_pool` 构造，"构造和缓存不可变 ProviderTransport"职责随之落地（见 §6）。
 
 Composition Root 唯一负责：
 
@@ -231,7 +231,7 @@ Composition Root 唯一负责：
 - 构造和缓存不可变 ProviderTransport；
 - 构造 capability resolver 与 model overrides；
 - 实现 `ProviderFactory`，把 `ProviderBuildSpec` 解析为 `ProviderBinding`；
-- 把 ProviderPort adapter 注入 RuntimeContext；
+- 把 LlmInvokePort adapter 注入 RuntimeContext；
 - 确保 Main/Sub 只共享无调用期可变状态的对象；
 - 在配置快照变化时构造新 transport/factory generation，而不是原地改写正在调用的 scope。
 
@@ -243,7 +243,7 @@ trait ProviderFactory: Send + Sync {
 
 /// Composition Root 生产构造结果。
 struct ProviderBinding {
-    provider: Arc<dyn ProviderPort>,
+    provider: Arc<dyn LlmInvokePort>,
     model: ModelId,
     max_tokens: u32,
     requested_reasoning: ReasoningLevel,
@@ -251,11 +251,11 @@ struct ProviderBinding {
 }
 ```
 
-Factory 是组合根接线概念，不进入 Runtime 领域模型。RuntimeContext 只看到已经解析完成的 `ProviderBinding` / `Arc<dyn ProviderPort>`。Runtime Main/Sub/Reflection/Compact 均只依赖 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 Provider Published Language。
+Factory 是组合根接线概念，不进入 Runtime 领域模型。RuntimeContext 只看到已经解析完成的 `ProviderBinding` / `Arc<dyn LlmInvokePort>`。Runtime Main/Sub/Reflection/Compact 均只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 Provider Published Language。
 
 ## 10. 并发与资源限制
 
-- `ProviderPort` 必须 `Send + Sync`；
+- `LlmInvokePort` 必须 `Send + Sync`；
 - 单个 `InvocationStream` 只允许一个消费者，保证顺序；
 - 全局/供应商并发限制可由 transport adapter 的资源机制执行，但业务优先级与 Run 调度归 Runtime；
 - 限流等待必须可取消；
@@ -313,11 +313,12 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-20 | #1645 落地不可变 Transport + TransportPool：`adapters/transport.rs` / `adapters/pool.rs` 按 key（driver/endpoint/认证域/user-agent/timeout）缓存不可变 transport，模型切换复用同一连接池；`DefaultProviderFactory` 进程级持有 pool，`TransportPool` 纳入构造所有权守卫符号清单；失效策略为 key 变更即新实例、无主动失效 | [#1645](https://github.com/rushsinging/aemeath/issues/1645) |
-| 2026-07-19 | Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 PL；`provider::composition` 独占构造（引擎构造白名单 + 负向探针）；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam 非 legacy；跨调用 retry/fallback 与错误分类已收口；resolver 接线仍延期 | 治理记录 |
+| 2026-07-19 | Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 PL；`provider::composition` 独占构造（引擎构造白名单 + 负向探针）；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam 非 legacy；跨调用 retry/fallback 与错误分类已收口；resolver 接线仍延期 | 治理记录 |
 | 2026-07-17 | #903 将 Provider→Runtime 生产链切换为 pull-based `InvocationStream`：`Completed/Failed` 单终结、取消统一为 `Failed(Cancelled)`、Runtime/Context 主动 poll 且禁止跨 crate legacy sink；Provider decoder 内部迁移桥作为明确残余登记 | [#903](https://github.com/rushsinging/aemeath/issues/903) |
 | 2026-07-16 | 交付 crate-private `HttpAttemptExecutor`：收敛单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic，并以引擎规则锁定单 executor 边界；跨调用 retry/fallback 仍是 Runtime 待迁移债，本次改动不冒充其已完成 | 治理记录 |
 | 2026-07-16 | 文档审查：明确后续承接边界——pull-based `InvocationStream`（P4）由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接；跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-12 | 初稿：ProviderPort、流/取消、Runtime 重试边界、不可变 Transport 与 Invocation Scope | #788 |
+| 2026-10-28 | 端口收敛（#2146）：ProviderPort + LlmTextInvokePort 合为 Provider 定义的 `LlmInvokePort` 单端口（流式 verb + 文本默认方法），取消单通道 `request.cancellation` | #2142 / #2146 |
 | 2026-07-14 | 增加 build 前 option resolution；Context prompt 与 InvocationScope 共享唯一 effective reasoning / limits 快照 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-14 | `ProviderPort` 明确 Runtime-owned；移除本文重复的 trait 定义，改为引用 [Runtime 06 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约) 的唯一签名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | `LlmInvokePort` 明确 Runtime-owned；移除本文重复的 trait 定义，改为引用 [Runtime 06 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约) 的唯一签名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | Provider API 失败统一进入 `aemeath:llm-api-error` 独立 sink；冻结 attempt 级关联、脱敏 JSON payload、取消排除和单失败单记录规则 | [#700](https://github.com/rushsinging/aemeath/issues/700) |

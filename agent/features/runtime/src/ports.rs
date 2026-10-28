@@ -43,7 +43,7 @@ pub use policy_port::Policy;
 pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
-    CancellationSignal, ModelInfo, ProviderPort, ProviderRequestData, StopReason, TokenUsageData,
+    LlmInvokePort, ModelInfo, ProviderRequestData, StopReason, TokenUsageData,
 };
 #[cfg(test)]
 pub use provider_port::{ProviderError, ProviderResponseStream};

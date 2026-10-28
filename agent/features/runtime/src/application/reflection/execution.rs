@@ -1,5 +1,5 @@
 use super::response::{request_reflection_response, ReflectionPhase};
-use crate::ports::ProviderPort;
+use crate::ports::LlmInvokePort;
 use futures::StreamExt;
 use memory::api::reflection::{
     ReflectionEngine, ReflectionErrorCategory, ReflectionExecutionIdentity,
@@ -63,7 +63,7 @@ impl From<ReflectionWorkflowError> for ReflectionExecutionError {
 }
 
 pub(crate) struct ReflectionInvocation<'a> {
-    pub provider: &'a dyn ProviderPort,
+    pub provider: &'a dyn LlmInvokePort,
     pub model: &'a provider::ModelInfo,
     pub max_tokens: u32,
     pub requested_reasoning: share::reasoning::ReasoningLevel,
@@ -328,7 +328,7 @@ pub(super) async fn call_provider(
     };
     let mut stream = invocation
         .provider
-        .invoke(request, cancel)
+        .invoke_stream(invocation.model, &request)
         .await
         .map_err(|_| ReflectionExecutionError::LlmCall)?;
     // 流式端口 → 本地聚合到终止帧（非流式语义经 Stop 帧获得）。

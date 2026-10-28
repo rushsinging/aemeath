@@ -21,7 +21,7 @@ Runtime 当前只有一个完整业务能力：`agent_execution`。它拥有“�
  model_invocation  tool_coordination  context_coord.   interaction
         │            │                     │              │
         ▼            ▼                     ▼              ▼
-   ProviderPort   ToolCatalogPort +  ContextPort   InteractionPort/PolicyPort
+   LlmInvokePort   ToolCatalogPort +  ContextPort   InteractionPort/PolicyPort
                   ToolExecutionPort
         │            │                     │              │
         └────────────┴─── sdk_event_mapper（横切：领域事件 → SDK ChatEvent）
@@ -97,9 +97,9 @@ agent/features/runtime/src/
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
-- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `RawUsageSnapshot`（provider-neutral、单 attempt 累计快照）；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（首次调用 + 最多 10 次重试，共最多 11 attempts；单次退避封顶 60 秒），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
+- **职责**：调 `LlmInvokePort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `RawUsageSnapshot`（provider-neutral、单 attempt 累计快照）；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（首次调用 + 最多 10 次重试，共最多 11 attempts；单次退避封顶 60 秒），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
-- 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`UsageSink`；reasoning level 为 Run 创建时静态冻结的 `ReasoningLevel`（仅来自配置 / 用户命令），与 Workflow 解耦；`ModelInvocation` 不读取任何 Graph 字段，Provider 不感知 Graph，Runtime 每轮按 Session 最新状态组织上下文（具体读取 / 注入协议待决，见 workflow/01-workflow-design.md）；Provider resolver → Context/Invocation effective reasoning 冻结链尚未接生产链路，该接线由 v0.2.0 #1142 决策
+- 消费：`LlmInvokePort`（返回 Retryable/Fatal 分类错误）、`UsageSink`；reasoning level 为 Run 创建时静态冻结的 `ReasoningLevel`（仅来自配置 / 用户命令），与 Workflow 解耦；`ModelInvocation` 不读取任何 Graph 字段，Provider 不感知 Graph，Runtime 每轮按 Session 最新状态组织上下文（具体读取 / 注入协议待决，见 workflow/01-workflow-design.md）；Provider resolver → Context/Invocation effective reasoning 冻结链尚未接生产链路，该接线由 v0.2.0 #1142 决策
 
 ### tool_coordination
 - **职责**：ToolCall 双 ID 映射（领域 `ToolCallId` ↔ provider_id）、Policy/Hook/审批、timeout/cancellation、多调用并发、结果回收与 Run Step 写入
@@ -111,7 +111,7 @@ agent/features/runtime/src/
 ### context_coordination
 - **职责**：构建本轮 Context Window（取历史 + compact 家族 + memory 注入 + prompt/guidance 装配 + token budget）
 - 消费：仅 `ContextPort`（Context Management BC）
-- **注**：Session 对话历史与把 Memory 注入 Context Window 的流程都属 Context Management；本模块只调用 `ContextPort`，**NEVER** 旁路再检索注入内容。Memory 本体及 Reflection 的 prompt / parse / apply / history workflow 属 Memory BC；Runtime 后台 Reflection 只决定触发、调用 `ProviderPort`，并拥有单槽任务的 cancel / timeout / drain。
+- **注**：Session 对话历史与把 Memory 注入 Context Window 的流程都属 Context Management；本模块只调用 `ContextPort`，**NEVER** 旁路再检索注入内容。Memory 本体及 Reflection 的 prompt / parse / apply / history workflow 属 Memory BC；Runtime 后台 Reflection 只决定触发、调用 `LlmInvokePort`，并拥有单槽任务的 cancel / timeout / drain。
 
 ### interaction
 - **职责**：将 Tool suspension、Policy approval 或 hard pause 统一映射为 Runtime-owned `InteractionRequest`，保存 request id + typed continuation，处理 reply / cancellation 竞争

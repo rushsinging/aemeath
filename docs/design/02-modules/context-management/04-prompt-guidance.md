@@ -161,7 +161,7 @@ mark_cache_breakpoint(&mut blocks);       // 唯一 breakpoint
 └── {prefix}.md          # 按 model id 前缀匹配，所有匹配的都追加
 ```
 
-> **`effective_reasoning`** 是本 invocation 已绑定的最终值：Runtime 使用 Run 创建时冻结的 `ReasoningLevel`（配置 / 用户命令），在 `build_window` 前调用 Provider-owned resolver（`ProviderPort.resolve_invocation_options`）按 model capability clamp，由 resolver 返回 effective value，并将该值同时冻结到 Context 与 Invocation。Prompt capability **NEVER** 读取或修改 Provider client 的“当前状态”；它只据 `effective_reasoning != Off` 决定是否加载 `_reasoning.md`。guidance 行为约束与 Provider adapter 的 wire 字段（`reasoning_effort` / `thinking.budget_tokens`）正交，但两者读取同一个 effective value。
+> **`effective_reasoning`** 是本 invocation 已绑定的最终值：Runtime 使用 Run 创建时冻结的 `ReasoningLevel`（配置 / 用户命令），在 `build_window` 前调用 Provider-owned resolver（`LlmInvokePort.resolve_invocation_options`）按 model capability clamp，由 resolver 返回 effective value，并将该值同时冻结到 Context 与 Invocation。Prompt capability **NEVER** 读取或修改 Provider client 的“当前状态”；它只据 `effective_reasoning != Off` 决定是否加载 `_reasoning.md`。guidance 行为约束与 Provider adapter 的 wire 字段（`reasoning_effort` / `thinking.budget_tokens`）正交，但两者读取同一个 effective value。
 
 ### 4.2 组合加载策略
 

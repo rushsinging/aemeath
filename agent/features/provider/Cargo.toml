@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 
+[features]
+# 测试实现面（脚本化 LlmInvokePort 等）。Consumers must add `provider` to
+# `[dev-dependencies]` with `features = ["dev"]`. Never enabled in production.
+dev = []
+
 [dependencies]
 share = { path = "../../shared" }
 logging = { path = "../../../packages/global/logging" }
