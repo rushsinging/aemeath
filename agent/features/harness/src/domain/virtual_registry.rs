@@ -23,6 +23,8 @@ impl<'a> VirtualComponentRegistry<'a> {
     }
 }
 
+impl crate::sealed::Sealed for VirtualComponentRegistry<'_> {}
+
 impl ComponentRegistry for VirtualComponentRegistry<'_> {
     fn list(&self) -> Vec<ComponentId> {
         let mut ids: Vec<ComponentId> = self.base.list();
