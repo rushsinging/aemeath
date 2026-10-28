@@ -379,7 +379,7 @@ enum HookBindingMode {
 /// 按 RunSpec 装配出的执行资源容器：运行时构造，注入 Loop Engine。不可序列化，不进 Run 聚合。
 struct RuntimeContext {
     context:   Arc<dyn ContextPort>,    // Sub: 独立 context manager
-    provider:  Arc<dyn ProviderPort>,   // Main/Sub 可共享不可变 transport；调用期 Invocation Scope 独立
+    provider:  Arc<dyn LlmInvokePort>,   // Main/Sub 可共享不可变 transport；调用期 Invocation Scope 独立
     tool_catalog:   Arc<dyn ToolCatalogPort>,   // 按 Registry Scope/Profile 投影 schemas
     tool_execution: Arc<dyn ToolExecutionPort>, // 不暴露 Tool/Registry，实现单次函数调用
     policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy

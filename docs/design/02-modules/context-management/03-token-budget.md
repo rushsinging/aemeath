@@ -149,7 +149,7 @@ compact 的两个窗口 **MUST** 分开归属：`summary_budget` 由**注入窗�
 ### 4.1 公式
 
 ```
-resolved         = ProviderPort.resolve_invocation_options(model, requested)
+resolved         = model.resolve_reasoning(requested)   # 现存 clamp 入口（#2032）
 max_output       = resolved.max_output_tokens
 reserved_context = context_size * 5%
 effective        = context_size - reserved_context - max_output
@@ -307,7 +307,7 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 | tool schemas | 2-8% | ToolCatalogPort snapshot |
 | 对话历史 | 60-85% | ChatChain（经 compact 管控） |
 | memory 注入 | <1% | Context memory integration（Config 上限 ∩ 剩余 budget） |
-| response | max_output_tokens | ProviderPort |
+| response | max_output_tokens | LlmInvokePort |
 
 主动管控分两类：
 
@@ -322,7 +322,7 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 
 - Compact 家族：[02-compact.md](02-compact.md)
 - Memory 注入：[05-memory-injection.md](05-memory-injection.md)
-- Runtime 端口（ProviderPort capabilities）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Runtime 端口（LlmInvokePort capabilities）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 - Run 状态机（Compacting 状态触发）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 

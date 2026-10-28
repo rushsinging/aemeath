@@ -72,8 +72,8 @@
   {
    "id": "w6",
    "type": "external",
-   "label": "文本端口",
-   "sublabel": "LlmTextInvokePort",
+   "label": "调用端口",
+   "sublabel": "LlmInvokePort",
    "row": 2,
    "col": 5
   },
@@ -81,7 +81,7 @@
    "id": "runtime",
    "type": "frontend",
    "label": "runtime",
-   "sublabel": "ProviderPort 消费",
+   "sublabel": "LlmInvokePort 消费",
    "row": 0,
    "col": 2
   },

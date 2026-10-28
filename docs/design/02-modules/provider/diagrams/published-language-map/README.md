@@ -14,7 +14,7 @@
 | 模型元数据 | `ModelInfo`（身份+能力单实体：config/catalog 投影 + `supported_reasoning` 阶梯与 `resolve_reasoning` clamp） |
 | 错误 | `ProviderError` + `ProviderErrorKind`（13 变体；`LlmError` 已内部化折叠） |
 | 工厂·客户端 | `wire_provider_client`（主链路，返回修正版 ModelInfo）、`wire_test_provider_client`（探测）、`LlmClient`/`ProviderClientSpecData`/`TransportPool`（构造面豁免） |
-| 文本端口 | `LlmTextInvokePort`/`LlmTextOutputData`（非流式纯文本调用） |
+| 调用端口 | `LlmInvokePort`（#2146 单端口：流式 `invoke_stream` verb + 文本 `invoke_text` 默认方法）/`LlmTextOutputData`（文本收口产出） |
 
 ## 数据来源
 
