@@ -167,6 +167,7 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 | 上下文不同或缺失时禁止合并 | 表面相似的任务/失败不得被合并成一条错误经验 |
 | 显式格式示例（NEVER 其他形态） | 实测失败：只写"格式同改进块"时模型输出裸 `{"edits":[]}` → 解析失败 |
 | Compose 无新增执行证据 | `signal_ids` 可空表示继承被仲裁采纳证据；非空必须是采纳 signal 的去重子集；只能修正本周期已采纳组件，修正 lesson 保留原 signal/source |
+| dry-run 同样进入 Compose | 有虚拟采纳时 MUST 调用 Compose；材料使用内存 overlay 的叠加终态，仲裁修正只进预览，NEVER 落盘 |
 
 ## 4. 应答解析容忍
 
@@ -201,5 +202,5 @@ NEVER 中断周期；失败原因落事件流 `proposal_rejected`。
 1. 单测：prompt 结构断言（材料/证据/经验/契约/格式五段齐全）+ 解析容忍
 2. **真模型 e2e**：至少一个模型跑 `rsi run`，产出提案 MUST 引用 signal id、lesson MUST 绑定真实 SignalKind
 3. **Compose 相似仲裁 e2e**：表面相似但来源上下文不同的提案/lesson 不被合并；同根因同类可合并且保留语义
-4. `rsi run --dry-run` 报告可读（块划分/证据/提案/落盘预演）
-4. 事件流落九类事件（#2070），且 `proposal_rejected` 为空
+4. `rsi run --dry-run` 报告可读且覆盖全链路：块划分/证据/提案/虚拟采纳/Compose 仲裁/落盘预演；有虚拟采纳时 Compose MUST 被调用并使用虚拟叠加终态，同时保持零持久副作用
+5. 事件流落九类事件（#2070），且 `proposal_rejected` 为空

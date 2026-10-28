@@ -231,5 +231,6 @@ struct LessonEntry {
 - 来源回读：`SessionEventRecord` 保留 session/run/step，`EvidenceSignal.sources` 有界且去重（L2）；scanner 从真实形态 dataset 回读目标 step 与相邻上下文（含 `step/accepted_input` 用户任务）并保证目标 step 在 1200 字符预算内，来源缺失/损坏成员不阻断（L2 + 真实 fixture）。
 - 提案门禁：空、重复、未知 `signal_ids` 整份作废且零落盘副作用；合法引用绑定真实 signal kind 与 source（L2）。
 - Compose 证据继承：修正未采纳组件或引用未知 signal 作废且零落盘；修正已采纳组件时新 lesson 保留原 signal/source（L2）。完整周期必须在首个 Block 前保存 Active lesson 快照，Compose prompt 含历史 lesson 与双方上下文，且不含本周期自身派生 lesson（L2）。
+- dry-run 全链路：虚拟采纳 MUST 进入 Compose，并基于内存 overlay 的叠加终态仲裁；真实组件、lesson、checkpoint 与 signal-history 全部零写入（L2 + 真模型 e2e）。
 - 真模型 e2e：一次完整循环后经验库出现带证据的 Active lesson，且下一次改进周期的材料分块消费到该 lesson。
 - JSON 兜底：空组件树/无信号时 daemon 仍输出合法 JSON 结构（对齐反思空 corpus 兜底教训，NEVER 自然语言解释）。

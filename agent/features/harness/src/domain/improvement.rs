@@ -542,7 +542,19 @@ async fn run_block(
                     }
                 }
                 return if valid {
-                    (None, "预演（将采纳）")
+                    // dry-run 的 registry 是内存 overlay：这里应用虚拟编辑，
+                    // 让后续块与 Compose 看到叠加后的终态；真实 registry 不写。
+                    match apply_change_set(registry, &change_set) {
+                        Ok(applied) => (
+                            Some(AcceptedBlock {
+                                edits: applied,
+                                reason,
+                                evidence: evidence_bindings,
+                            }),
+                            "预演（将采纳）",
+                        ),
+                        Err(_) => (None, "预演（将作废）"),
+                    }
                 } else {
                     (None, "预演（将作废）")
                 };

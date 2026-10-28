@@ -94,9 +94,10 @@ aemeath rsi run [--dry-run] [--max-sessions N] [--window-days N] [--json]
 
 `aemeath rsi run --dry-run` 执行**完整周期但不产生任何持久副作用**：
 
-- ✅ 执行：证据投影（按流模型取数）→ LLM 提案 → ChangeSet 校验（含整份作废预检）
-- ❌ 不执行：组件落盘、lesson 写入、checkpoint 推进——三者全部跳过（校验失败的作废同样只报告不落任何状态）
-- **预览输出**：每块的提案摘要（组件 id + 编辑类型 + reason + diff 概要）写入 stdout（`--json` 时输出结构化结果），并落 `~/.agents/harness/dry-run-preview.md` 供事后查看（预览文件 ALWAYS 覆盖写，NEVER 累积）
+- ✅ 执行：证据投影（按流模型取数）→ LLM 提案 → ChangeSet 校验（含整份作废预检）→ **虚拟采纳** → Compose 仲裁
+- **虚拟终态**：dry-run 使用内存 overlay registry。改进块与 Compose 的编辑只写入 overlay，后续块和 Compose 都能看到叠加后的虚拟终态；底层真实组件 registry NEVER 被写入
+- ❌ 不执行：组件落盘、lesson 写入、checkpoint 推进——三者全部跳过（校验失败的作废同样只报告不落任何状态；Compose 修正同样只预览不落盘）
+- **预览输出**：每块提案摘要与 Compose 仲裁摘要（组件 id + 编辑类型 + reason + diff 概要）写入 stdout（`--json` 时输出结构化结果），并落 `~/.agents/harness/dry-run-preview.md` 供事后查看（预览文件 ALWAYS 覆盖写，NEVER 累积）
 - **checkpoint 语义**：dry-run NEVER 推进游标——下次正式跑仍从原游标取同一批 session（这正是预演的意义：看到「这批证据会产出什么提案」再决定是否正式执行）
 - `rsi serve` 不提供 dry-run（定时自动跑无预览消费方）
 
@@ -110,6 +111,7 @@ TaskKind 插拔面保留（c8 plugin 等后续组件治理任务可注册），�
 
 - **daemon 生命周期**：常驻不自动退出、显式 stop、崩溃后重拉，主会话全程可用（L4 场景）。
 - **控制协议**：Trigger/Status/Stop 往返、Busy 排队路径。
+- **dry-run 全链路**：有虚拟采纳时 MUST 进入 Compose；Compose prompt 使用内存叠加终态与采纳前 lesson 快照；真实 registry write/delete、lesson append/retire、checkpoint 推进全部为 0（L2 + 真模型 e2e）。
 - **分块**：大材料分块处理、单块失败不影响其余块（L2）。
 - **真模型 e2e**：Timer 触发 → daemon 分块提案 → daemon 落盘 → 活跃会话下一 run 生效且收到 Remind 通知 → 经验库含证据记录；**无会话时离线改进路径同样验证**。mock 全绿不构成本项验收（既有教训）。
 - TUI：Manual 回执可见；Timer 周期静默（结果可查）。

@@ -37,3 +37,6 @@ mod task_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod versioning;
+pub mod virtual_registry;
+#[cfg(test)]
+mod virtual_registry_tests;

@@ -5,6 +5,7 @@ use crate::domain::errors::HarnessError;
 use crate::domain::improvement::{run_improvement_cycle, RsiLlmPort};
 use crate::domain::lesson::LessonStore;
 use crate::domain::task::{CycleOutcome, RsiTask};
+use crate::domain::virtual_registry::VirtualComponentRegistry;
 use async_trait::async_trait;
 use share::config::RsiConfig;
 use std::sync::Arc;
@@ -94,7 +95,18 @@ impl HarnessRsiCycleTask {
 #[async_trait]
 impl RsiTask for HarnessRsiCycleTask {
     async fn run_cycle(&mut self) -> Result<CycleOutcome, HarnessError> {
-        let registry = &mut **self.registry.lock().await;
+        let actual_registry: &mut dyn ComponentRegistry = &mut **self.registry.lock().await;
+        // dry-run 使用内存 overlay：块间能看见虚拟叠加终态，Compose 也基于
+        // 同一虚拟终态仲裁；底层真实 registry NEVER 被写入。
+        let mut virtual_registry = self
+            .dry_run
+            .then(|| VirtualComponentRegistry::new(actual_registry));
+        let registry: &mut dyn ComponentRegistry =
+            if let Some(virtual_overlay) = virtual_registry.as_mut() {
+                virtual_overlay
+            } else {
+                actual_registry
+            };
         // 数据源块驱动（#2049）：每块独立「证据 → 提案 → 采纳 → lesson」，
         // 块成功（周期 Ok——作废也是明确处理结论）才推进游标。
         let params = crate::domain::stream::StreamPlanParams {
@@ -347,7 +359,7 @@ impl RsiTask for HarnessRsiCycleTask {
             .await
             {
                 if self.dry_run {
-                    report_lines.push(format!("    Compose：{}", compose_outcome.summary));
+                    report_lines.push(format!("    {}", compose_outcome.summary));
                 }
                 summary_parts.push(compose_outcome.summary);
             }
