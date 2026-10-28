@@ -12,26 +12,62 @@ use crate::domain::evidence::{
     truncate_with_marker, EvidenceSourceRef, SessionContextExcerpt, SessionEventRecord,
 };
 
-/// 轻量提取 dataset 的 run id 清单（有序去重；只读 cursor，NEVER 全量解析成员体）。
+use serde::Deserialize;
+use std::io::BufReader;
+
+/// 只投影 cursor.run_id 的成员探针（未知字段由 serde 跳过）。
+#[derive(Deserialize)]
+struct MemberCursorProbe {
+    run_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MemberProbe {
+    cursor: Option<MemberCursorProbe>,
+}
+
+/// 提取 dataset 的 run id 清单（有序去重；cursor 投影逐成员流式读取，
+/// NEVER 物化完整成员 JSON）。
 pub fn dataset_run_ids(dataset_dir: &std::path::Path) -> Vec<String> {
     let mut run_ids: Vec<String> = Vec::new();
     let Ok(entries) = std::fs::read_dir(dataset_dir.join("members")) else {
         return run_ids;
     };
+    let members_dir = dataset_dir.join("members");
     for entry in entries.flatten() {
-        let Ok(raw) = std::fs::read_to_string(entry.path()) else {
+        let path = entry.path();
+        if !path.is_file() || !member_path_is_inside(&members_dir, &path) {
+            continue;
+        }
+        let Ok(file) = std::fs::File::open(&path) else {
             continue;
         };
-        let Ok(member) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        let Ok(member) = serde_json::from_reader::<_, MemberProbe>(BufReader::new(file)) else {
             continue;
         };
-        if let Some(run_id) = member.pointer("/cursor/run_id").and_then(|v| v.as_str()) {
-            if !run_ids.iter().any(|existing| existing == run_id) {
-                run_ids.push(run_id.to_string());
+        if let Some(run_id) = member
+            .cursor
+            .and_then(|cursor| cursor.run_id)
+            .filter(|run_id| !run_id.is_empty() && run_id != "unknown")
+        {
+            if !run_ids.iter().any(|existing| existing == &run_id) {
+                run_ids.push(run_id);
             }
         }
     }
     run_ids
+}
+
+/// members 内的普通文件才可作为输入；canonicalize 后必须仍在 members 目录内，
+/// 拒绝成员级 symlink 指向 dataset 外（防上下文/凭据注入）。
+fn member_path_is_inside(members_dir: &std::path::Path, path: &std::path::Path) -> bool {
+    let Ok(members_canonical) = members_dir.canonicalize() else {
+        return false;
+    };
+    let Ok(member_canonical) = path.canonicalize() else {
+        return false;
+    };
+    member_canonical.starts_with(&members_canonical)
 }
 
 /// 扫描单个 session dataset 目录，产出事件流（成员损坏跳过并计数）。
@@ -59,7 +95,7 @@ impl SessionDatasetScanner {
             .to_string();
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_file() {
+            if !path.is_file() || !member_path_is_inside(&dataset_dir.join("members"), &path) {
                 continue;
             }
             let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -230,7 +266,7 @@ impl SessionDatasetScanner {
         let mut steps: Vec<(u64, String, std::path::PathBuf)> = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_file() {
+            if !path.is_file() || !member_path_is_inside(&dataset_dir.join("members"), &path) {
                 continue;
             }
             let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -271,6 +307,10 @@ impl SessionDatasetScanner {
                 .unwrap_or_default();
             steps.push((revision, step_id.to_string(), path));
         }
+        // 同一 step 可能存在多 revision；先按 revision 降序去重保留最新副本，
+        // 再恢复时间序，避免来源窗口锚定旧版本。
+        steps.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+        steps.dedup_by(|left, right| left.1 == right.1);
         steps.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         let target_index = steps
             .iter()

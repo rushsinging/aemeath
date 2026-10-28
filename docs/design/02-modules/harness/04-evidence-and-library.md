@@ -32,11 +32,11 @@
 
 投影器只读 dataset（manifest 定位成员、按成员清单流式扫描），NEVER 依赖主进程内存态。
 
-**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。上下文读取 `step/accepted_input/messages` 与 `step/outcome/messages`，包含目标 step 与前后各一步：目标 step 800 字符、单邻居 200 字符、单来源总计 1200 字符，目标事实 MUST 保留；缺失来源显式标记不可用。生产读取 MUST 以 datasets root 为基准验证 session id 是单一 Normal `.dataset` 成员，且 canonicalize 后仍在 root 内（拒绝 `..`、绝对路径与 symlink 逃逸）。
+**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。上下文读取 `step/accepted_input/messages` 与 `step/outcome/messages`，包含目标 step 与前后各一步：目标 step 800 字符、单邻居 200 字符、单来源总计 1200 字符，目标事实 MUST 保留；缺失来源显式标记不可用。生产读取 MUST 以 datasets root 为基准验证 session id 是单一 Normal `.dataset` 成员，且 canonicalize 后仍在 root 内（拒绝 `..`、绝对路径与 dataset/成员级 symlink 逃逸）；同一 step 的多 revision 只保留最新副本。
 
 ### 2A.2 投影器（`SessionEvidenceProjector`，harness crate）
 
-- **输入**：sessions 根目录 + 证据流窗口（由 2A.5 流模型决定：checkpoint 游标 + 步长 + 首次 30 天窗口；投影器只处理本次周期分到的 session 段）。
+- **输入**：sessions 根目录 + 证据流窗口（由 2A.5 流模型决定：checkpoint 游标 + 步长 + 首次 30 天窗口；投影器只处理本次周期分到的 session 段）。run 清单使用只含 `cursor.run_id` 的 serde 探针逐成员读取，未知字段不物化。
 - **输出**：`EvidenceBundle`（分块进材料，见 2A.3），聚合而非全文——**NEVER 把 ToolResult 原文整段进材料**，每信号类最多携带 2 条有界摘录（对齐 memory 内容预览常量族），并附有界 `sources` 供 Compose 回读。
 
 聚合信号类（对齐 §2 信号集 + Harness² 三级优先）：

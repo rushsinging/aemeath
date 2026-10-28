@@ -283,6 +283,61 @@ fn read_step_context_under_root_rejects_path_escape() {
         SessionDatasetScanner::read_step_context_under_root(root.path(), &symlink_source).is_none(),
         "symlink 指向 root 外 MUST 拒绝"
     );
+
+    let only_link_members = root.path().join("only-link.dataset/members");
+    std::fs::create_dir_all(&only_link_members).unwrap();
+    std::os::unix::fs::symlink(
+        outside_dataset.join("members/m1.json"),
+        only_link_members.join("escape.json"),
+    )
+    .expect("member symlink");
+    let member_escape_source = EvidenceSourceRef {
+        session_id: "only-link.dataset".into(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    assert!(
+        SessionDatasetScanner::read_step_context_under_root(root.path(), &member_escape_source)
+            .is_none(),
+        "成员级 symlink 指向 root 外 MUST 拒绝"
+    );
+}
+
+/// 同一 step 的多 revision 只保留最新副本作为来源锚点。
+#[test]
+fn read_step_context_prefers_latest_revision_for_same_step() {
+    let root = tempfile::tempdir().unwrap();
+    let members = root.path().join("revisions.dataset/members");
+    std::fs::create_dir_all(&members).unwrap();
+    for (revision, text) in [(0, "旧版本事实"), (2, "新版本事实")] {
+        let member = serde_json::json!({
+            "cursor": {"run_id": "run-1", "step_id": "step-1"},
+            "step": {
+                "step_id": "step-1",
+                "outcome": {
+                    "committed_revision": revision,
+                    "messages": [
+                        {"role": "assistant", "content": [{"type": "text", "text": text}]}
+                    ]
+                }
+            }
+        });
+        std::fs::write(
+            members.join(format!("rev-{revision}.json")),
+            member.to_string(),
+        )
+        .unwrap();
+    }
+    let dataset = root.path().join("revisions.dataset");
+    let source = EvidenceSourceRef {
+        session_id: "revisions.dataset".into(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    let excerpt =
+        SessionDatasetScanner::read_step_context(&dataset, &source).expect("上下文必须可回读");
+    assert!(excerpt.text.contains("新版本事实"));
+    assert!(!excerpt.text.contains("旧版本事实"));
 }
 
 /// 缺 members 目录：空报告 NEVER 报错。
