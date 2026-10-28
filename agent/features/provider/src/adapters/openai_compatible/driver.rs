@@ -130,6 +130,12 @@ pub struct DeepSeekDriver;
 #[derive(Debug)]
 pub struct AgnesDriver;
 
+/// OpenCode Go 订阅通道（`opencode.ai/inference/go`）：多厂商模型混杂
+/// （deepseek / glm / kimi / qwen / minimax），服务端 effort 归并未知 →
+/// 恒等；网关只接受顶层 `reasoning_effort`（与 LiteLLM 同构）。
+#[derive(Debug)]
+pub struct OpencodeGoDriver;
+
 /// Kimi（platform.kimi.com / api.kimi.com）#2032 收口：用户曾以 openai
 /// driver 兜底，kimi-k3 的 effort 词汇与归并无处安放。
 #[derive(Debug)]
@@ -242,6 +248,24 @@ impl ChatApiDriver for LiteLlmDriver {
         // Extract effort and pass it as top-level `reasoning_effort` instead,
         // which LiteLLM forwards to the upstream OpenAI-compatible endpoint.
         if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
+            request_body["reasoning_effort"] = serde_json::Value::String(effort);
+        }
+    }
+}
+
+impl ChatApiDriver for OpencodeGoDriver {
+    fn reasoning_capability(&self) -> Vec<ReasoningLevel> {
+        effort_capability(ReasoningLevel::Max)
+    }
+
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        _reasoning_enabled: bool,
+    ) {
+        // OpenCode Go 是 OpenAI 兼容网关，只透传顶层 `reasoning_effort`。
+        if let Some(effort) = reasoning_config.and_then(|config| config.as_effort()) {
             request_body["reasoning_effort"] = serde_json::Value::String(effort);
         }
     }
@@ -488,6 +512,7 @@ pub(crate) fn driver_for_provider_driver(
         ProviderDriverKind::DeepSeek => Box::new(DeepSeekDriver),
         ProviderDriverKind::Kimi => Box::new(KimiDriver),
         ProviderDriverKind::Agnes => Box::new(AgnesDriver),
+        ProviderDriverKind::OpencodeGo => Box::new(OpencodeGoDriver),
         // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容驱动；兜底走 OpenAI 驱动。
         ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama => Box::new(OpenAiDriver),
     }

@@ -20,6 +20,7 @@ pub fn driver_api_key_env_name(driver: &str) -> Option<&'static str> {
         "deepseek" => Some("DEEPSEEK_API_KEY"),
         "agnes" => Some("AGNES_API_KEY"),
         "ollama" => Some("OLLAMA_API_KEY"),
+        "opencode-go" => Some("OPENCODE_GO_API_KEY"),
         // Zhipu and LiteLLM don't have driver-specific env vars
         "zhipu" | "litellm" => None,
         _ => None,

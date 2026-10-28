@@ -128,6 +128,14 @@ impl OpenAICompatibleProvider {
             HeaderValue::from_str(&self.user_agent)
                 .map_err(|e| crate::LlmError::Config(e.to_string()))?,
         );
+
+        if matches!(self.config.driver, crate::ProviderDriverKind::OpencodeGo) {
+            // OpenCode Go 强制要求会话头，缺失时上游 400 MissingSessionID。
+            headers.insert(
+                super::constants::SESSION_HEADER,
+                HeaderValue::from_static(super::constants::SESSION_ID),
+            );
+        }
         Ok(headers)
     }
 

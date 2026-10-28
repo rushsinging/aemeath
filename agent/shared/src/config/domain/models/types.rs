@@ -49,7 +49,10 @@ pub struct ProviderModelsConfig {
     #[serde(default, rename = "apiKey")]
     pub api_key: String,
 
-    /// Provider driver: "openai", "anthropic", "zhipu", "litellm", "volcengine", "minimax", "mimo", "deepseek", "agnes", or "ollama".
+    /// Provider driver: "openai", "anthropic", "zhipu", "litellm", "volcengine",
+    /// "minimax", "mimo", "deepseek", "kimi", "agnes", "ollama", 或
+    /// "opencode-go"（OpenCode Go 订阅通道：内置 `/go` 端点约定与
+    /// `x-opencode-session` 头）。
     #[serde(default)]
     pub driver: String,
 

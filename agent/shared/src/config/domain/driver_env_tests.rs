@@ -27,6 +27,10 @@ fn test_known_drivers() {
     );
     assert_eq!(driver_api_key_env_name("agnes"), Some("AGNES_API_KEY"));
     assert_eq!(driver_api_key_env_name("ollama"), Some("OLLAMA_API_KEY"));
+    assert_eq!(
+        driver_api_key_env_name("opencode-go"),
+        Some("OPENCODE_GO_API_KEY")
+    );
 }
 
 #[test]

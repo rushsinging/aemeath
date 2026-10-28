@@ -190,3 +190,21 @@ fn runtime_resolution_falls_back_to_global_default_user_agent() {
 
     assert_eq!(resolved.user_agent, "Aemeath/0.1.0 cli linux/6.1.0/x86_64");
 }
+
+#[test]
+fn opencode_go_driver_resolves_with_explicit_go_endpoint_and_global_user_agent() {
+    // OpenCode Go 是自定义 source：Catalog 无条目 → 不继承任何官方 SDK UA，
+    // 端点由用户显式填写（含 /go 段），driver 身份保留 "opencode-go"。
+    let snapshot = snapshot(
+        "OpenCode",
+        "opencode-go",
+        "https://opencode.ai/inference/go/openai/v1",
+        None,
+    );
+    let resolved = resolve(&snapshot, "OpenCode", "opencode-go", None);
+    assert_eq!(
+        resolved.base_url.as_deref(),
+        Some("https://opencode.ai/inference/go/openai/v1")
+    );
+    assert_eq!(resolved.user_agent, "global/1.0");
+}

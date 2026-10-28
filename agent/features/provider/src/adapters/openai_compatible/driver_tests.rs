@@ -1,4 +1,6 @@
+use super::super::OpenAICompatibleProvider;
 use super::*;
+use crate::adapters::client::OpenAIProviderConfig;
 
 #[test]
 fn every_openai_compatible_driver_derives_maximum_from_capability() {
@@ -12,6 +14,7 @@ fn every_openai_compatible_driver_derives_maximum_from_capability() {
         (ProviderDriverKind::DeepSeek, ReasoningLevel::Max),
         (ProviderDriverKind::Kimi, ReasoningLevel::Max),
         (ProviderDriverKind::Agnes, ReasoningLevel::Medium),
+        (ProviderDriverKind::OpencodeGo, ReasoningLevel::Max),
     ] {
         let driver = driver_for_provider_driver(kind);
         let capability = driver.reasoning_capability();
@@ -286,5 +289,49 @@ fn kimi_driver_server_effective_effort_merges_k3_vocabulary() {
     assert_eq!(
         driver.server_effective_effort("kimi-k2.7-code", ReasoningLevel::High),
         ReasoningLevel::High
+    );
+}
+
+#[test]
+fn opencode_go_driver_uses_openai_compatible_chat_suffix() {
+    let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpencodeGo, "OpenCode");
+    assert_eq!(
+        config.chat_api_suffix, "/chat/completions",
+        "OpenCode Go 的 baseUrl 自带 /v1，suffix 只拼 /chat/completions"
+    );
+    assert!(!config.use_responses_api);
+}
+
+#[test]
+fn opencode_go_headers_carry_session_id_and_other_drivers_do_not() {
+    use reqwest::header::HeaderName;
+
+    fn headers_for(kind: ProviderDriverKind) -> reqwest::header::HeaderMap {
+        let provider = OpenAICompatibleProvider::new_with_user_agent(
+            OpenAIProviderConfig::from_driver(kind, "OpenCode"),
+            "test-key".to_string(),
+            Some("https://opencode.ai/inference/go/openai/v1".to_string()),
+            Some("deepseek-v4.1-flash".to_string()),
+            20000,
+            true,
+            None,
+            300,
+            "aemeath-test".to_string(),
+        );
+        provider.build_headers().expect("headers")
+    }
+
+    let session = HeaderName::from_static("x-opencode-session");
+    let go = headers_for(ProviderDriverKind::OpencodeGo);
+    assert_eq!(
+        go.get(&session).map(|value| value.to_str().unwrap()),
+        Some(super::super::SESSION_ID),
+        "OpenCode Go 请求 MUST 带 x-opencode-session（缺失会 400 MissingSessionID）"
+    );
+
+    let openai = headers_for(ProviderDriverKind::OpenAI);
+    assert!(
+        openai.get(&session).is_none(),
+        "其它 driver 不得注入 OpenCode 专属头"
     );
 }
