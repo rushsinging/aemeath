@@ -178,6 +178,134 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
     );
 }
 
+/// 端到端 dry-run 用例：两个证据块采纳同一场景的相反规则，Compose 必须
+/// 产出仲裁修正并进入最终预览；这证明 dry-run 不止“调用了 Compose”，
+/// 而是真的能走到「冲突 → 修正 → 预览」的终点。
+#[tokio::test]
+async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
+    let guardrails = ComponentId {
+        kind: ComponentKind::Guardrails,
+        name: ComponentName::new("default"),
+    };
+    let tool_guidance = ComponentId {
+        kind: ComponentKind::ToolGuidance,
+        name: ComponentName::new("default"),
+    };
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> =
+        Box::new(FakeRegistry::with_entries(vec![
+            (
+                guardrails.clone(),
+                body_content("# Guardrails\n\n- 保持稳定。"),
+            ),
+            (
+                tool_guidance.clone(),
+                body_content("# Tool Guidance\n\n- 保持稳定。"),
+            ),
+        ]));
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+
+    let stream = FakeEvidenceStream::default();
+    for run_id in ["run-1", "run-2"] {
+        stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
+            runs: vec![RunRef {
+                session_key: "s1.dataset".into(),
+                run_id: run_id.into(),
+            }],
+        });
+    }
+    let source = EvidenceSourceRef {
+        session_id: "s1.dataset".into(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    *stream.evidence.lock().expect("evidence") = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RepeatedFailure,
+            signal_id: "repeated_failure:Bash:unchanged-retry".into(),
+            summary: "Bash 同参数失败后重复调用 ×2".into(),
+            excerpt: Some("exit code 1: unchanged retry".into()),
+            occurrences: 2,
+            sources: vec![source.clone()],
+        }],
+    };
+    stream
+        .contexts
+        .lock()
+        .expect("contexts")
+        .push(SessionContextExcerpt {
+            source,
+            text: "两个 run 都在 Bash 失败后未修改命令即重试".into(),
+        });
+
+    let conflict_rule = "Bash 失败后必须立即原样重试一次。";
+    let opposite_rule = "Bash 失败后禁止原样重试；必须先修改命令或代码。";
+    let resolved_rule = "Bash 失败后禁止原样重试；先读取 stderr，修正命令或代码后再执行。";
+    let llm = PromptRecordingLlm::new(vec![
+        format!(
+            r#"{{"decision":"propose","reason":"第一块证据要求失败后重试","signal_ids":["repeated_failure:Bash:unchanged-retry"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"guardrails","name":"default"}},"content":{{"frontmatter":null,"body":"Guardrails {conflict_rule}"}}}}]}}}}"#
+        ),
+        format!(
+            r#"{{"decision":"propose","reason":"第二块证据要求禁止机械重试","signal_ids":["repeated_failure:Bash:unchanged-retry"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"default"}},"content":{{"frontmatter":null,"body":"Tool Guidance {opposite_rule}"}}}}]}}}}"#
+        ),
+        format!(
+            r#"{{"decision":"propose","reason":"两条采纳在相同 Bash 失败场景下给出相反指令，保留证据支持的禁止重试规则","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"guardrails","name":"default"}},"content":{{"frontmatter":null,"body":"Guardrails {resolved_rule}"}}}}]}}}}"#
+        ),
+    ]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry,
+        llm.clone(),
+        lesson_store,
+        RsiConfig {
+            chunk_max_components: 4,
+            ..RsiConfig::default()
+        },
+    )
+    .with_dry_run()
+    .with_evidence_stream(Box::new(stream));
+    let outcome = task.run_cycle().await.expect("dry-run cycle");
+
+    assert!(
+        outcome
+            .summary
+            .contains("（dry-run）Compose：仲裁修正（将采纳）"),
+        "Compose 必须走到修正终态：{}",
+        outcome.summary
+    );
+    assert!(
+        outcome
+            .summary
+            .contains("[dry-run][Compose] upsert guardrails/default"),
+        "最终预览必须包含 Compose 修正：{}",
+        outcome.summary
+    );
+    assert!(
+        outcome.summary.contains(resolved_rule),
+        "最终预览必须保留修正后的规则：{}",
+        outcome.summary
+    );
+    let compose_marker = outcome
+        .summary
+        .find("[dry-run][Compose]")
+        .expect("Compose 预览标记");
+    let resolved_position = outcome.summary.find(resolved_rule).expect("修正规则");
+    assert!(
+        compose_marker < resolved_position,
+        "修正规则必须出现在 Compose 预览之后：{}",
+        outcome.summary
+    );
+
+    let prompts = llm.prompts.lock().expect("prompts").clone();
+    assert_eq!(prompts.len(), 3, "两块提案 + Compose");
+    let compose_prompt = &prompts[2];
+    assert!(
+        compose_prompt.contains(conflict_rule) && compose_prompt.contains(opposite_rule),
+        "Compose 必须同时看到两条虚拟采纳后的冲突终态：{compose_prompt}"
+    );
+}
+
 /// 完整周期：Compose 必须使用采纳前 Active lesson 快照，避免历史经验
 /// 被本周期 Block 退役，也避免当前 proposal 与自身派生 lesson 配对。
 #[tokio::test]
