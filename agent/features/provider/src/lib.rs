@@ -56,8 +56,6 @@ pub mod composition {
     pub use crate::adapters::client::{wire_provider_client, LlmClient, ProviderClientSpecData};
     pub use crate::adapters::pool::TransportPool;
     pub use crate::adapters::probe::wire_test_provider_client;
-    #[cfg(any(test, feature = "dev"))]
-    pub use crate::adapters::text_invoke::{unsupported_llm_invoke_port, UnsupportedLlmInvokePort};
 }
 
 #[derive(Debug, thiserror::Error)]

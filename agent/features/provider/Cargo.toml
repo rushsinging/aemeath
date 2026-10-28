@@ -4,11 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 
-[features]
-# 测试辅助面（占位 LlmTextInvokePort 等）。Consumers must add `provider` to
-# `[dev-dependencies]` with `features = ["dev"]`. Never enabled in production.
-dev = []
-
 [dependencies]
 share = { path = "../../shared" }
 logging = { path = "../../../packages/global/logging" }

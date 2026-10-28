@@ -1797,8 +1797,6 @@
         "ResponseStopReason",
         "TokenUsageData",
         "TransportPool",
-        "UnsupportedLlmInvokePort",
-        "unsupported_llm_invoke_port",
         "wire_provider_client",
         "wire_test_provider_client"
       ],
