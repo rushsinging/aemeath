@@ -127,16 +127,18 @@ eval/compact/
 | estimated_tokens | 479560 | 2296755 | 2296755 |
 | must_keep（上限 200） | 200 | 200 | 200 |
 
-### 多模型矩阵（首跑，1 case，#2148 修复前）
+### 多模型矩阵（1 case，#2148 修复后）
 
 | 模型 | quality | 耗时 | summary | must_keep 召回 |
 |---|---|---|---|---|
 | Bailian/deepseek-v4.1-flash | Llm | 223.8s | 12941 chars | 0.078 |
-| Zhipu/glm-5.3-flash | **PartialMapFallback ×5** | 1.5s（假完成） | 59670 chars（本地降级） | 0.349（虚高） |
+| Zhipu/glm-5.3-flash | Llm | 72.4s | 10918 chars | 0.102 |
 
-矩阵首跑即暴露 #2148（server_effort_map 抬升 Off 与 InvocationScope 校验冲突：
-Zhipu 系 compact LLM 调用必失败）。**degraded 行的召回不可比**——本地降级拼接
-保留更多原文，召回虚高，矩阵按 degraded 标记排除解读。
+矩阵首跑曾暴露 #2148（server_effort_map 抬升 Off 与 InvocationScope
+「effective≤requested」校验冲突：Zhipu 系 compact LLM 调用必失败、五块全降级、
+1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
+PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**，
+矩阵按 degraded 标记排除解读。
 
 ### 摘要质量（199 个 session，13 个有压缩；已落盘摘要）
 

@@ -28,12 +28,9 @@ impl InvocationScopeData {
                 "invocation max_tokens must be greater than zero".to_string(),
             ));
         }
-        if effective_reasoning > requested_reasoning {
-            return Err(crate::ProviderError::fatal(
-                crate::ProviderErrorKind::Configuration,
-                "effective reasoning must not exceed requested reasoning".to_string(),
-            ));
-        }
+        // #2148：server_effort_map 是服务端归并权威（#2032），允许把 Off 归并为
+        // 更高档（如 Zhipu off→low）；effective 高于 requested 是合法形态，
+        // 不再视为配置错误。model 非空与 max_tokens>0 校验保留。
         Ok(Self {
             model,
             max_tokens,
@@ -91,13 +88,15 @@ mod invocation_scope_tests {
     }
 
     #[test]
-    fn invocation_scope_rejects_effective_reasoning_above_requested() {
+    fn invocation_scope_allows_effective_reasoning_above_requested() {
+        // #2148：server_effort_map 是服务端归并权威（#2032），可把请求档位
+        // 归并为更高档（如 Zhipu off→low）；effective 高于 requested 合法。
         assert!(InvocationScopeData::new(
             "claude-sonnet",
             4096,
             ReasoningLevel::Low,
             ReasoningLevel::High,
         )
-        .is_err());
+        .is_ok());
     }
 }

@@ -439,3 +439,26 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
         "expected Cancelled when the external signal fires during establishment"
     );
 }
+
+#[test]
+fn invocation_scope_allows_server_effort_promotion_beyond_requested() {
+    // #2148：server_effort_map 是服务端归并权威（#2032），把 Off 归并为
+    // 更高档（Zhipu off→low）是合法形态，MUST 不再报配置错误。
+    let scope = crate::domain::invoke::InvocationScopeData::new(
+        "fake-model",
+        4096,
+        ReasoningLevel::Off,
+        ReasoningLevel::Low,
+    )
+    .expect("promoted effective must be accepted");
+    assert_eq!(scope.effective_reasoning(), ReasoningLevel::Low);
+
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "fake-model",
+        4096,
+        ReasoningLevel::Off,
+        ReasoningLevel::Low,
+    )
+    .expect("promoted effective must be accepted (ports)");
+    let _ = &resolved;
+}
