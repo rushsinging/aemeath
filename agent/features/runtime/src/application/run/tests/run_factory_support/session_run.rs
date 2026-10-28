@@ -366,6 +366,7 @@ impl SessionRunFixtureBuilder {
                 self.scoring_for_skill_match.clone(),
                 None,
                 None,
+                None,
             ))
         });
         SessionRunFixture {

@@ -521,7 +521,8 @@ where
                                 continue;
                             }
                         };
-                        let session_id = crate::ports::SessionId::new(bound.session().id.clone());
+                        let session_text = bound.session().id.clone();
+                        let session_id = crate::ports::SessionId::new(session_text.clone());
                         let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context().clone());
                         match coordinator.clear_session(&session_id).await {
                             Ok(()) => {
@@ -529,6 +530,34 @@ where
                                 // Run 计数器（Reflection interval 频控）绑定
                                 // session epoch：/clear 即新 epoch，从 0 重数。
                                 run_count = 0;
+                                // #2089：Workflow 只清 Session 可见性（索引 +
+                                // 内存表），实体保留待统一清理回收。失败不阻断
+                                // 会话 reset，但必须如实回报，避免 Workflow 残留
+                                // 被误认为「仍然可见」。
+                                if let Some(reset) = shell
+                                    .runtime_context_factory
+                                    .services()
+                                    .workflow_reset
+                                    .clone()
+                                {
+                                    if let Err(error) = reset.reset_session(session_text.as_str()) {
+                                        log::warn!(
+                                            target: crate::LOG_TARGET,
+                                            "workflow_session_reset_failed session_id={} error={error}",
+                                            session_text,
+                                        );
+                                        sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Workflow 索引清理失败（实体仍保留）：{error}"),
+                                            is_error: true,
+                                        }).await;
+                                    } else {
+                                        log::debug!(
+                                            target: crate::LOG_TARGET,
+                                            "workflow_session_reset session_id={}",
+                                            session_text,
+                                        );
+                                    }
+                                }
                                 sink.send_event(RuntimeStreamEvent::SessionReset).await;
                             }
                             Err(error) => {

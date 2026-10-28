@@ -1620,6 +1620,7 @@ async fn manual_reflection_empty_increment_still_reviews_existing_memory() {
         services.scoring_for_skill_match,
         services.policy_triage,
         None,
+        None,
     ));
     shell.set_test_session_id("test-reflect-existing-memory-without-new-dialog");
     let context = test_session_driver_input(sink.clone(), input_events, shell);
