@@ -45,7 +45,7 @@ pub struct AdoptionRecord {
 
 /// RSI 任务接口：一个完整改进周期（分块在实现内部组织）。
 #[async_trait]
-pub trait RsiTask: Send {
+pub trait RsiTask: crate::sealed::Sealed + Send {
     /// 执行一轮改进周期。实现 MUST 可中断友好（周期内不阻塞控制面应答）。
     async fn run_cycle(&mut self) -> Result<CycleOutcome, HarnessError>;
 }

@@ -127,6 +127,14 @@
 //! }
 //! ```
 
+/// 实现密封基建（#2146 实现权治理）：crate 内共享一个 Sealed 标记。
+/// `pub(crate)` 模块 + `pub` trait——crate 外不可命名（路径不可达），
+/// 因此「实现权」编译期归属本 crate；seal 的 PL trait 绑定
+/// `crate::sealed::Sealed` 作为超 trait。
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
 mod constants;
 pub(crate) use constants::LOG_TARGET;
 

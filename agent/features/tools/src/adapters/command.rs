@@ -187,3 +187,6 @@ fn control_target(target: CommandTarget) -> Option<ApplicationControlTarget> {
         CommandTarget::Provider | CommandTarget::Audit => return None,
     })
 }
+
+// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
+impl crate::sealed::Sealed for CommandAdapter {}

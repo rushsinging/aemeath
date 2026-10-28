@@ -223,3 +223,6 @@ pub fn validate_component_file_shape(path: &Path) -> Result<(), HarnessError> {
     let content = FilesystemComponentRegistry::parse_content(&text)?;
     FilesystemComponentRegistry::validate_content_shape(&content)
 }
+
+// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
+impl crate::sealed::Sealed for FilesystemComponentRegistry {}
