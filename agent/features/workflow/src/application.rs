@@ -13,6 +13,9 @@ mod advance_tests;
 #[cfg(test)]
 mod backend_tests;
 
+#[cfg(test)]
+mod replan_tests;
+
 pub use aggregate::WorkflowAggregate;
 pub use backend::InMemoryWorkflowBackend;
 pub use store::InMemoryWorkflowStore;
