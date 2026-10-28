@@ -134,10 +134,15 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
         let (client, model) =
             provider::composition::wire_provider_client(config, model, self.pool.as_ref())?;
 
-        let port = provider_port(client, model.clone());
+        // #2142 双句柄：同一 `Arc<LlmClient>` 同时交出 ProviderPort（会话对话）
+        // 与 LlmTextInvokePort（compact 等按模型文本调用）——invoker 与 model
+        // 恒同源 wire，跨 driver 的 compact_model 配置天然 transport 匹配。
+        let port = provider_port(Arc::clone(&client), model.clone());
+        let text_invoker: Arc<dyn provider::composition::LlmTextInvokePort> = client;
 
         Ok(ProviderBindingData {
             provider: port,
+            text_invoker,
             model,
             max_tokens: spec.max_tokens,
             // #1861 v4：binding 档位从 spec 直取（原 wiring.requested_reasoning

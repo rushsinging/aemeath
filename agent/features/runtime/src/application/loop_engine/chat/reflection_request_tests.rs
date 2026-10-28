@@ -46,6 +46,7 @@ impl ProviderPort for RequestParameterRecorder {
 fn recording_binding(recorder: Arc<RequestParameterRecorder>) -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
         provider: recorder,
+        text_invoker: provider::composition::unsupported_text_invoker(),
         model: provider::ModelInfo {
             provider: "reflection-parameter-test".to_string(),
             model: "reflection-parameter-model".to_string(),

@@ -90,3 +90,31 @@ fn stop_reason_label(reason: &crate::published_language::ResponseStopReason) -> 
         ResponseStopReason::Other(other) => format!("other:{other}"),
     }
 }
+
+/// 占位 text invoker（#2142）：恒返回 `ModelUnavailable`，供装配层测试 fake
+/// 填充 `ProviderBindingData.text_invoker` 字段——不参与文本调用的测试
+/// 路径零成本。
+#[cfg(any(test, feature = "dev"))]
+pub struct UnsupportedTextInvoker;
+
+#[cfg(any(test, feature = "dev"))]
+#[async_trait]
+impl LlmTextInvokePort for UnsupportedTextInvoker {
+    async fn invoke_text(
+        &self,
+        _model: &ModelInfo,
+        _request: &ProviderRequestData,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<LlmTextOutputData, crate::ProviderError> {
+        Err(crate::ProviderError::fatal(
+            crate::ProviderErrorKind::ModelUnavailable,
+            "占位 text invoker（测试 fake）：本 binding 未装配真实 LLM 文本调用句柄",
+        ))
+    }
+}
+
+/// 测试 fake 快捷构造：`text_invoker: provider::composition::unsupported_text_invoker()`。
+#[cfg(any(test, feature = "dev"))]
+pub fn unsupported_text_invoker() -> std::sync::Arc<dyn LlmTextInvokePort> {
+    std::sync::Arc::new(UnsupportedTextInvoker)
+}

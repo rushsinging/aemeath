@@ -52,6 +52,11 @@ pub struct ProviderBuildSpecData {
 pub struct ProviderBindingData {
     /// The built provider port.
     pub provider: Arc<dyn ProviderPort>,
+    /// LLM 文本调用句柄（#2142）：与 `provider` 同源 wire（同一 `LlmClient`），
+    /// 供 compact 等按模型消费方经 `LlmTextInvokePort` 直接调用——
+    /// invoker 与 `model` 恒同 transport，跨 driver 的 `context.compact_model`
+    /// 配置天然匹配。
+    pub text_invoker: Arc<dyn provider::composition::LlmTextInvokePort>,
     /// 该 binding 绑定模型的完整元数据（身份 + 能力——config/catalog 投影）。
     pub model: ModelInfo,
     /// Maximum output tokens for invocations through this binding.

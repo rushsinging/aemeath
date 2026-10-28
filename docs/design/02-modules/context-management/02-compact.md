@@ -525,14 +525,14 @@ prompt、memory 和 tool schemas。选择单位是完整 finalized RunStep：
 | `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Run/Invocation binding |
 | `reserved_context` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
 | threshold safety ratio | 0.8 | `token_budget::autocompact_threshold` |
-| compact 模型窗口 | `context.compact_model` 解析结果或当前会话模型 | Runtime `CompactModelResolver`（经 `CompactGenerator::compact_context_window`） |
+| compact 模型窗口 | `context.compact_model` 解析结果或当前会话模型 | Runtime `CompactModelResolver::to_llm_binding` → `CompactLlmBinding.compact_context_window`（#2142） |
 
 Compact 涉及两个语义不同的窗口，**MUST** 分开计算：
 
 | 窗口 | 来源 | 决定的预算 |
 |---|---|---|
 | 注入窗口 | 本 Run 已解析的 `context_size`（summary 注入的主对话模型） | 持久化 summary 上限 `summary_budget` |
-| compact 模型窗口 | `CompactGenerator::compact_context_window()` | Map 单块目标与 previous checkpoint 嵌入预算 |
+| compact 模型窗口 | `CompactLlmBinding.compact_context_window`（Runtime 按轮注入） | Map 单块目标与 previous checkpoint 嵌入预算 |
 
 - 未配置 `context.compact_model`（缺省或空串）时两窗口相同：compact 使用当前会话模型，`/model` 切换在**下一次** compact 生效。
 - 配置后 compact 模型窗口 **MUST** 只收紧 Map 分块与 previous checkpoint 嵌入量，**NEVER** 缩小持久化 summary 预算——summary 的消费方始终是主对话模型。

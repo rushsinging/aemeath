@@ -25,6 +25,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
         scoring_for_recall: None,
         scoring_for_skill_match: None,
         policy_triage: None,
+        compact_model_resolver: None,
         tool_catalog: tool_ports.catalog_port(),
         tool_execution: tool_ports.execution(),
         policy: policy::allow_all(),

@@ -279,6 +279,9 @@ pub(crate) async fn from_args_with_gateways(
         .build(provider_spec)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let compact_model_slot = runtime::SessionModelSlotData::new();
+    // #2142：同一 slot 的共享句柄留给 compact resolver——未配置
+    // `context.compact_model` 时 compact 跟随会话模型（`/model` 切换可见）。
+    let compact_model_slot_for_resolver = compact_model_slot.clone();
     let initial_provider = runtime::InitialProviderAssemblyData::new(
         initial_binding,
         resolved_model,
@@ -384,21 +387,30 @@ pub(crate) async fn from_args_with_gateways(
 
     // 构造一次基础 RuntimeContextFactory，并将同一 Arc 注入 Main bootstrap
     // 与 Derived Agent Runner；Derived 仅追加受限 binding，不重建基础服务。
-    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
-        tool_assembly.catalog.clone(),
-        tool_assembly.execution.clone(),
-        gateways.policy.clone(),
-        reflection_history.clone(),
-        task_wiring.access(),
-        hook_runner.clone(),
-        usage_sink,
-        scoring_ports.for_memory_recall.clone(),
-        scoring_ports.for_skill_match.clone(),
-        scoring_ports
-            .for_policy_triage
-            .clone()
-            .map(|scoring| std::sync::Arc::new(runtime::PolicyTriage::new(scoring))),
-    ));
+    let runtime_context_factory = Arc::new(
+        runtime::RuntimeContextFactory::new(
+            tool_assembly.catalog.clone(),
+            tool_assembly.execution.clone(),
+            gateways.policy.clone(),
+            reflection_history.clone(),
+            task_wiring.access(),
+            hook_runner.clone(),
+            usage_sink,
+            scoring_ports.for_memory_recall.clone(),
+            scoring_ports.for_skill_match.clone(),
+            scoring_ports
+                .for_policy_triage
+                .clone()
+                .map(|scoring| std::sync::Arc::new(runtime::PolicyTriage::new(scoring))),
+        )
+        // #2142：装配 compact 模型解析器——主 Run 的 manual/自动压缩经它按轮
+        // 解析 LLM 绑定（未配置跟随会话模型；解析失败回退本地压缩并 warn）。
+        .with_compact_resolver(std::sync::Arc::new(runtime::CompactModelResolver::new(
+            wiring.gate_aware_config_reader(),
+            gateways.provider.clone(),
+            compact_model_slot_for_resolver,
+        ))),
+    );
     context::guidance::init_guidance_dir();
     let cwd = args
         .cwd

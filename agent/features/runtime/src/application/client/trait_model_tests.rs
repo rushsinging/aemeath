@@ -130,6 +130,7 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
             let port: Arc<dyn ProviderPortTrait> = Arc::new(TestPort);
             Ok(crate::ports::ProviderBindingData {
                 provider: port,
+                text_invoker: provider::composition::unsupported_text_invoker(),
                 model,
                 max_tokens: spec.max_tokens,
                 requested_reasoning: spec.requested_reasoning,

@@ -142,6 +142,42 @@ fn factory_build_valid_spec_returns_binding() {
 }
 
 #[test]
+fn factory_build_returns_text_invoker_sharing_the_wired_client() {
+    // #2142 双句柄契约：一次 build 同时交出 ProviderPort（会话对话）与
+    // LlmTextInvokePort（compact 等按模型文本调用），两者来自同一次
+    // wire_provider_client——invoker 与 model 恒同源，跨 driver 的
+    // compact_model 配置天然 transport 匹配。
+    let factory = super::provider_factory();
+    let binding = factory
+        .build(valid_spec())
+        .expect("valid spec should build");
+
+    // 占位实现返回 ModelUnavailable；真实 LlmClient 走网络（无 endpoint
+    // 响应时返回上游类错误）。断言「不是占位」：调用不返回 ModelUnavailable。
+    let request = ProviderRequestData::new(
+        binding.model.model.clone(),
+        Vec::new(),
+        1,
+        ReasoningLevel::Off,
+    );
+    let result =
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(binding.text_invoker.invoke_text(
+                &binding.model,
+                &request,
+                &CancellationToken::new(),
+            ));
+    assert!(
+        !matches!(
+            result,
+            Err(ref error) if error.kind == ProviderErrorKind::ModelUnavailable
+        ),
+        "build 必须产出真实 LlmClient 句柄而非占位 invoker"
+    );
+}
+
+#[test]
 fn factory_build_missing_endpoint_fails_closed() {
     let factory = super::provider_factory();
     let mut spec = valid_spec();

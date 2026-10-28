@@ -64,6 +64,7 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
 pub(crate) fn static_reflection_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(StaticReflectionProvider),
+        text_invoker: provider::composition::unsupported_text_invoker(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "reflection-test-model".to_string(),

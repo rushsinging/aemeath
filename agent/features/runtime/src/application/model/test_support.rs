@@ -261,6 +261,7 @@ pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBi
     let port = Arc::new(TestProviderPort::new(responses, model.clone()));
     Arc::new(crate::ports::ProviderBindingData {
         provider: port,
+        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
@@ -273,6 +274,7 @@ pub(crate) fn test_binding_from_port(
     let model = port.model.clone();
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(port),
+        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
@@ -383,6 +385,7 @@ pub(crate) fn binding_from_llm_provider(
     };
     std::sync::Arc::new(crate::ports::ProviderBindingData {
         provider: std::sync::Arc::new(ScriptedProviderPortAdapter::new(provider)),
+        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,

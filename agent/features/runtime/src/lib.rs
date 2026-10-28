@@ -5,7 +5,7 @@
 //! | 组 | 实体 |
 //! |---|---|
 //! | 工厂 | `wire_agent_runner`、`wire_agent_client_from_args`（原 build_agent_runner/from_args_with_workspace 更名）、`wire_active_run_registry` |
-//! | 角色和职能 | `ProviderPort`/`ProviderFactory`（runtime 自有 trait，provider crate 实现载荷转发）、`UsageSink`/`UnavailableUsageSink`（audit 降级路径）、`RuntimeContextFactory`（#1248 窄构造入口）、`ToolResultMaterializer`、`ActiveRunRegistry`、`AtomicBlobToolResultStore`、`AgentClientImpl`、`CompactModelResolver`、`ProviderCompactGenerator`、`ReflectionTaskAdapter`、`ParentRunContextSource` |
+//! | 角色和职能 | `ProviderPort`/`ProviderFactory`（runtime 自有 trait，provider crate 实现载荷转发）、`UsageSink`/`UnavailableUsageSink`（audit 降级路径）、`RuntimeContextFactory`（#1248 窄构造入口）、`ToolResultMaterializer`、`ActiveRunRegistry`、`AtomicBlobToolResultStore`、`AgentClientImpl`、`CompactModelResolver`（含 #2142 `to_llm_binding` 投影——compact LLM 绑定唯一投影点）、`ReflectionTaskAdapter`、`ParentRunContextSource` |
 //! | 数据和生命周期 | 14 个 Data：ProviderBindingData/ProviderBuildSpecData（provider 装配）、ModelRuntimeSettingsData/PromptContextData、装配族 8（RuntimeBootstrapDependenciesData 已组合化：core+tool_assembly+agent_runner 嵌套，消除三层平铺）、ToolResultMaterializationPolicyData、reflection 数据 5 |
 //! | Error | 出口统一 `sdk::SdkError`（架构既定）；10 个内部错误全 crate 内——**不折叠不 Data 化** |
 //!
@@ -46,7 +46,6 @@ pub use application::client::{
     wire_session_switch_coordinator, BoundMainRun, OwnedSessionSharedPermit,
     SessionSwitchCoordinator, SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
 };
-pub use application::compact_generator::CompactLlmBindingFactory;
 // #1248: RuntimeContextFactory is the narrow crate-root construction entry.
 // RuntimeServices stays internal; callers construct via RuntimeContextFactory::new(…).
 pub use application::prompt::build::git_context::is_git_repo as workspace_is_git;
@@ -79,7 +78,6 @@ mod boundary_tests {
             "activity",
             "background_process",
             "client",
-            "compact_generator",
             "constants",
             "context",
             "hook",

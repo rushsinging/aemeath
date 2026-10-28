@@ -26,6 +26,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
         }
         Ok(runtime::ProviderBindingData {
             provider: Arc::new(UnusedPort),
+            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

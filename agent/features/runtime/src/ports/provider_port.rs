@@ -150,6 +150,7 @@ pub(crate) mod fake {
         ) -> Result<crate::ports::ProviderBindingData, ProviderError> {
             Ok(crate::ports::ProviderBindingData {
                 provider: Arc::new(FakeProvider::new()),
+                text_invoker: provider::composition::unsupported_text_invoker(),
                 model: crate::ports::ModelInfo {
                     provider: spec.source_key.clone(),
                     model: spec.model.clone(),

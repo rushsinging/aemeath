@@ -76,6 +76,7 @@ impl ProviderPort for FakeProviderPort {
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
         provider: Arc::new(FakeProviderPort),
+        text_invoker: provider::composition::unsupported_text_invoker(),
         model: crate::ports::ModelInfo {
             provider: "test-provider".into(),
             model: "test-model".into(),
@@ -98,6 +99,7 @@ impl ProviderFactory for FakeProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
             provider: Arc::new(FakeProviderPort),
+            text_invoker: provider::composition::unsupported_text_invoker(),
             model: crate::ports::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

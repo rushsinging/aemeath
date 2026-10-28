@@ -1797,6 +1797,8 @@
         "ResponseStopReason",
         "TokenUsageData",
         "TransportPool",
+        "UnsupportedTextInvoker",
+        "unsupported_text_invoker",
         "wire_provider_client",
         "wire_test_provider_client"
       ],
@@ -1817,7 +1819,6 @@
         "AtomicBlobToolResultStore",
         "BoundMainRun",
         "CancellationSignal",
-        "CompactLlmBindingFactory",
         "CompactModelResolver",
         "CompleteReflectionResult",
         "HookInstructionsNotifier",

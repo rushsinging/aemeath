@@ -240,6 +240,7 @@ impl ProviderFactory for ReportedUsageProviderFactory {
             provider: Arc::new(ReportedUsageProvider {
                 invocation_count: self.invocation_count.clone(),
             }),
+            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -762,6 +763,7 @@ impl ProviderFactory for DirectLogProviderFactory {
             provider: Arc::new(DirectLogScriptProvider {
                 invocation_count: self.invocation_count.clone(),
             }),
+            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

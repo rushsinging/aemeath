@@ -11,7 +11,7 @@ pub(crate) const REFLECTION_RESPONSE_PREVIEW_CHARS: usize = 200;
 
 pub(crate) const MAX_RETAINED_TERMINAL_ACTIVITIES: usize = 64;
 
-// ─── compact_generator.rs ───
+// ─── client/compact_model.rs（compact LLM 绑定投影） ───
 
 /// Compact 摘要请求的最大输出 token（摘要可长，给足预算）。
 ///
