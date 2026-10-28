@@ -29,29 +29,13 @@ use share::ids::BackgroundProcessId;
 use share::ids::SessionId;
 use std::sync::{Arc, Mutex};
 use tools::published::execution::{
-    CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolInvocation,
+    CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolInvocation,
 };
 use tools::test_support::{sequential_test_tool_catalog, TestToolExecutionContextBuilder};
 
 // ── fakes ────────────────────────────────────────────────────────────
 
 /// 可控时长的假执行端口：sleep 指定时长后返回成功。
-struct SleepingToolPort {
-    sleep: Duration,
-}
-
-#[async_trait]
-impl ToolExecutionPort for SleepingToolPort {
-    async fn execute(
-        &self,
-        _invocation: ToolInvocation,
-        _context: &ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        tokio::time::sleep(self.sleep).await;
-        ToolExecutionOutcome::success_text("sleep tool finished")
-    }
-}
 
 /// 永不取消的假信号（前台 cancel 分支不在本组测试范围）。
 struct NeverCancelSignal;
@@ -192,7 +176,7 @@ fn supervisor_with(sleep: Duration) -> (ToolExecutionSupervisor, Arc<Mutex<Vec<S
         states: Arc::clone(&states),
     };
     let supervisor = ToolExecutionSupervisor::new(
-        Arc::new(SleepingToolPort { sleep }),
+        sleeping_tool_port(sleep),
         sequential_test_tool_catalog("SleepTool", 300),
         ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(port))),
     );
@@ -238,6 +222,34 @@ fn success_text(outcome: &ToolExecutionOutcome) -> String {
 }
 
 // ── tests ────────────────────────────────────────────────────────────
+
+/// 可控时长替身（#2146：实现权归 tools crate）。
+fn sleeping_tool_port(
+    sleep: std::time::Duration,
+) -> Arc<dyn tools::published::execution::ToolExecutionPort> {
+    tools::test_support::scripted_tool_execution_async(move |_invocation, _context| async move {
+        tokio::time::sleep(sleep).await;
+        tools::published::execution::ToolExecutionOutcome::success_text("sleep tool finished")
+    })
+}
+
+/// scope 捕捉替身：断言 invocation 与 context scope 同源并记录 effective timeout。
+fn capturing_tool_port(
+    captured: Arc<std::sync::Mutex<Option<u64>>>,
+) -> Arc<dyn tools::published::execution::ToolExecutionPort> {
+    tools::test_support::scripted_tool_execution_async(move |invocation, context| {
+        let captured = Arc::clone(&captured);
+        let scope = context.scope().clone();
+        async move {
+            assert_eq!(
+                invocation.execution_scope, scope,
+                "invocation 与 context 的 scope 必须同源"
+            );
+            *captured.lock().unwrap() = scope.effective_timeout_secs();
+            tools::published::execution::ToolExecutionOutcome::success_text("captured")
+        }
+    })
+}
 
 #[tokio::test]
 async fn execute_within_threshold_completes_on_fast_path() {
@@ -610,34 +622,12 @@ type RecordedStates = Arc<Mutex<Vec<String>>>;
 
 /// 捕获 supervisor 下传的 effective timeout，并校验 invocation 与 context
 /// 的 scope 完全一致（否则 ExecutionAdapter 会拒绝执行）。
-struct CapturingToolPort {
-    captured: CapturedTimeout,
-}
-
-#[async_trait]
-impl ToolExecutionPort for CapturingToolPort {
-    async fn execute(
-        &self,
-        invocation: ToolInvocation,
-        context: &ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        assert_eq!(
-            invocation.execution_scope,
-            *context.scope(),
-            "invocation 与 context 的 scope 必须同源"
-        );
-        *self.captured.lock().unwrap() = context.scope().effective_timeout_secs();
-        ToolExecutionOutcome::success_text("captured")
-    }
-}
 
 fn supervisor_capturing_timeout() -> (ToolExecutionSupervisor, RecordedStates, CapturedTimeout) {
     let states = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::new(Mutex::new(None));
     let supervisor = ToolExecutionSupervisor::new(
-        Arc::new(CapturingToolPort {
-            captured: Arc::clone(&captured),
-        }),
+        capturing_tool_port(Arc::clone(&captured)),
         sequential_test_tool_catalog("SleepTool", 300),
         ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(
             RecordingContextPort {

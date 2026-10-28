@@ -171,3 +171,99 @@ impl crate::domain::skill_ports::SkillCatalogPort for MutableSkillCatalog {
     }
 }
 impl crate::sealed::Sealed for MutableSkillCatalog {}
+
+/// 工具执行替身（#2146：ToolExecutionPort 实现权归 tools crate）：
+/// execute 按脚本返回 outcome（不可 await；需要 sleep/取消交互的测试
+/// 用 `scripted_tool_execution_async`）。
+pub fn scripted_tool_execution(
+    script: impl Fn(
+            &crate::published::execution::ToolInvocation,
+            &crate::domain::context::ToolExecutionContext,
+        ) -> crate::published::execution::ToolExecutionOutcome
+        + Send
+        + Sync
+        + 'static,
+) -> std::sync::Arc<dyn crate::published::execution::ToolExecutionPort> {
+    std::sync::Arc::new(ScriptedToolExecution {
+        script: std::sync::Arc::new(script),
+    })
+}
+
+struct ScriptedToolExecution {
+    script: std::sync::Arc<
+        dyn Fn(
+                &crate::published::execution::ToolInvocation,
+                &crate::domain::context::ToolExecutionContext,
+            ) -> crate::published::execution::ToolExecutionOutcome
+            + Send
+            + Sync,
+    >,
+}
+
+#[async_trait::async_trait]
+impl crate::published::execution::ToolExecutionPort for ScriptedToolExecution {
+    async fn execute(
+        &self,
+        invocation: crate::published::execution::ToolInvocation,
+        context: &crate::domain::context::ToolExecutionContext,
+    ) -> crate::published::execution::ToolExecutionOutcome {
+        (self.script)(&invocation, context)
+    }
+}
+
+/// 异步工具执行替身：脚本返回 Future（sleep / 取消交互场景）。
+pub fn scripted_tool_execution_async<F, Fut>(
+    script: F,
+) -> std::sync::Arc<dyn crate::published::execution::ToolExecutionPort>
+where
+    F: for<'a> Fn(
+            crate::published::execution::ToolInvocation,
+            &'a crate::domain::context::ToolExecutionContext,
+        ) -> Fut
+        + Send
+        + Sync
+        + 'static,
+    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+{
+    std::sync::Arc::new(AsyncScriptedToolExecution {
+        script: std::sync::Arc::new(script),
+    })
+}
+
+struct AsyncScriptedToolExecution<F> {
+    script: std::sync::Arc<F>,
+}
+
+#[async_trait::async_trait]
+impl<F, Fut> crate::published::execution::ToolExecutionPort for AsyncScriptedToolExecution<F>
+where
+    F: for<'a> Fn(
+            crate::published::execution::ToolInvocation,
+            &'a crate::domain::context::ToolExecutionContext,
+        ) -> Fut
+        + Send
+        + Sync,
+    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+{
+    async fn execute(
+        &self,
+        invocation: crate::published::execution::ToolInvocation,
+        context: &crate::domain::context::ToolExecutionContext,
+    ) -> crate::published::execution::ToolExecutionOutcome {
+        (self.script)(invocation, context).await
+    }
+}
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for ScriptedToolExecution {}
+impl<F, Fut> crate::sealed::Sealed for AsyncScriptedToolExecution<F>
+where
+    F: for<'a> Fn(
+            crate::published::execution::ToolInvocation,
+            &'a crate::domain::context::ToolExecutionContext,
+        ) -> Fut
+        + Send
+        + Sync,
+    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+{
+}

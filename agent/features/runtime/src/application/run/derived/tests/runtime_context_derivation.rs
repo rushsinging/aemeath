@@ -24,18 +24,6 @@ impl ToolCatalogPort for FakeToolCat {
     }
 }
 
-pub(super) struct FakeToolExec;
-#[async_trait::async_trait]
-impl tools::published::execution::ToolExecutionPort for FakeToolExec {
-    async fn execute(
-        &self,
-        _invocation: tools::published::execution::ToolInvocation,
-        _context: &tools::published::execution::ToolExecutionContext,
-    ) -> tools::published::execution::ToolExecutionOutcome {
-        tools::published::execution::ToolExecutionOutcome::success_text("fake")
-    }
-}
-
 /// #2146：实现权归 policy crate。
 pub(super) fn fake_policy_port() -> std::sync::Arc<dyn crate::ports::Policy> {
     policy::test_support::allow_all_standard()
@@ -209,7 +197,13 @@ pub(super) fn make_parent_context_with_config(
     config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
 ) -> RuntimeContext {
     let run_config = crate::application::run::config::RunConfigSnapshot::capture(config_snapshot);
-    assemble_parent_context(Arc::new(FakeToolCat), Arc::new(FakeToolExec), run_config)
+    assemble_parent_context(
+        Arc::new(FakeToolCat),
+        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+            tools::published::execution::ToolExecutionOutcome::success_text("fake")
+        }),
+        run_config,
+    )
 }
 
 pub(super) fn make_parent_context() -> RuntimeContext {
@@ -290,7 +284,9 @@ pub(super) fn make_parent_context() -> RuntimeContext {
         RunConfigSnapshot::capture(share::config::domain::snapshot::ConfigSnapshot::new(config));
     assemble_parent_context(
         Arc::new(FakeToolCat),
-        Arc::new(FakeToolExec),
+        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+            tools::published::execution::ToolExecutionOutcome::success_text("fake")
+        }),
         config_snapshot,
     )
 }
@@ -305,7 +301,9 @@ pub(super) fn make_parent_workspace() -> RuntimeWorkspaceAccess {
 fn make_test_factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         Arc::new(FakeToolCat),
-        Arc::new(FakeToolExec),
+        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+            tools::published::execution::ToolExecutionOutcome::success_text("fake")
+        }),
         fake_policy_port(),
         Arc::new(FakeReflHist),
         crate::application::run::test_task_access(),
@@ -673,7 +671,12 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
         calls: calls.clone(),
     });
 
-    let parent_ctx = make_parent_context_with_catalog(recording_catalog, Arc::new(FakeToolExec));
+    let parent_ctx = make_parent_context_with_catalog(
+        recording_catalog,
+        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+            tools::published::execution::ToolExecutionOutcome::success_text("fake")
+        }),
+    );
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
@@ -754,7 +757,13 @@ fn make_parent_context_with_policy_role(
     let config_snapshot = crate::application::run::config::RunConfigSnapshot::capture(
         share::config::domain::snapshot::ConfigSnapshot::new(config),
     );
-    assemble_parent_context(recording_catalog, Arc::new(FakeToolExec), config_snapshot)
+    assemble_parent_context(
+        recording_catalog,
+        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+            tools::published::execution::ToolExecutionOutcome::success_text("fake")
+        }),
+        config_snapshot,
+    )
 }
 
 #[test]
@@ -820,7 +829,12 @@ impl ToolCatalogPort for FailingToolCatalog {
 #[test]
 fn sub_derivation_fails_closed_when_parent_catalog_errors() {
     let failing_catalog: Arc<dyn ToolCatalogPort> = Arc::new(FailingToolCatalog);
-    let parent_ctx = make_parent_context_with_catalog(failing_catalog, Arc::new(FakeToolExec));
+    let parent_ctx = make_parent_context_with_catalog(
+        failing_catalog,
+        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+            tools::published::execution::ToolExecutionOutcome::success_text("fake")
+        }),
+    );
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {

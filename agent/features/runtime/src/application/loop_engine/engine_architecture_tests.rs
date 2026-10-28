@@ -508,29 +508,27 @@ impl FakeToolExecutionPort {
     fn returned_text(&self) -> Option<String> {
         self.returned_text.lock().unwrap().clone()
     }
-}
 
-#[async_trait::async_trait]
-impl tools::published::execution::ToolExecutionPort for FakeToolExecutionPort {
-    async fn execute(
-        &self,
-        invocation: tools::published::execution::ToolInvocation,
-        context: &tools::published::execution::ToolExecutionContext,
-    ) -> tools::published::execution::ToolExecutionOutcome {
-        let _ = context;
-        self.execute_count
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        self.recorded_invocations.lock().unwrap().push(invocation);
-        let text = self.result_text.lock().unwrap().clone();
-        let outcome_text = if text.is_empty() {
-            "fake result".to_string()
-        } else {
-            text.clone()
-        };
-        *self.returned_text.lock().unwrap() = Some(outcome_text.clone());
-        tools::published::execution::ToolExecutionOutcome::success_text(outcome_text)
+
+    /// #2146：实现权归 tools crate；替身经其脚本端口（共享状态经闭包捕获）。
+    fn port(&self) -> std::sync::Arc<dyn tools::published::execution::ToolExecutionPort> {
+        let execute_count = std::sync::Arc::clone(&self.execute_count);
+        let recorded = std::sync::Arc::clone(&self.recorded_invocations);
+        let result_text = std::sync::Arc::clone(&self.result_text);
+        let returned_text = std::sync::Arc::clone(&self.returned_text);
+        tools::test_support::scripted_tool_execution(move |invocation, _context| {
+            use std::sync::atomic::Ordering;
+            execute_count.fetch_add(1, Ordering::AcqRel);
+            recorded.lock().unwrap().push(invocation.clone());
+            let text = result_text.lock().unwrap().clone();
+            let outcome_text = if text.is_empty() { "fake result".to_string() } else { text };
+            *returned_text.lock().unwrap() = Some(outcome_text.clone());
+            tools::published::execution::ToolExecutionOutcome::success_text(outcome_text)
+        })
     }
 }
+
+
 
 #[derive(Default)]
 struct ScriptedObservations {
@@ -642,7 +640,8 @@ struct InteractionMailboxFake {
     interaction_port_override: Option<Arc<dyn InteractionPort>>,
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
     pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
-    fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
+    fake_tool_port:
+        Option<Arc<dyn tools::published::execution::ToolExecutionPort>>,
 }
 
 struct ScriptedPorts {
@@ -766,7 +765,8 @@ struct ScriptedScenario {
     interaction_port_override: Option<Arc<dyn InteractionPort>>,
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
     pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
-    fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
+    fake_tool_port:
+        Option<Arc<dyn tools::published::execution::ToolExecutionPort>>,
     /// 与反思端口共享的 PreCompact 材料槽（生产中由 ChatCompactionObserver 持有）。
     pre_compact_slot:
         Option<crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot>,
@@ -1453,12 +1453,13 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
         let materializer = MATERIALIZER
             .get_or_init(crate::application::tool::test_support::test_tool_result_materializer)
             .as_ref();
-        static UNUSED_TOOL_EXECUTION: std::sync::LazyLock<FakeToolExecutionPort> =
-            std::sync::LazyLock::new(FakeToolExecutionPort::new);
-        let tool_execution = self.fake_tool_port.as_deref().map_or(
-            &*UNUSED_TOOL_EXECUTION as &dyn tools::published::execution::ToolExecutionPort,
-            |port| port,
-        );
+        static UNUSED_TOOL_EXECUTION: std::sync::LazyLock<
+            Arc<dyn tools::published::execution::ToolExecutionPort>,
+        > = std::sync::LazyLock::new(|| FakeToolExecutionPort::new().port());
+        let tool_execution: &dyn tools::published::execution::ToolExecutionPort = self
+            .fake_tool_port
+            .as_deref()
+            .unwrap_or(UNUSED_TOOL_EXECUTION.as_ref());
         let tool_context =
             crate::application::run::workspace_test_support::test_tool_execution_context(
                 std::path::PathBuf::from("/tmp"),

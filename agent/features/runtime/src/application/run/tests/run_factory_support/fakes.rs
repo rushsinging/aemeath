@@ -6,7 +6,6 @@ use crate::application::loop_engine::chat::{
 };
 use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderError, ProviderFactory};
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
-use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
 use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 
 pub(crate) struct FakeContextPort;
@@ -118,19 +117,6 @@ impl ToolCatalogPort for FakeToolCatalog {
     }
 }
 
-pub(crate) struct FakeToolExecution;
-
-#[async_trait::async_trait]
-impl ToolExecutionPort for FakeToolExecution {
-    async fn execute(
-        &self,
-        _invocation: ToolInvocation,
-        _context: &tools::published::execution::ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        ToolExecutionOutcome::success_text("fake")
-    }
-}
-
 /// #2146：Policy 实现权归 policy crate；替身经其 test_support。
 pub(crate) fn fake_policy() -> std::sync::Arc<dyn crate::ports::Policy> {
     policy::test_support::allow_all_standard()
@@ -234,3 +220,10 @@ impl ChatEventSink for RecordingEventSink {
 }
 
 impl crate::ports::ReminderControlPort for FakeContextPort {}
+
+/// #2146：ToolExecutionPort 实现权归 tools crate；替身经其脚本端口。
+pub(crate) fn fake_tool_execution() -> Arc<dyn tools::published::execution::ToolExecutionPort> {
+    tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        tools::published::execution::ToolExecutionOutcome::success_text("fake")
+    })
+}

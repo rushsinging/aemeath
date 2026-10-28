@@ -3062,10 +3062,8 @@
         {
           "trait_name": "ToolExecutionPort",
           "owner_crate": "tools",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "TypedTool",
