@@ -32,7 +32,8 @@
   },
   "early_tokens": {
     "p50": 185789,
-    "p95": 542328
+    "p95": 542328,
+    "max": 1004355
   },
   "by_model": {
     "unknown": {
@@ -49,7 +50,7 @@
     "chunks_p50": 6,
     "chunks_p95": 15,
     "chunks_max": 26,
-    "chunk_ms_p50_p50": null,
+    "chunk_ms_p50_median": null,
     "map_ms_p95": null,
     "reduce_ms_p95": null,
     "refresh_compactions": 0,
@@ -59,12 +60,11 @@
     "unknown": 122
   },
   "degraded_chunks_total": 195,
-  "source": {
-    "log": "/Users/guoyuqi/.agents/logs/context.log",
-    "since": "2026-10-01",
-    "generated_at": "2026-10-28T19:51:36"
-  },
   "notes": {
     "unmatched_sessions": 2
+  },
+  "source": {
+    "log": "/Users/guoyuqi/.agents/logs/context.log",
+    "since": "2026-10-01"
   }
 }

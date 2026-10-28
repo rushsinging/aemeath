@@ -1,21 +1,20 @@
 {
   "cases": 8,
-  "message_count": {
-    "p50": 597,
-    "p95": 8075,
-    "max": 8075
-  },
   "estimated_tokens": {
-    "p50": 479831,
-    "p95": 2263883,
-    "max": 2263883
+    "max": 2286859,
+    "p50": 479342,
+    "p95": 2286859
+  },
+  "message_count": {
+    "max": 8196,
+    "p50": 597,
+    "p95": 8196
   },
   "must_keep": {
-    "p50": 200,
-    "max": 200
+    "max": 200,
+    "p50": 200
   },
-  "generated_at": "2026-10-28T20:01:29",
-  "command": "export_cases.py --limit 8 --output-dir /tmp/compact-cases",
   "source_root": "~/.agents/session",
+  "command": "aemeath eval compact export --limit 8 --output-dir /tmp/compact-cases",
   "notes": "输入侧基线，只覆盖 case 规模与 must_keep 数量；不含压缩输出与质量指标。"
 }

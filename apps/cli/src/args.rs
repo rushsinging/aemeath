@@ -131,6 +131,85 @@ pub enum Commands {
 
     /// Print version information
     Version,
+
+    /// Offline evaluation tools for the compaction chain (hidden)
+    #[command(hide = true)]
+    Eval {
+        #[command(subcommand)]
+        command: EvalCommands,
+    },
+}
+
+/// `aemeath eval` 子命令集（隐藏，离线评测用，不参与日常对话链路）。
+#[derive(Subcommand)]
+pub enum EvalCommands {
+    /// Compact chain evaluation
+    #[command(hide = true)]
+    Compact {
+        #[command(subcommand)]
+        command: CompactEvalCommands,
+    },
+}
+
+/// `aemeath eval compact` 子命令集。
+#[derive(Subcommand)]
+pub enum CompactEvalCommands {
+    /// 从 context.log 输出压缩画像（频率/耗时/分块/降级/模型分桶）
+    Telemetry {
+        /// 日志路径（默认 ~/.agents/logs/context.log）
+        #[arg(long)]
+        log: Option<PathBuf>,
+
+        /// 只统计该 ISO 日期前缀之后的事件，如 2026-10-01
+        #[arg(long)]
+        since: Option<String>,
+
+        /// 输出 JSON 路径（默认 eval/compact/results/telemetry_baseline.json）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
+    /// 从真实 session dataset 导出压缩评测 case
+    Export {
+        /// session 根目录（默认 ~/.agents/session）
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// case 输出目录（必填）
+        #[arg(long)]
+        output_dir: PathBuf,
+
+        /// 最多导出多少个 case
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+
+        /// 只导出 committed steps 不少于该数量的会话
+        #[arg(long, default_value_t = 40)]
+        min_steps: usize,
+
+        /// 每个 case 的 must_keep 上限（按出现频次取前 N）
+        #[arg(long, default_value_t = 200)]
+        max_must_keep: usize,
+
+        /// 跳过估算 token 超过该值的会话（超出压缩窗口的巨型历史不适合评测）
+        #[arg(long, default_value_t = 3_000_000)]
+        max_tokens: u64,
+    },
+
+    /// 按 case 计算确定性指标（需要压缩输出）
+    Score {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// 压缩输出目录，文件名约定 <case_id>.summary.txt
+        #[arg(long)]
+        summaries: Option<PathBuf>,
+
+        /// 输出 JSON 路径
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 /// `aemeath systemone` 子命令集。
