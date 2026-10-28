@@ -2710,6 +2710,422 @@
           "since": "#1146"
         }
       ]
+    },
+    {
+      "id": "pattern.pl.trait-implementation-registry",
+      "assertion": "impl_registry",
+      "scope": {
+        "kind": "workspace"
+      },
+      "entries": [
+        {
+          "trait_name": "AgentDispatch",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "AtomicBlobPort",
+          "owner_crate": "storage",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c",
+            "r"
+          ]
+        },
+        {
+          "trait_name": "AtomicDatasetPort",
+          "owner_crate": "storage",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "BackgroundProcessAccess",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "composition",
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "BackgroundProcessAccessSource",
+          "owner_crate": "tools",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "CancellationSignal",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "CommandCatalogPort",
+          "owner_crate": "tools",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "CommandRouterPort",
+          "owner_crate": "tools",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "CompactProgressFn",
+          "owner_crate": "context",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ComponentRegistry",
+          "owner_crate": "harness",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ConfigReader",
+          "owner_crate": "config",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ConfigWriter",
+          "owner_crate": "config",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ConnectCommitPort",
+          "owner_crate": "config",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ConnectProviderDirectory",
+          "owner_crate": "config",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ContextAppendPort",
+          "owner_crate": "context",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "ContextCompactPort",
+          "owner_crate": "context",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "ContextWindowPort",
+          "owner_crate": "context",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "EvidenceStreamPort",
+          "owner_crate": "harness",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "GlobalConfigConnectStore",
+          "owner_crate": "config",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "Guidance",
+          "owner_crate": "tools",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "HookCancellationSignal",
+          "owner_crate": "hook",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "HookDispatcher",
+          "owner_crate": "hook",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "HookExecutionObserver",
+          "owner_crate": "hook",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "LlmInvokePort",
+          "owner_crate": "provider",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "MemoryOpener",
+          "owner_crate": "memory",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c",
+            "r"
+          ]
+        },
+        {
+          "trait_name": "MemoryPort",
+          "owner_crate": "memory",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c"
+          ]
+        },
+        {
+          "trait_name": "MemoryPortSource",
+          "owner_crate": "tools",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "Policy",
+          "owner_crate": "policy",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "ProgressSink",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ProjectConfigParticipant",
+          "owner_crate": "config",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ProviderFactory",
+          "owner_crate": "runtime",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c"
+          ]
+        },
+        {
+          "trait_name": "ProviderProbePort",
+          "owner_crate": "config",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ReflectionHistoryQuery",
+          "owner_crate": "memory",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ReflectionHistoryStore",
+          "owner_crate": "memory",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ReminderControlPort",
+          "owner_crate": "context",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "ReminderSource",
+          "owner_crate": "context",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "RsiLlmPort",
+          "owner_crate": "harness",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "RsiTask",
+          "owner_crate": "harness",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ScoringPort",
+          "owner_crate": "systemone",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "m",
+            "r",
+            "t"
+          ]
+        },
+        {
+          "trait_name": "SessionManagementPort",
+          "owner_crate": "context",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "SkillCatalogPort",
+          "owner_crate": "tools",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c",
+            "r"
+          ]
+        },
+        {
+          "trait_name": "SkillLoadPort",
+          "owner_crate": "tools",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "SkillLoadStatePort",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "TaskAccess",
+          "owner_crate": "task",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "TaskPersist",
+          "owner_crate": "task",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c"
+          ]
+        },
+        {
+          "trait_name": "TaskRestoreAccess",
+          "owner_crate": "task",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "Tool",
+          "owner_crate": "tools",
+          "type": "sealed",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "ToolCatalogPort",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "ToolExecutionPort",
+          "owner_crate": "tools",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "r"
+          ]
+        },
+        {
+          "trait_name": "TypedTool",
+          "owner_crate": "tools",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "runtime"
+          ]
+        },
+        {
+          "trait_name": "UsageSink",
+          "owner_crate": "runtime",
+          "type": "comp-bridge",
+          "allowed_impl_crates": []
+        },
+        {
+          "trait_name": "WorkflowToolBackend",
+          "owner_crate": "workflow",
+          "type": "injected-host",
+          "allowed_impl_crates": [
+            "tools"
+          ]
+        },
+        {
+          "trait_name": "WorkspaceControl",
+          "owner_crate": "project",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "t"
+          ]
+        },
+        {
+          "trait_name": "WorkspaceReader",
+          "owner_crate": "project",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c",
+            "t"
+          ]
+        },
+        {
+          "trait_name": "WorkspaceWriter",
+          "owner_crate": "project",
+          "type": "fake-pending",
+          "allowed_impl_crates": [
+            "c"
+          ]
+        }
+      ],
+      "reason": "#2146 实现权治理：sealed 由编译器（Sealed trait）强制，本表为双保险与未 seal trait 的实现 crate 白名单（injected-host 宿主 / comp-bridge 桥接 / fake-pending 存量待收敛，收敛完成即转 sealed）；未登记 trait 不校验，登记即锁",
+      "profile": "fast"
     }
   ],
   "retired_symbols": [
