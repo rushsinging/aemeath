@@ -227,7 +227,7 @@ fn render_tree(tree: &syn::UseTree) -> String {
 
 /// 语句在源码中的行号：先按归一化后整行匹配（覆盖单行 use），
 /// 再退化为语句前缀匹配（覆盖多行 group use 的首行）。
-fn line_of(source: &str, statement: &str) -> usize {
+pub(crate) fn line_of(source: &str, statement: &str) -> usize {
     let normalized = normalize_whitespace(statement);
     for (index, line) in source.lines().enumerate() {
         if normalize_whitespace(line) == normalized {
@@ -246,6 +246,6 @@ fn line_of(source: &str, statement: &str) -> usize {
     1
 }
 
-fn normalize_whitespace(input: &str) -> String {
+pub(crate) fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
 }

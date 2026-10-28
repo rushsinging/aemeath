@@ -47,6 +47,12 @@ fn main() -> Result<()> {
             print!("{rendered}");
             Ok(())
         }
+        Some("pl-collect") => {
+            let crate_dir = PathBuf::from(args.next().context("缺少 crate 目录（如 agent/features/provider）")?);
+            let repo_root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
+            print!("{}", xtask::pl_collect::collect(&crate_dir, &repo_root)?);
+            Ok(())
+        }
         Some("production-reachability") => {
             let root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
             for step in xtask::reachability::run(&root)? {

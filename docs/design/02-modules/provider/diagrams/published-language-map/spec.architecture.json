@@ -1,0 +1,202 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Provider 根面 Published Language 设计图",
+  "subtitle": "终态设计 · 根符号 17 · 1 pub mod（published_language）+ composition 子发布",
+  "quality_profile": "showcase",
+  "visual_preset": "blueprint",
+  "output": "index.html"
+ },
+ "layout": {
+  "mode": "grid",
+  "origin": [
+   80,
+   120
+  ],
+  "cols": 6,
+  "gapX": 60,
+  "gapY": 70,
+  "cellW": 200,
+  "cellH": 80
+ },
+ "components": [
+  {
+   "id": "prov",
+   "type": "backend",
+   "label": "provider crate",
+   "sublabel": "LLM 防腐网关 BC",
+   "row": 1,
+   "col": 2
+  },
+  {
+   "id": "w1",
+   "type": "security",
+   "label": "输入",
+   "sublabel": "ProviderRequestData",
+   "row": 2,
+   "col": 0
+  },
+  {
+   "id": "w2",
+   "type": "messagebus",
+   "label": "输出",
+   "sublabel": "流式帧 · 载荷 · 计量",
+   "row": 2,
+   "col": 1
+  },
+  {
+   "id": "w3",
+   "type": "database",
+   "label": "模型元数据",
+   "sublabel": "ModelInfo 单实体",
+   "row": 2,
+   "col": 2
+  },
+  {
+   "id": "w4",
+   "type": "cloud",
+   "label": "错误",
+   "sublabel": "ProviderError · 13 Kind",
+   "row": 2,
+   "col": 3
+  },
+  {
+   "id": "w5",
+   "type": "backend",
+   "label": "工厂·客户端",
+   "sublabel": "wire ×2 · Client · Pool",
+   "row": 2,
+   "col": 4
+  },
+  {
+   "id": "w6",
+   "type": "external",
+   "label": "文本端口",
+   "sublabel": "LlmTextInvokePort",
+   "row": 2,
+   "col": 5
+  },
+  {
+   "id": "runtime",
+   "type": "frontend",
+   "label": "runtime",
+   "sublabel": "ProviderPort 消费",
+   "row": 0,
+   "col": 2
+  },
+  {
+   "id": "composition",
+   "type": "cloud",
+   "label": "composition",
+   "sublabel": "wire 装配",
+   "row": 0,
+   "col": 0
+  },
+  {
+   "id": "config",
+   "type": "database",
+   "label": "config / catalog",
+   "sublabel": "模型元数据来源",
+   "row": 3,
+   "col": 1
+  },
+  {
+   "id": "upstream",
+   "type": "external",
+   "label": "LLM 上游",
+   "sublabel": "SSE / HTTP driver",
+   "row": 3,
+   "col": 3
+  },
+  {
+   "id": "sdk",
+   "type": "frontend",
+   "label": "sdk / TUI",
+   "sublabel": "用户可见错误",
+   "row": 0,
+   "col": 4
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "provider 根面 PL（白名单 17）",
+   "wraps": [
+    "prov",
+    "w1",
+    "w2",
+    "w3",
+    "w4",
+    "w5",
+    "w6"
+   ],
+   "pad": 40
+  }
+ ],
+ "connections": [
+  {
+   "id": "rt-prov",
+   "from": "runtime",
+   "to": "prov",
+   "label": "consume PL",
+   "labelDy": 20
+  },
+  {
+   "id": "comp-prov",
+   "from": "composition",
+   "to": "prov",
+   "label": "wire 装配",
+   "variant": "dashed"
+  },
+  {
+   "id": "sdk-rt",
+   "from": "sdk",
+   "to": "runtime",
+   "label": "错误视图映射"
+  },
+  {
+   "id": "prov-upstream",
+   "from": "prov",
+   "to": "upstream",
+   "label": "driver 分发 · SSE",
+   "variant": "security",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelAt": [
+    762,
+    412
+   ]
+  },
+  {
+   "id": "config-prov",
+   "from": "config",
+   "to": "prov",
+   "label": "ModelInfo 投影",
+   "variant": "dashed"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "slate",
+   "title": "#1861 v4 收敛记录",
+   "items": [
+    "LlmError 内部化（C10）· request 单载体（C12）",
+    "工厂收敛 2 入口：wire_provider_client / wire_test_provider_client（C14）",
+    "tool call 载荷摊平进 ProviderContentData 命名字段（v4）",
+    "reasoning 能力摊平进 ModelInfo.supported_reasoning + resolve_reasoning（v4）",
+    "system 块类型消除：整串 + static_prefix_len（v4）"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "状态与事实",
+   "items": [
+    "非流式 ProviderResponse 生产链路零外部消费（保留为 PL 完整性）",
+    "构造面豁免：LlmClient / ProviderClientSpecData / TransportPool（组合根桥接）",
+    "ResponseStopReason = StopReason 别名发布（避免命名冲突）",
+    "guard 88 rules（context 白名单同基线引擎）"
+   ]
+  }
+ ]
+}

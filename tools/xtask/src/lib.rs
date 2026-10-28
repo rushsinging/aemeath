@@ -5,6 +5,7 @@ pub mod guards;
 pub mod guards_engine;
 pub mod guards_facade_trim;
 pub mod guards_rules;
+pub mod pl_collect;
 pub mod reachability;
 pub mod sdk_wire_schema;
 pub mod source_guard;
@@ -30,3 +31,7 @@ mod guards_rules_tests;
 #[cfg(test)]
 #[path = "guards_tests.rs"]
 mod guards_tests;
+
+#[cfg(test)]
+#[path = "pl_collect_tests.rs"]
+mod pl_collect_tests;
