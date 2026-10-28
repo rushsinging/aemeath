@@ -3,3 +3,4 @@
 //! 阶段三迁入 runtime 层漏译文案。
 
 pub mod command;
+pub mod config_reload;

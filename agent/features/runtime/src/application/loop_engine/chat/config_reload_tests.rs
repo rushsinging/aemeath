@@ -21,10 +21,11 @@ fn temp_dir() -> PathBuf {
 
 #[test]
 fn test_classify_change_key_non_prompt_asset() {
-    // #2015 语义升级：aemeath.json 升为 config: 前缀（原 other:）。
+    // aemeath.json 已从 watch 列表移除（config 由 ConfigAppService 指纹负责），
+    // 因此不再有 config: 专属前缀，走 other: 兜底。
     let path = PathBuf::from("/home/user/.agents/aemeath.json");
     let key = classify_change_key(&path, &FileChangeKind::Modified);
-    assert!(key.starts_with("config:modified:"));
+    assert!(key.starts_with("other:modified:"));
 }
 
 #[test]
@@ -106,11 +107,82 @@ fn test_classify_change_key_tool_guidance() {
 }
 
 #[test]
-fn test_classify_change_key_config_file() {
+fn test_classify_change_key_config_file_falls_back_to_other() {
     let path = PathBuf::from("/home/user/.agents/aemeath.json");
     assert_eq!(
         classify_change_key(&path, &FileChangeKind::Modified),
-        "config:modified:aemeath.json"
+        "other:modified:aemeath.json"
+    );
+}
+
+#[test]
+fn watched_files_exclude_config_json() {
+    // config 文件变化由 ConfigAppService::refresh_if_sources_changed 的 SHA 指纹
+    // 检测并 emit；registry 再 watch 一次会重复通知且不带 scope 语义。
+    let cwd = temp_dir();
+    let files = collect_watched_files(&cwd);
+    let config_json: Vec<&PathBuf> = files
+        .iter()
+        .filter(|path| path.ends_with("aemeath.json"))
+        .collect();
+    assert!(
+        config_json.is_empty(),
+        "watch 列表 MUST NOT 包含 config 文件，实际: {config_json:?}"
+    );
+    let _ = fs::remove_dir_all(&cwd);
+}
+
+#[test]
+fn component_reload_notices_render_one_i18n_line_per_source() {
+    let keys = vec![
+        "guidance:modified:_default.md".to_string(),
+        "guidance:added:extra.md".to_string(),
+        "skills:added:skills".to_string(),
+        "other:modified:notes.txt".to_string(),
+    ];
+    assert_eq!(
+        component_reload_notices("zh", &keys),
+        vec![
+            "[guidance] 已重载（2 个文件）。".to_string(),
+            "[skills] 已重载（1 个文件）。".to_string(),
+        ]
+    );
+    assert_eq!(
+        component_reload_notices("en", &keys),
+        vec![
+            "[guidance] reloaded (2 file(s)).".to_string(),
+            "[skills] reloaded (1 file(s)).".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn component_reload_groups_counts_keys_by_source_in_stable_order() {
+    let keys = vec![
+        "guidance:modified:_default.md".to_string(),
+        "guidance:added:extra.md".to_string(),
+        "skills:added:skills".to_string(),
+        "instructions:deleted:AGENTS.md".to_string(),
+        "other:modified:notes.txt".to_string(),
+    ];
+    let groups = component_reload_groups(&keys);
+    assert_eq!(
+        groups,
+        vec![
+            (
+                share::config::domain::reload::ComponentReloadSource::Guidance,
+                2
+            ),
+            (
+                share::config::domain::reload::ComponentReloadSource::Instructions,
+                1
+            ),
+            (
+                share::config::domain::reload::ComponentReloadSource::Skills,
+                1
+            ),
+        ],
+        "分组 MUST 按 Guidance→Instructions→Skills 固定顺序，且忽略 other: key"
     );
 }
 

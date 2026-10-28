@@ -36,6 +36,9 @@ use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ConfigPatch {
+    /// 语言偏好（`"en"` / `"zh"`）：决定面向 LLM 的 guidance 与用户可见 i18n 文案。
+    #[serde(default)]
+    pub language: Option<String>,
     #[serde(default)]
     pub api: Option<ApiConfigPatch>,
     #[serde(default)]
@@ -85,7 +88,8 @@ impl ConfigPatch {
 
     /// Returns true if no field is set (all None).
     pub fn is_empty(&self) -> bool {
-        self.api.is_none()
+        self.language.is_none()
+            && self.api.is_none()
             && self.model.is_none()
             && self.models.is_none()
             && self.context.is_none()
@@ -442,6 +446,9 @@ pub struct GuidanceConfigPatch {
 /// Only fields explicitly present in `patch` overwrite the corresponding
 /// `base` values; missing fields keep the base values.
 pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
+    if let Some(language) = patch.language {
+        base.language = language;
+    }
     if let Some(api) = patch.api {
         base.api = apply_api_patch(base.api, api);
     }

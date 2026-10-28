@@ -420,6 +420,15 @@ fn loaded_empty_model_list_shows_real_config_path() {
         "空列表场景仍应发 ListModels 刷新，实际: {:?}",
         result.effects
     );
+    // 显示时刷新：缓存标记为空也必须等 fresh 列表到达后再呈现结论。
+    assert!(!app.layout.has_active_dialog());
+    assert!(
+        app.session.model_selection_pending,
+        "刷新在途时应挂起等待，不得用旧缓存直接下结论"
+    );
+
+    apply_sdk_event(&mut app, sdk::ChatEvent::ModelList { models: vec![] });
+
     assert!(!app.layout.has_active_dialog());
     assert!(!app.session.model_selection_pending);
     let rendered = system_texts(&app).join("\n");
@@ -433,9 +442,10 @@ fn loaded_empty_model_list_shows_real_config_path() {
     );
 }
 
-/// #740：缓存已回填时 /model 立即打开 dialog（不等待），并附带一次刷新请求。
+/// 显示时刷新：缓存已有内容也 MUST 等 fresh 列表到达后才渲染 dialog，
+/// 否则用户看到的是配置修改前的旧模型。
 #[test]
-fn cached_models_open_dialog_immediately_with_refresh() {
+fn cached_models_wait_for_fresh_list_before_opening_dialog() {
     let mut app = app_with_builtin_router();
     apply_sdk_event(
         &mut app,
@@ -450,20 +460,45 @@ fn cached_models_open_dialog_immediately_with_refresh() {
     let result = app.handle_slash_command("/model");
 
     assert!(
-        app.layout.has_active_dialog(),
-        "缓存已回填时应立即打开 dialog"
-    );
-    assert_eq!(
-        app.layout.dialog_model_keys,
-        vec!["anthropic/Claude 3".to_string(), "openai/GPT-5".to_string()]
-    );
-    assert!(
         matches!(
             sent_chat_event(&result),
             Some(sdk::ChatInputEvent::ListModels)
         ),
-        "打开 dialog 应同时发 ListModels 刷新，实际: {:?}",
+        "打开 dialog 前必须发 ListModels 刷新，实际: {:?}",
         result.effects
+    );
+    assert!(
+        !app.layout.has_active_dialog(),
+        "旧缓存不得直接打开 dialog，必须等 fresh 列表"
+    );
+    assert!(
+        app.session.model_selection_pending,
+        "刷新在途时应挂起等待 fresh 列表"
+    );
+
+    apply_sdk_event(
+        &mut app,
+        sdk::ChatEvent::ModelList {
+            models: vec![
+                model_summary("anthropic", "claude-3-id", "Claude 3"),
+                model_summary("openai", "gpt-5-id", "GPT-5"),
+                model_summary("kimi", "k3-1-pro", "K3.1 Pro"),
+            ],
+        },
+    );
+
+    assert!(
+        app.layout.has_active_dialog(),
+        "fresh 列表到达后应打开 dialog"
+    );
+    assert_eq!(
+        app.layout.dialog_model_keys,
+        vec![
+            "anthropic/Claude 3".to_string(),
+            "openai/GPT-5".to_string(),
+            "kimi/K3.1 Pro".to_string()
+        ],
+        "dialog 必须渲染 fresh 列表（含配置新增的模型）"
     );
 }
 
@@ -547,8 +582,66 @@ fn resume_input_fetches_session_list_once() {
     );
 }
 
-// ── #2032：/think 档位调节 ──
+/// 设置输入框内容并把光标移到末尾（补全触发依赖光标位置）。
+fn set_input(app: &mut App, text: &str) {
+    app.model.input.document.buffer = text.to_string();
+    app.model.input.document.cursor = text.len();
+}
 
+/// 显示时刷新：进入 `/model <arg>` 补全时请求一次模型列表（pull，不靠事件推送）；
+/// 同一轮补全输入不重复请求，离开补全后再次进入会重新请求。
+#[test]
+fn model_arg_completion_fetches_model_list_once_per_entry() {
+    let mut app = app_with_builtin_router();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    app.chat.input_event_tx = Some(event_tx);
+
+    set_input(&mut app, "/model ");
+    app.update_suggestions();
+    assert!(
+        app.session.model_completion_list_requested,
+        "进入 /model 参数补全时必须置位刷新标记"
+    );
+
+    set_input(&mut app, "/model kim");
+    app.update_suggestions();
+
+    let mut received = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        received.push(event);
+    }
+    assert_eq!(
+        received.len(),
+        1,
+        "同一轮补全只应请求一次模型列表，实际 {received:?}"
+    );
+    assert!(
+        matches!(received.first(), Some(sdk::ChatInputEvent::ListModels)),
+        "请求应为 ListModels：{received:?}"
+    );
+
+    // 离开补全 → 标记复位 → 再次进入重新拉取（配置可能已变化）。
+    set_input(&mut app, "/think");
+    app.update_suggestions();
+    assert!(
+        !app.session.model_completion_list_requested,
+        "离开 /model 参数补全后必须复位刷新标记"
+    );
+
+    set_input(&mut app, "/model k");
+    app.update_suggestions();
+    let mut second_round = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        second_round.push(event);
+    }
+    assert_eq!(
+        second_round.len(),
+        1,
+        "重新进入补全应再请求一次，实际 {second_round:?}"
+    );
+}
+
+// ── #2032：/think 档位调节 ──
 #[test]
 fn think_slash_command_with_level_returns_set_thinking_event() {
     let mut app = app_with_builtin_router();

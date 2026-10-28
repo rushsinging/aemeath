@@ -2,9 +2,10 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::render::dialog::Dialog;
 
 impl super::super::App {
-    /// 打开 /model 选择对话框：先用已回填的缓存呈现（立即打开 / 挂起等待 /
-    /// 空态提示），并附带一次 `ListModels` 刷新请求（#740）。
+    /// 打开 /model 选择对话框：总是先丢弃缓存并请求 `ListModels`，
+    /// 由新鲜列表回填后自动打开（显示时刷新，NEVER 用旧缓存直接渲染）。
     pub(super) fn open_model_selection_dialog(&mut self) -> Effect {
+        self.session.invalidate_cached_models();
         self.present_model_selection_dialog();
         Effect::SendChatInputEvent {
             event: sdk::ChatInputEvent::ListModels,

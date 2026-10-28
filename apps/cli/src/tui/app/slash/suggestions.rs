@@ -18,6 +18,23 @@ impl super::super::App {
                 });
         }
 
+        // 显示时刷新（pull）：进入 `/model <arg>` 补全时请求一次模型列表，
+        // 让补全基于磁盘最新配置；同一轮输入不重复请求，离开补全后复位。
+        let model_completion_active =
+            crate::tui::model::input::completion::extract_completion_token(&input, cursor_offset)
+                .is_some_and(|(_token, _start, trigger)| {
+                    matches!(
+                        trigger,
+                        crate::tui::model::input::completion::TriggerType::ModelArg
+                    )
+                });
+        if model_completion_active && !self.session.model_completion_list_requested {
+            self.session.model_completion_list_requested = true;
+            self.chat.push_input_event(sdk::ChatInputEvent::ListModels);
+        } else if !model_completion_active {
+            self.session.model_completion_list_requested = false;
+        }
+
         // #740：模型与 session 列表从事件流回填的缓存读取（启动预热 +
         // ModelList/SessionList 事件消费），此处保持纯函数。
         let models: Vec<(String, String)> = self

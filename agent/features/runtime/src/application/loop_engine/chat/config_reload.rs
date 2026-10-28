@@ -32,8 +32,13 @@ impl ConfigDiff {
 ///   全局指令 `~/.agents/AGENTS.md`，fallback `~/.claude/CLAUDE.md`
 /// - Guidance 文件：`~/.agents/guidance/` 下动态发现的 `*.md`
 /// - 组件面（#2015 热载 watch 扩展）：guardrails（全局+项目）、
-///   tool_guidance（全局）、config（全局+项目 `aemeath.json`）、
-///   skills 目录（全局+项目 `.agents`/`.claude`）；scripts 目录已退役并入 skills（#2060）
+///   tool_guidance（全局）、skills 目录（全局+项目 `.agents`/`.claude`）；
+///   scripts 目录已退役并入 skills（#2060）
+///
+/// config 文件（全局/项目 `aemeath.json`）**不在此列表**：配置热载由
+/// `ConfigAppService::refresh_if_sources_changed()` 的内容指纹负责并携带
+/// 生效边界（Run / SessionRestartRequired）；registry 再 watch 一次会产生
+/// 第二条不带 scope 的 `ConfigReloaded`，导致回显重复且语义混淆。
 pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
@@ -58,9 +63,6 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     files.push(paths::project_guardrails_path(cwd));
     // tool_guidance 覆盖层：全局
     files.push(expand_home(&paths::global_tool_guidance_path()));
-    // config：全局 + 项目 aemeath.json
-    files.push(expand_home(&paths::global_config_path()));
-    files.push(paths::project_config_path(cwd));
     // skills 目录（目录级监控）
     files.push(expand_home(&paths::global_skills_dir()));
     files.push(paths::project_skills_dir(cwd));
@@ -192,13 +194,52 @@ fn classify_change_key(path: &Path, kind: &FileChangeKind) -> String {
         format!("tool_guidance:{}:{}", prefix, file_name)
     } else if path_str.contains("guidance") {
         format!("guidance:{}:{}", prefix, file_name)
-    } else if path_str.ends_with("aemeath.json") {
-        format!("config:{}:{}", prefix, file_name)
     } else if path_str.contains("/skills/") || path_str.ends_with("/skills") {
         format!("skills:{}:{}", prefix, file_name)
     } else {
         format!("other:{}:{}", prefix, file_name)
     }
+}
+
+/// 按来源分组统计组件类变更 key（如 `guidance:modified:x.md`）。
+///
+/// 返回顺序固定为 Guidance → Instructions → Skills（与 i18n 回显一致），
+/// 只统计数量 > 0 的来源；`other:` / 被拒绝的 key 不参与分组。
+pub fn component_reload_groups(
+    changed_keys: &[String],
+) -> Vec<(share::config::domain::reload::ComponentReloadSource, usize)> {
+    use share::config::domain::reload::ComponentReloadSource;
+
+    let mut groups = Vec::new();
+    for source in [
+        ComponentReloadSource::Guidance,
+        ComponentReloadSource::Instructions,
+        ComponentReloadSource::Skills,
+    ] {
+        let prefix = source.key_prefix();
+        let count = changed_keys
+            .iter()
+            .filter(|key| key.starts_with(prefix))
+            .count();
+        if count > 0 {
+            groups.push((source, count));
+        }
+    }
+    groups
+}
+
+/// 组件热载的用户可见回显文本（按来源分组 + i18n，一行一个来源）。
+///
+/// `other:` / 被拒绝的 key 不参与；返回顺序固定 Guidance → Instructions → Skills。
+pub fn component_reload_notices(language: &str, changed_keys: &[String]) -> Vec<String> {
+    component_reload_groups(changed_keys)
+        .into_iter()
+        .map(|(source, file_count)| {
+            share::i18n::runtime::config_reload::component_reload_notice(
+                language, source, file_count,
+            )
+        })
+        .collect()
 }
 
 /// 将 `~` 展开为 home 目录。

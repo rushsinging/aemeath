@@ -213,10 +213,12 @@ fn empty_config_view() -> crate::tui::adapter::tui_runtime_event::TuiConfigView 
 }
 
 #[test]
-fn config_reloaded_maps_scope_notices_for_run_and_session_restart() {
+fn config_reloaded_does_not_append_system_message() {
     use crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope;
     use crate::tui::model::conversation::intent::AppendSystemMessage;
 
+    // 可见回显由 runtime 以 SystemMessage 生成（含 i18n 与生效边界），
+    // ConfigReloaded 只负责状态/缓存更新，NEVER 再产生第二条文本。
     let mapping = map_runtime_event(&TuiRuntimeEvent::ConfigReloaded {
         changed_keys: vec!["config:reloaded".to_string()],
         scopes: vec![
@@ -226,9 +228,12 @@ fn config_reloaded_maps_scope_notices_for_run_and_session_restart() {
         view: empty_config_view(),
     });
 
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::AppendSystemMessage(AppendSystemMessage { text })]
-            if text.contains("下次 Run 生效") && text.contains("重启 Session 后生效")
-    ));
+    assert!(
+        mapping.conversation.iter().all(|intent| !matches!(
+            intent,
+            ConversationIntent::AppendSystemMessage(AppendSystemMessage { .. })
+        )),
+        "ConfigReloaded 不得再追加可见文本，实际: {:?}",
+        mapping.conversation
+    );
 }
