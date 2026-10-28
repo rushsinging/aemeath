@@ -114,6 +114,7 @@ fn observer_with_task_store(
                 None,
                 None,
                 None,
+                None,
             ),
         ))
         .with_session_id("session-live")

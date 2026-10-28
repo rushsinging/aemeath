@@ -15,6 +15,7 @@ pub mod runtime;
 pub mod systemone;
 pub mod tools;
 pub mod update;
+pub mod workflow_cleanup;
 
 /// Re-export 版本号，CLI 经 composition 间接引用 `share::version()`
 /// 而不直接依赖 shared（守薄入口守卫）。

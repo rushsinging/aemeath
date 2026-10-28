@@ -154,3 +154,16 @@ impl crate::ports::WorkflowStateProbe for InMemoryWorkflowStore {
         })
     }
 }
+
+impl crate::ports::WorkflowSessionReset for InMemoryWorkflowStore {
+    fn reset_session(&self, session_id: &str) -> Result<(), crate::ports::PersistenceError> {
+        // 先清索引（磁盘可见性），再清内存表；两步都成功才算 reset 完成。
+        if let Some((bound_session, persistence)) = &self.persistence {
+            if bound_session == session_id {
+                persistence.clear_index(session_id)?;
+            }
+        }
+        self.workflows.lock().expect("store lock").clear();
+        Ok(())
+    }
+}

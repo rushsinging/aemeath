@@ -71,6 +71,8 @@ struct RuntimeToolAssembly {
     active_run: Arc<runtime::ActiveRunRegistry>,
     /// Workflow 状态查询端口（#2088）：开关关闭时为 None。
     workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
+    /// Workflow Session reset 端口（#2089）：开关关闭时为 None。
+    workflow_reset: Option<Arc<dyn workflow::WorkflowSessionReset>>,
 }
 
 /// 装配层聚合注入：端口依赖逐项平铺（对齐 `wire_builtin_catalog_execution`
@@ -107,15 +109,19 @@ fn wire_runtime_tool_assembly(
             session_id.to_owned(),
         ));
         let probe: std::sync::Arc<dyn workflow::WorkflowStateProbe> = store.clone();
+        let reset: std::sync::Arc<dyn workflow::WorkflowSessionReset> = store.clone();
         let backend = std::sync::Arc::new(workflow::InMemoryWorkflowBackend::new(
             store,
             Box::new(|| uuid::Uuid::now_v7().to_string()),
             Box::new(|| chrono::Utc::now().to_rfc3339()),
         )) as std::sync::Arc<dyn workflow::WorkflowToolBackend>;
-        (backend, probe)
+        (backend, probe, reset)
     });
-    let workflow_backend = workflow_wiring.as_ref().map(|(backend, _)| backend.clone());
-    let workflow_probe = workflow_wiring.as_ref().map(|(_, probe)| probe.clone());
+    let workflow_backend = workflow_wiring
+        .as_ref()
+        .map(|(backend, _, _)| backend.clone());
+    let workflow_probe = workflow_wiring.as_ref().map(|(_, probe, _)| probe.clone());
+    let workflow_reset = workflow_wiring.as_ref().map(|(_, _, reset)| reset.clone());
     let tools = tools::composition::wire_builtin_catalog_execution(
         task_access,
         memory_source,
@@ -140,6 +146,7 @@ fn wire_runtime_tool_assembly(
         catalog: tools.catalog(),
         execution: tools.execution(),
         workflow_probe,
+        workflow_reset,
         tool_result_materializer: Arc::new(runtime::ToolResultMaterializer::new(
             blobs,
             runtime::ToolResultMaterializationPolicyData::new(
@@ -419,6 +426,7 @@ pub(crate) async fn from_args_with_gateways(
                 .clone()
                 .map(|scoring| std::sync::Arc::new(runtime::PolicyTriage::new(scoring))),
             tool_assembly.workflow_probe.clone(),
+            tool_assembly.workflow_reset.clone(),
         )
         // #2142：装配 compact 模型解析器——主 Run 的 manual/自动压缩经它按轮
         // 解析 LLM 绑定（未配置跟随会话模型；解析失败回退本地压缩并 warn）。

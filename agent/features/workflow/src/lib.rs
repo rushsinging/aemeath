@@ -14,7 +14,7 @@ mod constants;
 
 pub(crate) use constants::LOG_TARGET;
 
-pub use adapters::FileWorkflowPersistence;
+pub use adapters::{CleanupReport, FileWorkflowPersistence};
 pub use application::{InMemoryWorkflowBackend, InMemoryWorkflowStore, WorkflowAggregate};
 pub use domain::{
     ActiveMode, AllowedAction, CreateWorkflowSpec, EdgeDefinition, EvidenceKind, EvidenceRef,
@@ -27,6 +27,6 @@ pub use domain::{
     WorkflowStatus, WorkflowSummaryData, WorkflowToolError,
 };
 pub use ports::{
-    PersistenceError, WorkflowPersistence, WorkflowStateHint, WorkflowStateProbe,
-    WorkflowToolBackend,
+    PersistenceError, WorkflowPersistence, WorkflowSessionReset, WorkflowStateHint,
+    WorkflowStateProbe, WorkflowToolBackend,
 };

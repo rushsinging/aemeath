@@ -122,6 +122,18 @@ pub enum Commands {
         command: RsiCommands,
     },
 
+    /// Remove orphaned on-disk data (sessions / tool results / workflows) that
+    /// no longer has any reference. Irreversible.
+    Cleanup {
+        /// Only list what would be removed, delete nothing
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install

@@ -361,6 +361,9 @@ pub struct RuntimeServices {
     /// Workflow 状态查询端口（#2088）：六工具开关开启时为 Some，供
     /// reminder source 读取 Active Workflow 的 id 与模式；关闭为 None。
     pub workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
+    /// Workflow Session reset 端口（#2089）：`/clear` 时清空本 Session 的
+    /// Workflow 可见性（索引 + 内存表；实体保留）。关闭为 None。
+    pub workflow_reset: Option<Arc<dyn workflow::WorkflowSessionReset>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。

@@ -143,3 +143,97 @@ impl WorkflowPersistence for FileWorkflowPersistence {
         Ok(())
     }
 }
+
+impl FileWorkflowPersistence {
+    /// 回收无引用实体（#2089）：扫描 `entities/`，删除未被任何
+    /// `index/*.json` 引用的实体。
+    ///
+    /// - 幂等：重复执行后 `removed` 为空；
+    /// - 仅删除无引用数据；`/clear` 后的实体正是无引用状态；
+    /// - 索引本身损坏时不删除任何实体（fail-closed，返回 Corrupt）。
+    pub fn cleanup_orphan_entities(&self) -> Result<CleanupReport, PersistenceError> {
+        self.cleanup_orphans(false)
+    }
+
+    /// 预演：与 [`Self::cleanup_orphan_entities`] 同扫描口径，但不删除任何文件。
+    pub fn cleanup_orphan_entities_dry_run(&self) -> Result<CleanupReport, PersistenceError> {
+        self.cleanup_orphans(true)
+    }
+
+    fn cleanup_orphans(&self, dry_run: bool) -> Result<CleanupReport, PersistenceError> {
+        let entities_dir = self.root.join("entities");
+        if !entities_dir.exists() {
+            return Ok(CleanupReport::default());
+        }
+        let referenced = self.collect_referenced_ids()?;
+
+        let mut scanned_entries = Vec::new();
+        for entry in fs::read_dir(&entities_dir).map_err(io(&entities_dir))? {
+            let entry = entry.map_err(io(&entities_dir))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let workflow_id = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            scanned_entries.push((workflow_id, path));
+        }
+
+        let mut report = CleanupReport {
+            scanned: scanned_entries.len(),
+            ..CleanupReport::default()
+        };
+        let mut removed = Vec::new();
+        for (workflow_id, path) in scanned_entries {
+            if referenced.contains(&workflow_id) {
+                report.referenced += 1;
+                continue;
+            }
+            if !dry_run {
+                fs::remove_file(&path).map_err(io(&path))?;
+            }
+            removed.push(workflow_id);
+        }
+        removed.sort();
+        report.removed = removed;
+        Ok(report)
+    }
+
+    /// 汇总全部 Session 索引的引用集合（含 active 指针）。
+    fn collect_referenced_ids(&self) -> Result<BTreeSet<String>, PersistenceError> {
+        let index_dir = self.root.join("index");
+        let mut referenced: BTreeSet<String> = BTreeSet::new();
+        if !index_dir.exists() {
+            return Ok(referenced);
+        }
+        for entry in fs::read_dir(&index_dir).map_err(io(&index_dir))? {
+            let entry = entry.map_err(io(&index_dir))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let bytes = fs::read(&path).map_err(io(&path))?;
+            let index: SessionIndexFile =
+                serde_json::from_slice(&bytes).map_err(|_| corrupt(&path))?;
+            referenced.extend(index.workflow_ids);
+            if let Some(active) = index.active_workflow_id {
+                referenced.insert(active);
+            }
+        }
+        Ok(referenced)
+    }
+}
+
+/// 统一清理报告（#2089）：只统计无引用实体。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupReport {
+    /// 扫描到的实体文件总数。
+    pub scanned: usize,
+    /// 仍被某个 Session 索引引用的实体（保留）。
+    pub referenced: usize,
+    /// 无引用并已删除（或 dry-run 下将删除）的实体 id。
+    pub removed: Vec<String>,
+}

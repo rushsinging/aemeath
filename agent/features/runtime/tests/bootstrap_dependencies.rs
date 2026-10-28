@@ -278,6 +278,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         None,
         None,
         None,
+        None,
     ));
     let dependencies = runtime::RuntimeBootstrapDependenciesData::new(
         runtime::RuntimeCoreDependenciesData::new(
