@@ -405,6 +405,7 @@ fn committed_outcome() -> CompactOutcome {
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
         quality: CompactSummaryQuality::LocalOnly,
+        metrics: Box::default(),
     })
 }
 

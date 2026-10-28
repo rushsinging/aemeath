@@ -64,6 +64,7 @@ impl ContextCompactPort for FakeContextPort {
             recent_messages: vec![],
             source_revision: SessionRevision::new(3),
             quality: crate::domain::CompactSummaryQuality::LocalOnly,
+            metrics: Box::default(),
         }))
     }
 }

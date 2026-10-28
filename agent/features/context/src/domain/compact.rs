@@ -9,6 +9,7 @@ pub(crate) mod llm_error;
 pub(crate) use constants::TASK_STATE_HEADING;
 mod context_read_candidate;
 mod continuation_checkpoint;
+mod metrics;
 mod microcompact;
 mod restore;
 mod snip;
@@ -27,6 +28,7 @@ pub use context_read_candidate::{ContextReadCandidate, ProtectedRunPolicy};
 #[cfg(test)]
 pub use context_read_candidate::{ContextReadRun, ContextReadStep};
 pub use continuation_checkpoint::*;
+pub use metrics::CompactMetricsData;
 pub use microcompact::microcompact_exploration;
 pub use restore::*;
 pub use snip::snip_superseded_exploration;

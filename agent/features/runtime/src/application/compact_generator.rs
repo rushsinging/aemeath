@@ -27,6 +27,8 @@ impl CompactLlmBindingFactory {
         match self.resolver.resolve() {
             Ok(target) => {
                 let binding = target.binding();
+                let max_output_tokens = crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
+                    .min(binding.max_tokens.max(1));
                 let window = target.context_window().or_else(|| {
                     if matches!(
                         target.origin(),
@@ -41,11 +43,19 @@ impl CompactLlmBindingFactory {
                         None
                     }
                 });
+                // 压缩耗时与模型强相关：解析结果（含来源与窗口）必须先落日志，
+                // 否则慢的时候无法判断用的是配置模型还是会话模型。
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "[compact] 目标模型解析：{}/{} origin={:?} compact_window={window:?} max_output={max_output_tokens}",
+                    binding.model.provider,
+                    binding.model.model,
+                    target.origin(),
+                );
                 Some(context::CompactLlmBinding {
                     invoker: Arc::clone(&self.invoker) as _,
                     model: binding.model.clone(),
-                    max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
-                        .min(binding.max_tokens.max(1)),
+                    max_output_tokens,
                     compact_context_window: window,
                 })
             }

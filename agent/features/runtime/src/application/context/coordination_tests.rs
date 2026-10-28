@@ -92,6 +92,7 @@ impl ContextCompactPort for RecordingPort {
             recent_messages: request.source.pending_messages.clone(),
             source_revision: SessionRevision::new(1),
             quality: CompactSummaryQuality::LocalOnly,
+            metrics: Box::default(),
         }))
     }
 }
@@ -378,6 +379,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
             quality: CompactSummaryQuality::LocalOnly,
+            metrics: Box::default(),
         }),
         &usage,
         &mut window,

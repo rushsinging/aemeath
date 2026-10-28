@@ -3064,3 +3064,15 @@ fn token_cap_budget_inside_candidate_count_keeps_count_semantics() {
     assert_eq!(window.split_point, 45);
     assert_eq!(window.keep_recent, 5);
 }
+
+#[test]
+fn percentile_ms_covers_empty_single_and_out_of_range_quantiles() {
+    assert_eq!(percentile_ms(&[], 0.5), 0);
+    assert_eq!(percentile_ms(&[42], 0.0), 42);
+    assert_eq!(percentile_ms(&[42], 0.95), 42);
+    let sorted = [10, 20, 30, 40, 50];
+    assert_eq!(percentile_ms(&sorted, 0.0), 10);
+    assert_eq!(percentile_ms(&sorted, 0.5), 30);
+    assert_eq!(percentile_ms(&sorted, 0.95), 50);
+    assert_eq!(percentile_ms(&sorted, 1.0), 50);
+}
