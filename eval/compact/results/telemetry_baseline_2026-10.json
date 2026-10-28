@@ -1,0 +1,70 @@
+{
+  "total_compactions": 122,
+  "per_day": {
+    "2026-10-01": 3,
+    "2026-10-03": 3,
+    "2026-10-04": 1,
+    "2026-10-05": 4,
+    "2026-10-06": 11,
+    "2026-10-07": 8,
+    "2026-10-08": 7,
+    "2026-10-09": 8,
+    "2026-10-10": 23,
+    "2026-10-11": 15,
+    "2026-10-12": 12,
+    "2026-10-13": 7,
+    "2026-10-14": 2,
+    "2026-10-15": 1,
+    "2026-10-17": 1,
+    "2026-10-19": 2,
+    "2026-10-20": 2,
+    "2026-10-21": 1,
+    "2026-10-22": 5,
+    "2026-10-23": 1,
+    "2026-10-24": 2,
+    "2026-10-26": 2,
+    "2026-10-28": 1
+  },
+  "duration_ms": {
+    "p50": 20086,
+    "p95": 77063,
+    "max": 758318
+  },
+  "early_tokens": {
+    "p50": 185789,
+    "p95": 542328
+  },
+  "by_model": {
+    "unknown": {
+      "count": 122,
+      "duration_ms_p50": 20086,
+      "duration_ms_p95": 77063,
+      "duration_ms_max": 758318,
+      "early_tokens_p50": 185789,
+      "early_tokens_p95": 542328
+    }
+  },
+  "chunk_shape": {
+    "compactions_with_map": 112,
+    "chunks_p50": 6,
+    "chunks_p95": 15,
+    "chunks_max": 26,
+    "chunk_ms_p50_p50": null,
+    "map_ms_p95": null,
+    "reduce_ms_p95": null,
+    "refresh_compactions": 0,
+    "refresh_ms_max": null
+  },
+  "quality": {
+    "unknown": 122
+  },
+  "degraded_chunks_total": 195,
+  "source": {
+    "log": "/Users/guoyuqi/.agents/logs/context.log",
+    "since": "2026-10-01",
+    "generated_at": "2026-10-28T19:51:36"
+  },
+  "notes": {
+    "unmatched_sessions": 2
+  }
+}
