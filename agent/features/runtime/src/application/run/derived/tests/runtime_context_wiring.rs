@@ -62,6 +62,7 @@ fn assemble_test_context(
         None,
         None,
         None,
+        None,
     ));
     let fixture = SessionRunFixture::builder()
         .with_context_factory(factory.clone())

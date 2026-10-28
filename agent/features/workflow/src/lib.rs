@@ -26,4 +26,7 @@ pub use domain::{
     UpdateWorkflowCommand, WorkflowDefinition, WorkflowDetailData, WorkflowSnapshotData,
     WorkflowStatus, WorkflowSummaryData, WorkflowToolError,
 };
-pub use ports::{PersistenceError, WorkflowPersistence, WorkflowToolBackend};
+pub use ports::{
+    PersistenceError, WorkflowPersistence, WorkflowStateHint, WorkflowStateProbe,
+    WorkflowToolBackend,
+};

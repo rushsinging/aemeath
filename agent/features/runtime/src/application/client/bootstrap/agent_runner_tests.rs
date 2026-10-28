@@ -85,6 +85,7 @@ fn build_agent_runner_constructs_without_panic() {
                 None,
                 None,
                 None,
+                None,
             )
         }),
     );

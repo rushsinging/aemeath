@@ -892,6 +892,17 @@ where
                         }
                     }
                 }
+                // Workflow 状态提示（#2088）：开关开启且装配了 probe 时注册；
+                // 状态未变由 SkipIfUnchanged 去重，不重复注入。
+                if let Some(probe) = runtime_context.workflow_probe() {
+                    reminder_sources.push(std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::WorkflowStateReminderSource::new(probe),
+                    ));
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "reminder_source_registered kind=workflow_state trigger=on_step_interval",
+                    );
+                }
                 let reminder_context_port = runtime_context.context();
                 reminder_context_port.reminders.create_reminder_pipeline(
                     run_id.clone(),
