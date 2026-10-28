@@ -67,6 +67,8 @@ struct MapReduceCompactOutput {
     degraded_chunks: usize,
     degradation_failure: Option<String>,
     locally_degraded_to_budget: bool,
+    /// map/reduce/refresh 阶段的观测指标（#2132）；外层再补模型与总耗时。
+    metrics: crate::domain::compact::CompactMetricsData,
 }
 
 impl MapReduceCompactOutput {
@@ -93,6 +95,8 @@ pub struct CompactResult {
     pub recent_messages: Vec<Message>,
     /// 摘要来源与降级质量。
     pub quality: CompactSummaryQuality,
+    /// 本次压缩的观测指标（#2132）。
+    pub metrics: crate::domain::compact::CompactMetricsData,
 }
 
 /// 构建再压提示词（#1490）：硬预算 + 激进压缩指令。
@@ -175,6 +179,7 @@ pub fn compact_messages(messages: &[Message], tail: CompactTail<'_>) -> Option<C
         summary,
         recent_messages: recent,
         quality: CompactSummaryQuality::LocalOnly,
+        metrics: Default::default(),
     })
 }
 
@@ -758,37 +763,49 @@ pub async fn compact_messages_with_llm(
         early_messages.len(),
         if binding.is_some() { "llm" } else { "local" },
     );
-    let (summary, quality) = match binding {
+    let (summary, quality, stage_metrics) = match binding {
         Some(binding) => {
-            let result: Result<(String, CompactSummaryQuality), CompactLlmError> =
-                if early_tokens > budgets.chunk_target_tokens() {
-                    compact_messages_map_reduce(
-                        binding,
-                        early_messages,
-                        previous_summary,
-                        progress,
-                        budgets,
-                        task_snapshot,
-                        cancel,
+            let result: Result<
+                (
+                    String,
+                    CompactSummaryQuality,
+                    crate::domain::compact::CompactMetricsData,
+                ),
+                CompactLlmError,
+            > = if early_tokens > budgets.chunk_target_tokens() {
+                compact_messages_map_reduce(
+                    binding,
+                    early_messages,
+                    previous_summary,
+                    progress,
+                    budgets,
+                    task_snapshot,
+                    cancel,
+                )
+                .await
+                .map(|output| {
+                    let quality = output.quality();
+                    (output.summary, quality, output.metrics)
+                })
+            } else {
+                emit_progress(progress, CompactStageData::Generating);
+                llm_compact(
+                    binding,
+                    early_messages,
+                    previous_summary,
+                    budgets,
+                    task_snapshot,
+                    cancel,
+                )
+                .await
+                .map(|summary| {
+                    (
+                        summary,
+                        CompactSummaryQuality::Llm,
+                        crate::domain::compact::CompactMetricsData::default(),
                     )
-                    .await
-                    .map(|output| {
-                        let quality = output.quality();
-                        (output.summary, quality)
-                    })
-                } else {
-                    emit_progress(progress, CompactStageData::Generating);
-                    llm_compact(
-                        binding,
-                        early_messages,
-                        previous_summary,
-                        budgets,
-                        task_snapshot,
-                        cancel,
-                    )
-                    .await
-                    .map(|summary| (summary, CompactSummaryQuality::Llm))
-                };
+                })
+            };
             match result {
                 Ok(result) => result,
                 Err(error) if matches!(&error, CompactLlmError::Provider(prov) if prov.is_cancelled()) =>
@@ -807,6 +824,7 @@ pub async fn compact_messages_with_llm(
                     (
                         build_summary_text(early_messages, previous_summary),
                         CompactSummaryQuality::LocalFallback(error.kind_label().to_string()),
+                        crate::domain::compact::CompactMetricsData::default(),
                     )
                 }
             }
@@ -814,8 +832,18 @@ pub async fn compact_messages_with_llm(
         None => (
             build_summary_text(early_messages, previous_summary),
             CompactSummaryQuality::LocalOnly,
+            crate::domain::compact::CompactMetricsData::default(),
         ),
     };
+
+    let mut metrics = stage_metrics;
+    metrics.model =
+        binding.map(|binding| format!("{}/{}", binding.model.provider, binding.model.model));
+    metrics.max_output_tokens = binding.map(|binding| binding.max_output_tokens);
+    metrics.total_messages = total;
+    metrics.early_messages = early_messages.len();
+    metrics.early_tokens = early_tokens;
+    metrics.total_ms = started.elapsed().as_millis() as u64;
 
     emit_progress(progress, CompactStageData::Finalizing);
 
@@ -837,6 +865,7 @@ pub async fn compact_messages_with_llm(
         summary,
         recent_messages: recent,
         quality,
+        metrics,
     })
 }
 
@@ -1428,17 +1457,30 @@ async fn compact_messages_map_reduce(
         .find_map(|(_, _, degradation)| degradation.clone());
     let mut sorted_chunk_ms = chunk_durations_ms;
     sorted_chunk_ms.sort_unstable();
+    let chunk_ms_p50 = percentile_ms(&sorted_chunk_ms, 0.50);
+    let chunk_ms_p95 = percentile_ms(&sorted_chunk_ms, 0.95);
+    let chunk_ms_max = sorted_chunk_ms.last().copied().unwrap_or(0);
+    let chunk_ms_sum: u64 = sorted_chunk_ms.iter().sum();
+    let map_ms = map_started.elapsed().as_millis() as u64;
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] map 完成：total_chunks={total_chunks} successful_chunks={} degraded_chunks={degraded_chunks} waves={waves} chunk_ms_p50={} chunk_ms_p95={} chunk_ms_max={} elapsed_ms={} model={}/{}",
+        "[compact] map 完成：total_chunks={total_chunks} successful_chunks={} degraded_chunks={degraded_chunks} waves={waves} chunk_ms_p50={chunk_ms_p50} chunk_ms_p95={chunk_ms_p95} chunk_ms_max={chunk_ms_max} elapsed_ms={map_ms} model={}/{}",
         total_chunks.saturating_sub(degraded_chunks),
-        percentile_ms(&sorted_chunk_ms, 0.50),
-        percentile_ms(&sorted_chunk_ms, 0.95),
-        sorted_chunk_ms.last().copied().unwrap_or(0),
-        map_started.elapsed().as_millis(),
         binding.model.provider,
         binding.model.model,
     );
+    let metrics = crate::domain::compact::CompactMetricsData {
+        chunk_count: total_chunks,
+        concurrency,
+        waves,
+        chunk_ms_sum,
+        chunk_ms_p50,
+        chunk_ms_p95,
+        chunk_ms_max,
+        map_ms,
+        degraded_chunks,
+        ..Default::default()
+    };
     let fact_batches = indexed_fact_batches
         .into_iter()
         .map(|(_, facts, _)| facts)
@@ -1463,6 +1505,10 @@ async fn compact_messages_map_reduce(
                 degraded_chunks,
                 degradation_failure,
                 locally_degraded_to_budget: false,
+                metrics: crate::domain::compact::CompactMetricsData {
+                    reduce_ms: reduce_started.elapsed().as_millis() as u64,
+                    ..metrics
+                },
             })
             .map_err(|error| {
                 CompactLlmError::InvalidSummary(format!("map compact facts 无法归并：{error}"))
@@ -1512,6 +1558,8 @@ async fn compact_messages_map_reduce(
     // 输出噪音一轮），且未缩小轮次不采用更差的输出。
     let budget = budgets.summary_budget();
     let mut rounds_without_shrink = 0usize;
+    let mut refresh_ms_total = 0u64;
+    let mut refresh_rounds_done = 0usize;
     for round in 1..=MAX_REDUCE_REFRESH_ROUNDS {
         if crate::domain::token_budget::estimate_tokens(&final_summary) <= budget {
             break;
@@ -1540,6 +1588,8 @@ async fn compact_messages_map_reduce(
                 break;
             }
         };
+        refresh_ms_total += round_started.elapsed().as_millis() as u64;
+        refresh_rounds_done += 1;
         emit_progress_completed(
             progress,
             CompactStageData::Refreshing,
@@ -1599,6 +1649,12 @@ async fn compact_messages_map_reduce(
         degraded_chunks,
         degradation_failure,
         locally_degraded_to_budget,
+        metrics: crate::domain::compact::CompactMetricsData {
+            reduce_ms: reduce_started.elapsed().as_millis() as u64,
+            refresh_rounds: refresh_rounds_done,
+            refresh_ms: refresh_ms_total,
+            ..metrics
+        },
     })
 }
 

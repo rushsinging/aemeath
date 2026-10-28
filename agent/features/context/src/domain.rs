@@ -583,6 +583,10 @@ pub struct CompactResult {
     pub recent_messages: Vec<ContextMessage>,
     pub source_revision: SessionRevision,
     pub quality: CompactSummaryQuality,
+    /// 本次压缩的观测指标（#2132）：形状/阶段耗时/降级计数。
+    /// 与 `[compact]` 日志同源，供评测与运维结构化消费。
+    /// 装箱避免 `CompactOutcome` 枚举被指标字段撑大（每次压缩只分配一次）。
+    pub metrics: Box<crate::domain::compact::CompactMetricsData>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

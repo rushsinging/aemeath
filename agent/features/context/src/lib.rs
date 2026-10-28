@@ -132,7 +132,9 @@ pub mod compact {
         ContextReadCandidate, ContextReadRun, ContextReadStep, ContinuationCheckpoint,
         ContinuationStatus, ProtectedRunPolicy,
     };
-    pub use crate::domain::compact::{CompactProgressFn, CompactStageData, CompactWorkData};
+    pub use crate::domain::compact::{
+        CompactMetricsData, CompactProgressFn, CompactStageData, CompactWorkData,
+    };
     #[cfg(test)]
     pub(crate) use crate::domain::token_budget::{estimate_tokens, summary_budget};
     pub use crate::domain::{estimate_messages_tokens, estimate_tool_schemas_tokens};

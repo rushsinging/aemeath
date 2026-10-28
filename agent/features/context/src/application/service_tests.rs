@@ -67,6 +67,7 @@ impl SessionRepository for BaselineSession {
                     recent_messages: vec![],
                     source_revision: self.revision,
                     quality: crate::domain::CompactSummaryQuality::LocalOnly,
+                    metrics: Box::default(),
                 },
             ))
         } else {
