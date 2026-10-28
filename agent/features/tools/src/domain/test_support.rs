@@ -73,9 +73,13 @@ impl WorkspaceReader for FakeWorkspace {
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.normalized(rel)
     }
-    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
+    fn resolve_file_path(
+        &self,
+        path: &Path,
+        auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<PathBuf, share::error::DomainError> {
         let resolved = self.normalized(path);
-        if resolved.starts_with(&self.initial_root) {
+        if auth.allow_outside_workspace || resolved.starts_with(&self.initial_root) {
             Ok(resolved)
         } else {
             Err(share::error::DomainError::invalid(
@@ -84,8 +88,12 @@ impl WorkspaceReader for FakeWorkspace {
             ))
         }
     }
-    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
-        let resolved = self.resolve_file_path(path)?;
+    fn resolve_search_path(
+        &self,
+        path: &Path,
+        auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<PathBuf, share::error::DomainError> {
+        let resolved = self.resolve_file_path(path, auth)?;
         if !resolved.exists() {
             return Err(share::error::DomainError::invalid(
                 "tools",
@@ -112,7 +120,11 @@ impl WorkspaceReader for FakeWorkspace {
 }
 
 impl WorkspaceControl for FakeWorkspace {
-    fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError> {
+    fn change_directory(
+        &self,
+        path: PathBuf,
+        _auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<(), share::error::DomainError> {
         let resolved = self.normalized(&path);
         if !resolved.exists() {
             return Err(share::error::DomainError::invalid(

@@ -288,7 +288,10 @@ fn sub_agent_workspace_isolated() {
         .expect("workspace initialization");
     parent
         .control()
-        .change_directory(child_dir.clone())
+        .change_directory(
+            child_dir.clone(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
         .expect("change parent directory");
 
     let child = parent.derive_isolated();
@@ -299,7 +302,10 @@ fn sub_agent_workspace_isolated() {
 
     child
         .control()
-        .change_directory(main_dir.path().to_path_buf())
+        .change_directory(
+            main_dir.path().to_path_buf(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
         .expect("change child directory");
     assert_eq!(child.read().current_path_base(), canonical_main);
     assert_eq!(parent.read().current_path_base(), canonical_child);

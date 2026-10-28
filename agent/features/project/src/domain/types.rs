@@ -6,6 +6,7 @@
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
+use share::tools_vocab::AuthorizationContext;
 use std::path::{Path, PathBuf};
 
 /// workspace 域快照：标识 + 路径 + 类型合一（原 Frame/Id/Kind 三导出合并）。
@@ -226,38 +227,21 @@ pub trait WorkspaceReader: Send + Sync {
     fn current_workspace_root(&self) -> PathBuf;
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
-    /// 解析文件路径；默认限制在 workspace root，授权方可显式放行越界路径。
-    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError>;
-    fn resolve_file_path_authorized(
+    /// 解析文件路径：非 `allow_outside_workspace` 授权时限制在 workspace root 内。
+    ///
+    /// 授权语义唯一来源是 policy 签发的 `AuthorizationContext`（决议直贯），
+    /// 消费方（tools）只透传、不解释。
+    fn resolve_file_path(
         &self,
         path: &Path,
-        allow_outside_workspace: bool,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        if allow_outside_workspace {
-            Ok(self.resolve(path))
-        } else {
-            self.resolve_file_path(path)
-        }
-    }
-    /// 解析已存在的搜索目录；默认限制在 workspace root。
-    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError>;
-    fn resolve_search_path_authorized(
+        auth: AuthorizationContext,
+    ) -> Result<PathBuf, share::error::DomainError>;
+    /// 解析已存在的搜索目录：非 `allow_outside_workspace` 授权时限制在 workspace root 内。
+    fn resolve_search_path(
         &self,
         path: &Path,
-        allow_outside_workspace: bool,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        if !allow_outside_workspace {
-            return self.resolve_search_path(path);
-        }
-        let resolved = self
-            .resolve(path)
-            .canonicalize()
-            .map_err(|_| WorkspaceError::CannotResolveSearchPath(path.to_path_buf()))?;
-        if !resolved.is_dir() {
-            return Err(WorkspaceError::NotDirectory(resolved).into());
-        }
-        Ok(resolved)
-    }
+        auth: AuthorizationContext,
+    ) -> Result<PathBuf, share::error::DomainError>;
     /// 当前工作根是否位于 linked git worktree（`.git/worktrees/*`）。
     /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;
@@ -270,7 +254,13 @@ pub trait WorkspaceReader: Send + Sync {
 
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
 pub trait WorkspaceControl: Send + Sync {
-    fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError>;
+    /// 变更 path_base（bash cd 回报）。非 `allow_outside_workspace` 授权时限制在
+    /// workspace root 内；授权越界时 path_base 跟随、workspace_root 不变。
+    fn change_directory(
+        &self,
+        path: PathBuf,
+        auth: AuthorizationContext,
+    ) -> Result<(), share::error::DomainError>;
     fn enter(
         &self,
         path: Option<PathBuf>,

@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use project::{wire_production_workspace, Workspace};
 use share::session_types::PersistedWorkspaceContext;
+use share::tools_vocab::AuthorizationContext;
 
 static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
@@ -158,7 +159,10 @@ fn writer_rejected_snapshot_keeps_live_state_unchanged() {
     std::fs::create_dir_all(&inside).unwrap();
     wiring
         .control()
-        .change_directory(inside.canonicalize().unwrap())
+        .change_directory(
+            inside.canonicalize().unwrap(),
+            AuthorizationContext::STANDARD,
+        )
         .expect("合法子目录切换应成功");
     let before = wiring.persist().snapshot();
     let before_base = wiring.read().current_path_base();
@@ -196,7 +200,10 @@ fn control_change_directory_follows_inside_and_rejects_outside() {
 
     wiring
         .control()
-        .change_directory(inside.canonicalize().unwrap())
+        .change_directory(
+            inside.canonicalize().unwrap(),
+            AuthorizationContext::STANDARD,
+        )
         .expect("workspace 内目录切换应成功");
     assert_eq!(
         wiring.read().current_path_base(),
@@ -206,7 +213,7 @@ fn control_change_directory_follows_inside_and_rejects_outside() {
     let outside = TempDir::new("cd-outside");
     let error = wiring
         .control()
-        .change_directory(outside.path().to_path_buf())
+        .change_directory(outside.path().to_path_buf(), AuthorizationContext::STANDARD)
         .expect_err("workspace 外目录必须被拒绝");
     assert!(
         error.message().starts_with("路径 "),
@@ -217,6 +224,48 @@ fn control_change_directory_follows_inside_and_rejects_outside() {
         wiring.read().current_path_base(),
         inside.canonicalize().unwrap(),
         "拒绝后位置不得漂移"
+    );
+}
+
+#[test]
+fn control_change_directory_allow_all_follows_outside_and_keeps_root() {
+    // 决议直贯：AllowAll 下 bash cd 出工作区时 path_base 跟随、
+    // workspace_root 不变（用户拍板 2026-10-28）。
+    let (tmp, wiring) = wired_git_repo("cd-allow-all");
+    let outside = TempDir::new("cd-allow-all-outside");
+    let workspace_root = wiring.read().current_workspace_root();
+
+    wiring
+        .control()
+        .change_directory(
+            outside.path().to_path_buf(),
+            AuthorizationContext::ALLOW_ALL,
+        )
+        .expect("授权越界 cd 必须放行");
+    assert_eq!(
+        wiring.read().current_path_base(),
+        outside.path().canonicalize().unwrap()
+    );
+    assert_eq!(
+        wiring.read().current_workspace_root(),
+        workspace_root,
+        "授权越界 cd 不得改动 workspace_root"
+    );
+
+    // 越界 path_base 落盘后 restore 必须成功并回退 workspace_root
+    // （restore 发生在会话边界，无逐调用授权上下文）。
+    let snapshot = wiring.persist().snapshot();
+    let target = wire_production_workspace(tmp.path().to_path_buf(), Some(PathBuf::from(".wt")))
+        .expect("同一仓库第二装配应成功");
+    let prepared = target
+        .persist()
+        .prepare_restore(&snapshot)
+        .expect("越界 path_base 快照必须可恢复（回退 workspace_root）");
+    target.persist().commit_restore(prepared);
+    assert_eq!(
+        target.read().current_path_base(),
+        target.read().current_workspace_root(),
+        "restore 应把越界 path_base 回退到 workspace_root"
     );
 }
 
@@ -298,7 +347,7 @@ fn reader_authorized_resolution_can_leave_workspace_root() {
 
     let error = wiring
         .read()
-        .resolve_file_path(&target)
+        .resolve_file_path(&target, AuthorizationContext::STANDARD)
         .expect_err("未授权越界路径必须被拒绝");
     assert!(
         error.message().starts_with("路径 "),
@@ -308,7 +357,7 @@ fn reader_authorized_resolution_can_leave_workspace_root() {
     assert_eq!(
         wiring
             .read()
-            .resolve_file_path_authorized(&target, true)
+            .resolve_file_path(&target, AuthorizationContext::ALLOW_ALL)
             .expect("显式授权必须放行 workspace 外路径"),
         target
     );

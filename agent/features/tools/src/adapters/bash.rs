@@ -349,9 +349,13 @@ impl TypedTool for BashTool {
                 let stdout = direct_or_pipe_stdout(&direct_log_path, &stdout).await;
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 // `cd` 改变了 path_base 时通知 workspace 并记录新值，回传给 LLM（#414）。
+                // 授权决议直贯：AllowAll 下 cd 出工作区时 path_base 跟随、workspace_root 不变。
                 let cd_path_base: Option<std::path::PathBuf> = new_path_base.clone();
                 if let Some(new_path_base) = new_path_base {
-                    if let Err(e) = self.control.change_directory(new_path_base) {
+                    if let Err(e) = self
+                        .control
+                        .change_directory(new_path_base, ctx.authorization())
+                    {
                         return TypedToolResult::error(e.to_string());
                     }
                 }

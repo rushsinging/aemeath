@@ -162,12 +162,14 @@ impl project::WorkspaceReader for FakeWorkspace {
     fn resolve_file_path(
         &self,
         rel: &std::path::Path,
+        _auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.0.join(rel))
     }
     fn resolve_search_path(
         &self,
         rel: &std::path::Path,
+        _auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.0.join(rel))
     }

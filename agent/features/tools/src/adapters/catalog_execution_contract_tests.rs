@@ -660,12 +660,14 @@ impl WorkspaceReader for FakeWorkspace {
     fn resolve_file_path(
         &self,
         path: &std::path::Path,
+        _auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.resolve(path))
     }
     fn resolve_search_path(
         &self,
         path: &std::path::Path,
+        _auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.resolve(path))
     }

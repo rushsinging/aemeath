@@ -10,7 +10,11 @@ struct RecordingWorkspaceControl {
 }
 
 impl WorkspaceControl for RecordingWorkspaceControl {
-    fn change_directory(&self, _path: PathBuf) -> Result<(), share::error::DomainError> {
+    fn change_directory(
+        &self,
+        _path: PathBuf,
+        _auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<(), share::error::DomainError> {
         Err(share::error::DomainError::invalid(
             "tools",
             "NonGit 环境不支持 worktree 操作",
