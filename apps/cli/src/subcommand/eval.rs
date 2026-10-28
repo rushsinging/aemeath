@@ -44,6 +44,8 @@ async fn run_compact(command: CompactEvalCommands) {
             min_steps,
             max_must_keep,
             max_tokens,
+            only_compacted,
+            min_compacted_tokens,
         } => cases::run(
             root.unwrap_or_else(default_session_root),
             output_dir,
@@ -51,6 +53,8 @@ async fn run_compact(command: CompactEvalCommands) {
             min_steps,
             max_must_keep,
             max_tokens,
+            only_compacted,
+            min_compacted_tokens,
         ),
         CompactEvalCommands::Score {
             cases,

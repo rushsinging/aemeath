@@ -25,6 +25,10 @@ aemeath eval compact score \
 aemeath eval compact run \
     --cases /tmp/compact-cases --output-dir /tmp/compact-run --limit 3
 
+# 导出真实压缩大 session（生产数据：--only-compacted + early 规模门槛）
+aemeath eval compact export --only-compacted --min-compacted-tokens 100000 \
+    --limit 3 --output-dir /tmp/cases-big
+
 # 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，判卷=独立 --judge
 aemeath eval compact quiz \
     --cases /tmp/compact-cases --summaries /tmp/compact-run \
@@ -139,11 +143,17 @@ eval/compact/
 1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
 PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**。
 
-### 续接问答（P3 首跑，1 case，Bailian summary + glm-5.3 答题 + qwen3.8-max 判卷）
+### 续接问答（真实大 session，44.5 万 token、真实压缩点 early≈28 万 token）
 
-5 题答 5、判对 2、correct_rate **0.4**。判错项（分篇时长细节、角色定名细节、
-改版历史）与 recall 0.078 的信号一致：细粒度事实难以在摘要中保留。
-correct_rate 是续接可用性代理，只做版本间对比。
+run：`quality=Llm`、3.6 分钟、summary 49706 chars。
+quiz（出题预算 800K token、glm-5.3 出题答题、qwen3.8-max 判卷）：6 题（early/mid/recent
+各 2 题，题目为真实工程决断：review 结论、gate 分类、must-fix、阶段划分）答 6、
+判对 3、correct_rate **0.5**；per_epoch：early 0.5 / mid 0.5 / recent 0.5
+（单 case 无衰减差异，多 case 收集后才有统计意义——机制已就位，
+专门验证「多次压缩后早期决断的记忆衰减」）。
+
+小 session 首跑（20 万 token）：5 题判对 2、rate 0.4；判错项为细粒度事实，
+与 recall 0.078 信号一致。correct_rate 是续接可用性代理，只做版本间对比。
 
 ### 摘要质量（199 个 session，13 个有压缩；已落盘摘要）
 

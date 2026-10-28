@@ -29,6 +29,18 @@ pub(crate) struct QuizItem {
     pub(crate) correct: Option<bool>,
     #[serde(default)]
     pub(crate) evidence: Option<String>,
+    /// 事实来源段：early（最老，经历最多轮摘要）/ mid / recent（临近压缩点）。
+    #[serde(default)]
+    pub(crate) epoch: Option<String>,
+}
+
+/// 按 epoch 分层的续接正确率：验证「多次压缩后早期决断的记忆衰减」。
+#[derive(Debug, Default, Clone, Serialize)]
+pub(crate) struct EpochStat {
+    pub(crate) epoch: String,
+    pub(crate) questions: usize,
+    pub(crate) correct: usize,
+    pub(crate) correct_rate: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +53,7 @@ pub(crate) struct CaseQuiz {
     correct_rate: Option<f64>,
     error: Option<String>,
     items: Vec<QuizItem>,
+    per_epoch: Vec<EpochStat>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -51,6 +64,8 @@ pub(crate) struct QuizReport {
     evaluated: usize,
     parse_failed: usize,
     correct_rate_mean: Option<f64>,
+    /// 跨 case 按 epoch 合并：early 段正确率显著低于 recent 即记忆衰减信号。
+    per_epoch: Vec<EpochStat>,
     cases: Vec<CaseQuiz>,
 }
 
@@ -93,12 +108,50 @@ fn message_texts(messages: &[serde_json::Value]) -> Vec<String> {
 
 fn questions_prompt(early_text: &str) -> String {
     format!(
-        "你在为一次上下文压缩验收出题。下面是一段对话的早期历史（已被压缩为摘要）。\n\
-         请出 {QUIZ_QUESTION_COUNT} 道只有读了这段历史才能答出的事实题（目标、决策、改动文件、\n\
-         关键约束、未完成事项），每题附简短标准答案。\n\
-         只输出一个 JSON 数组，元素形如 {{\"question\":\"...\",\"gold\":\"...\"}}。\n\
+        "你在为一次上下文压缩验收出题。下面是按时间顺序排列的早期历史（已被压缩为摘要）。\n\
+         把它按顺序均分为三段：early（最老）、mid、recent（临近压缩点），每段出 2 道\n\
+         只有读了该段才能答出的事实题（目标、决策、改动文件、关键约束、未完成事项），\n\
+         每题标注来源段并附简短标准答案。\n\
+         只输出一个 JSON 数组，元素形如 {{\"epoch\":\"early|mid|recent\",\"question\":\"...\",\"gold\":\"...\"}}。\n\
          不要 Markdown 围栏、不要解释。\n\n<early_history>\n{early_text}\n</early_history>"
     )
+}
+
+/// 跨 case 合并 per-epoch 统计。
+fn merge_epoch_stats(cases: &[CaseQuiz]) -> Vec<EpochStat> {
+    let order = ["early", "mid", "recent"];
+    let mut buckets: std::collections::BTreeMap<String, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for case in cases {
+        for item in &case.items {
+            let epoch = item.epoch.clone().unwrap_or_else(|| "unknown".to_string());
+            let entry = buckets.entry(epoch).or_default();
+            entry.0 += 1;
+            if item.correct == Some(true) {
+                entry.1 += 1;
+            }
+        }
+    }
+    let mut stats: Vec<EpochStat> = buckets
+        .into_iter()
+        .map(|(epoch, (questions, correct))| EpochStat {
+            epoch: epoch.clone(),
+            questions,
+            correct,
+            correct_rate: if questions == 0 {
+                None
+            } else {
+                Some(correct as f64 / questions as f64)
+            },
+        })
+        .collect();
+    stats.sort_by_key(|stat| {
+        order
+            .iter()
+            .position(|name| *name == stat.epoch)
+            .unwrap_or(order.len())
+    });
+    stats
 }
 
 fn answers_prompt(source_text: &str, items: &[QuizItem]) -> String {
@@ -203,6 +256,7 @@ pub(crate) async fn run(
                 correct_rate: None,
                 error: Some(format!("缺少 {}", summary_path.display())),
                 items: Vec::new(),
+                per_epoch: Vec::new(),
             });
             continue;
         };
@@ -224,6 +278,7 @@ pub(crate) async fn run(
                     correct_rate: None,
                     error: Some(error),
                     items: Vec::new(),
+                    per_epoch: Vec::new(),
                 });
             }
         }
@@ -239,6 +294,7 @@ pub(crate) async fn run(
     } else {
         Some(rates.iter().sum::<f64>() / rates.len() as f64)
     };
+    report.per_epoch = merge_epoch_stats(&report.cases);
     let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
     write_or_print(output.as_deref(), &json)
 }
@@ -323,6 +379,18 @@ async fn quiz_one(
         .get("case_id")
         .and_then(|value| value.as_str())
         .unwrap_or_default();
+    // 分层统计复用跨 case 合并逻辑：单 case 构造临时视图。
+    let per_epoch = merge_epoch_stats(&[CaseQuiz {
+        case_id: String::new(),
+        status: String::new(),
+        questions_total: 0,
+        answered: 0,
+        correct: 0,
+        correct_rate: None,
+        error: None,
+        items: items.clone(),
+        per_epoch: Vec::new(),
+    }]);
     Ok(CaseQuiz {
         case_id: case_id.to_string(),
         status: "evaluated".to_string(),
@@ -332,6 +400,7 @@ async fn quiz_one(
         correct_rate: Some(correct as f64 / items.len() as f64),
         error: None,
         items,
+        per_epoch,
     })
 }
 

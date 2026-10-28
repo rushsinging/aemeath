@@ -80,9 +80,15 @@ fn build_case(
     output_dir: &Path,
     limit: usize,
     max_tokens: u64,
+    only_compacted: bool,
+    min_compacted_tokens: u64,
 ) -> Result<Option<Case>, String> {
     let session = load_session(dataset)?;
     if session.messages.len() < 20 {
+        return Ok(None);
+    }
+    // 真实生产压缩点：quiz/生产反馈只对发生过压缩的会话有意义。
+    if only_compacted && session.compact_start.is_none() {
         return Ok(None);
     }
     let texts: Vec<String> = session.messages.iter().map(message_text).collect();
@@ -90,6 +96,16 @@ fn build_case(
     let estimated_tokens = estimate_tokens(&joined);
     if estimated_tokens > max_tokens {
         return Ok(None);
+    }
+    if session.compact_start.is_some() {
+        let compacted_texts: Vec<String> = session.messages
+            [..session.compacted_message_count.min(session.messages.len())]
+            .iter()
+            .map(message_text)
+            .collect(); // allow unsafe_text_op: Vec slice
+        if estimate_tokens(&compacted_texts.join("\n")) < min_compacted_tokens {
+            return Ok(None);
+        }
     }
     let case_dir = output_dir.join(&session.session_id);
     std::fs::create_dir_all(&case_dir).map_err(|error| error.to_string())?;
@@ -129,6 +145,8 @@ pub(crate) fn run(
     min_steps: usize,
     max_must_keep: usize,
     max_tokens: u64,
+    only_compacted: bool,
+    min_compacted_tokens: u64,
 ) -> Result<(), String> {
     std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
     let mut index = String::new();
@@ -146,7 +164,15 @@ pub(crate) fn run(
         if session.committed_step_count < min_steps {
             continue;
         }
-        let Some(case) = build_case(&dataset, &output_dir, max_must_keep, max_tokens)? else {
+        let Some(case) = build_case(
+            &dataset,
+            &output_dir,
+            max_must_keep,
+            max_tokens,
+            only_compacted,
+            min_compacted_tokens,
+        )?
+        else {
             continue;
         };
         index.push_str(&serde_json::to_string(&case).map_err(|error| error.to_string())?);

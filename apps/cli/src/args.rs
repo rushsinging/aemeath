@@ -194,6 +194,14 @@ pub enum CompactEvalCommands {
         /// 跳过估算 token 超过该值的会话（超出压缩窗口的巨型历史不适合评测）
         #[arg(long, default_value_t = 3_000_000)]
         max_tokens: u64,
+
+        /// 只导出发生过压缩的会话（真实生产压缩点，quiz/生产反馈用）
+        #[arg(long, default_value_t = false)]
+        only_compacted: bool,
+
+        /// 只导出被压缩历史（early）估算 token 不低于该值的会话
+        #[arg(long, default_value_t = 100_000)]
+        min_compacted_tokens: u64,
     },
 
     /// 生产实际反馈指标（重问率/重复读取/错误率/中断/不满信号/成本）
