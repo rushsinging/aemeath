@@ -142,6 +142,12 @@ impl EnvAdapter {
                 level: Some(level),
                 ..Default::default()
             });
+        let workflow_patch =
+            parse_bool_switch(source.get("AEMEATH_WORKFLOW_ENABLED")).map(|enabled| {
+                share::config::domain::merge::WorkflowConfigPatch {
+                    enabled: Some(enabled),
+                }
+            });
         let scoring = {
             let enabled = parse_bool_switch(source.get("AEMEATH_SCORING_ENABLED"));
             let memory_rerank = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RERANK"));
@@ -237,6 +243,7 @@ impl EnvAdapter {
             logging,
             storage,
             scoring,
+            workflow: workflow_patch,
             ..Default::default()
         }
     }

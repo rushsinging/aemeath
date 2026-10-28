@@ -87,6 +87,7 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
         skill.loader(),
         skill.catalog(),
         empty_background_source(),
+        None,
         Vec::new(),
     )
     .unwrap();
@@ -198,6 +199,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
             skill.loader(),
             skill.catalog(),
             empty_background_source(),
+            None,
             Vec::new(),
         )
         .unwrap();
@@ -257,6 +259,7 @@ async fn deleted_skill_returns_failure_without_panicking() {
         skill.loader(),
         skill.catalog(),
         empty_background_source(),
+        None,
         Vec::new(),
     )
     .unwrap();
@@ -355,6 +358,7 @@ async fn backgrounding_enabled_catalog_publishes_24h_timeout_with_watch_exceptio
         skill.loader(),
         skill.catalog(),
         empty_background_source(),
+        None,
         Vec::new(),
     )
     .unwrap();

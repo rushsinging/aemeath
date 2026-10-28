@@ -115,6 +115,10 @@ pub struct Config {
     #[serde(default)]
     pub scoring: crate::config::scoring::ScoringConfig,
 
+    /// Workflow Graph 配置（MVP 总开关；完全交付前默认关闭，#2085）
+    #[serde(default)]
+    pub workflow: crate::config::workflow::WorkflowConfig,
+
     /// Hook configuration
     #[serde(default)]
     pub hooks: HooksConfig,
@@ -164,6 +168,7 @@ impl Default for Config {
             audit: AuditConfig::default(),
             storage: StorageConfig::default(),
             scoring: crate::config::scoring::ScoringConfig::default(),
+            workflow: crate::config::workflow::WorkflowConfig::default(),
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),
             harness: HarnessConfig::default(),

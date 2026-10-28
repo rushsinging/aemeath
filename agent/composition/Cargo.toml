@@ -27,6 +27,7 @@ memory = { path = "../features/memory" }
 systemone = { path = "../features/systemone" }
 harness = { path = "../features/harness" }
 task = { path = "../features/task" }
+workflow = { path = "../features/workflow" }
 share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
 logging = { path = "../../packages/global/logging" }
@@ -36,6 +37,8 @@ log = "0.4"
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 serde_json = { workspace = true }
+uuid = { version = "1", features = ["v7"] }
+chrono = "0.4"
 
 [dev-dependencies]
 # 测试经 test_support 消费 context port mock（AtomicBlobSessionManagement）。

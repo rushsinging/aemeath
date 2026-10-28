@@ -222,6 +222,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         tools::composition::wire_skills().loader(),
         tools::composition::wire_skills().catalog(),
         noop_background_source(),
+        None,
         Vec::new(),
     )
     .expect("wire_builtin_catalog_execution");
@@ -289,6 +290,7 @@ async fn role_policies_surface_as_role_profiles() {
         tools::composition::wire_skills().loader(),
         tools::composition::wire_skills().catalog(),
         noop_background_source(),
+        None,
         role_policies,
     )
     .expect("wire_builtin_catalog_execution");
@@ -339,6 +341,7 @@ async fn role_policy_with_unknown_capability_fails_wiring() {
         tools::composition::wire_skills().loader(),
         tools::composition::wire_skills().catalog(),
         noop_background_source(),
+        None,
         role_policies,
     );
     assert!(result.is_err(), "unknown tool name must fail wiring");
