@@ -9,7 +9,8 @@
    "ProviderResponseStream",
    "ProviderContentData",
    "ResponseStopReason",
-   "TokenUsageData"
+   "TokenUsageData",
+   "LlmTextOutputData"
   ],
   "模型元数据": [
    "ModelInfo"
@@ -18,16 +19,13 @@
    "ProviderError",
    "ProviderErrorKind"
   ],
-  "工厂·客户端": [
+  "调用端口·客户端": [
    "wire_provider_client",
    "wire_test_provider_client",
    "LlmClient",
    "ProviderClientSpecData",
-   "TransportPool"
-  ],
-  "文本端口": [
-   "LlmInvokePort",
-   "LlmTextOutputData"
+   "TransportPool",
+   "LlmInvokePort"
   ]
  },
  "nodeGroup": {
@@ -46,8 +44,8 @@
   "LlmClient": "工厂·客户端",
   "ProviderClientSpecData": "工厂·客户端",
   "TransportPool": "工厂·客户端",
-  "LlmInvokePort": "文本端口",
-  "LlmTextOutputData": "文本端口"
+  "LlmInvokePort": "调用端口·客户端",
+  "LlmTextOutputData": "输出"
  },
  "symbols": {
   "LlmClient": {
@@ -5512,28 +5510,20 @@
     "runtime adapters/sdk_event_mapper.rs:400 → sdk ChatEvent::ApiError（用户可见文案终点）"
    ]
   },
-  "工厂·客户端": {
-   "chain": "装配链（wire 工厂 → 传输池复用；旁路 connect 探测入口）",
+  "调用端口·客户端": {
+   "chain": "调用链与装配链（LlmInvokePort 能力契约 → LlmClient 唯一实现 → wire 工厂 + transport 池复用）",
    "path": [
+    "provider published_language.rs trait LlmInvokePort —— invoke_stream(model,&request) → Result<ProviderResponseStream>（唯一必须实现的 verb）；invoke_text 为默认方法：collect_text 逐帧收口（Stop→Ok、Error→Err）",
+    "provider adapters/text_invoke.rs impl LlmInvokePort for LlmClient —— 转发固有 invoke_stream（reasoning clamp / scope 构造 / 取消竞速在 client 内）",
+    "provider lib.rs 根导出 LlmInvokePort / LlmTextOutputData；composition 面导出 wire_provider_client / LlmClient / TransportPool",
     "composition provider.rs:122-137 组合根调 wire_provider_client（config + 占位 ModelInfo → 修正版）",
     "provider adapters/client.rs:197 wire_provider_client 装配主链路 client",
     "provider adapters/client.rs:337 from_config_with_pool —— :343 transport_key_for（driver/api_style/base_url/api_key/UA/timeout 入 key，model 不入）；:344 pool.acquire",
     "provider adapters/pool.rs:38 TransportPool::acquire —— :40-44 读锁 fast path 复用；:47-53 写锁 double-check 防并发重复建池",
     "provider adapters/transport.rs:35 ProviderTransport{id, http} —— :41 build_http_client_for_endpoint；回收靠 Arc 最后引用 drop（pool.rs:65 distinct_transport_count 断言模型切换不建第二 transport）",
     "旁路探测：config core/form/provider_connect.rs:593 begin_probe → connect/service.rs:439 run_probe → ProviderProbePort（config ports.rs:188）",
-    "旁路探测：composition app.rs:480 装配 ProviderProbeAdapter（provider.rs:168）→ probe.rs:27 wire_test_provider_client（:31 独立 transport 不走 pool）"
-   ]
-  },
-  "文本端口": {
-   "chain": "文本调用链（LlmInvokePort：流式收口为单次文本；当前生产压缩走本地）",
-   "path": [
-    "provider adapters/text_invoke.rs:28 trait LlmInvokePort —— invoke_text(model,&request,cancel) → Result<LlmTextOutputData>",
-    "provider adapters/text_invoke.rs:38 impl for LlmClient —— :48 调 invoke_stream，:53-72 逐帧收口（Stop→Ok、Error→Err）",
-    "provider lib.rs:59 composition 面导出 LlmInvokePort/LlmTextOutputData",
-    "context domain.rs:513 CompactLlmBinding —— :515 invoker: Arc<dyn LlmInvokePort>；canonical_session.rs:281 分派 LLM 压缩路径",
-    "context adapters/compact_summary.rs:831 llm_generate —— :836-844 binding.invoker.invoke_text 并校验非空文本",
-    "runtime application/client/compact_model.rs to_llm_binding —— 投影 CompactLlmBinding（invoker = binding.provider，窗口兜底/预算取小/失败 warn 回退 None）",
-    "生产装配事实（#2142 已修）：ContextCoordinator.with_compact_resolver 后 manual/auto 两处 CompactRequestData.llm = resolver.to_llm_binding()；composition assemble_runtime 装配 resolver → RuntimeContextFactory → RuntimeContext（session 级共享）"
+    "旁路探测：composition app.rs:480 装配 ProviderProbeAdapter（provider.rs:168）→ probe.rs:27 wire_test_provider_client（:31 独立 transport 不走 pool）",
+    "消费面（#2146 单端口）：runtime 会话/反思 invoke_stream（流式）；context 压缩 invoke_text（默认收口）——CompactLlmBinding.invoker 即 binding.provider"
    ]
   }
  }
