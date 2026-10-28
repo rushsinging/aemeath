@@ -50,3 +50,34 @@ pub trait WorkflowToolBackend: Send + Sync {
         command: ReplanWorkflowCommand,
     ) -> Result<ReplanResultData, WorkflowToolError>;
 }
+
+/// 持久化错误：IO 故障或损坏数据（fail-closed，不静默重置）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PersistenceError {
+    #[error("persistence io error: {0}")]
+    Io(String),
+    #[error("persistence corrupt data at {0}")]
+    Corrupt(String),
+}
+
+/// Workflow 出站持久化端口（#2083）：Session 索引 + 实体快照。
+///
+/// 实现方（storage 文件系统 adapter）保证单文件原子写；损坏数据以
+/// [`PersistenceError::Corrupt`] 拒绝加载。
+pub trait WorkflowPersistence: Send + Sync {
+    /// 保存聚合快照（write-through；temp+rename 原子）。
+    fn save(
+        &self,
+        session_id: &str,
+        snapshot: &crate::domain::snapshot::WorkflowSnapshotData,
+    ) -> Result<(), PersistenceError>;
+
+    /// 加载 Session 索引内的全部聚合快照（resume 用）。
+    fn load_all(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::domain::snapshot::WorkflowSnapshotData>, PersistenceError>;
+
+    /// 清空 Session 索引与 active 指针；实体保留（/clear 语义）。
+    fn clear_index(&self, session_id: &str) -> Result<(), PersistenceError>;
+}

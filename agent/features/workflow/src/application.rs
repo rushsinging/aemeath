@@ -16,6 +16,9 @@ mod backend_tests;
 #[cfg(test)]
 mod replan_tests;
 
+#[cfg(test)]
+mod persistence_tests;
+
 pub use aggregate::WorkflowAggregate;
 pub use backend::InMemoryWorkflowBackend;
 pub use store::InMemoryWorkflowStore;

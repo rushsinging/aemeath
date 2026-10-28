@@ -710,6 +710,84 @@ impl WorkflowAggregate {
         false
     }
 
+    /// 全量快照（#2083 持久化）。
+    pub fn to_snapshot(&self) -> crate::domain::snapshot::WorkflowSnapshotData {
+        use crate::domain::snapshot::{NodeSnapshotEntry, WorkflowSnapshotData};
+        let node_entries = self
+            .nodes
+            .iter()
+            .map(|node| NodeSnapshotEntry {
+                node_id: node.node_id.clone(),
+                status: self
+                    .node_status(&node.node_id)
+                    .unwrap_or(NodeStatus::Pending),
+                conclusion: self.node_conclusion(&node.node_id).map(str::to_owned),
+                evidence_refs: self.node_evidence(&node.node_id).unwrap_or_default(),
+                exits: self.node_exits(&node.node_id).unwrap_or_default(),
+            })
+            .collect();
+        WorkflowSnapshotData {
+            workflow_id: self.workflow_id.clone(),
+            name: self.name.clone(),
+            objective: self.objective.clone(),
+            root_node_id: self.root_node_id.clone(),
+            nodes: self.nodes.clone(),
+            edges: self.edges.clone(),
+            node_entries,
+            status: self.status,
+            active_mode: self.active_mode,
+            pending_mode: self.pending_mode,
+            updated_at: self.updated_at.clone(),
+        }
+    }
+
+    /// 从快照恢复（resume）；结构非法（如引用悬空）时 Corrupt 语义拒绝。
+    pub fn from_snapshot(
+        snapshot: crate::domain::snapshot::WorkflowSnapshotData,
+    ) -> Result<Self, crate::ports::PersistenceError> {
+        let corrupt = |subject: &str| crate::ports::PersistenceError::Corrupt(subject.to_owned());
+        let mut node_states = std::collections::HashMap::new();
+        let mut node_conclusions = std::collections::HashMap::new();
+        let mut node_evidence = std::collections::HashMap::new();
+        let mut node_exits = std::collections::HashMap::new();
+        for entry in &snapshot.node_entries {
+            let known = snapshot
+                .nodes
+                .iter()
+                .any(|node| node.node_id == entry.node_id);
+            if !known {
+                return Err(corrupt(&format!("unknown node {}", entry.node_id)));
+            }
+            node_states.insert(entry.node_id.clone(), entry.status);
+            if let Some(conclusion) = &entry.conclusion {
+                node_conclusions.insert(entry.node_id.clone(), conclusion.clone());
+            }
+            node_evidence.insert(entry.node_id.clone(), entry.evidence_refs.clone());
+            node_exits.insert(entry.node_id.clone(), entry.exits.clone());
+        }
+        for node in &snapshot.nodes {
+            node_states
+                .entry(node.node_id.clone())
+                .or_insert(NodeStatus::Pending);
+        }
+        Ok(Self {
+            workflow_id: snapshot.workflow_id,
+            name: snapshot.name,
+            objective: snapshot.objective,
+            root_node_id: snapshot.root_node_id,
+            nodes: snapshot.nodes,
+            edges: snapshot.edges,
+            node_states,
+            node_conclusions,
+            node_evidence,
+            node_exits,
+            status: snapshot.status,
+            active_mode: snapshot.active_mode,
+            pending_mode: snapshot.pending_mode,
+            updated_at: snapshot.updated_at,
+        })
+    }
+
     fn ensure_not_terminal(&self) -> Result<(), WorkflowToolError> {
         if matches!(
             self.status,

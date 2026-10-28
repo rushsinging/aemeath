@@ -902,7 +902,9 @@
         "constants.rs",
         "ports.rs",
         "application",
-        "application.rs"
+        "application.rs",
+        "adapters",
+        "adapters.rs"
       ],
       "reason": "F-3：workflow Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
