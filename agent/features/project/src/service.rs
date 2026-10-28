@@ -192,37 +192,29 @@ impl WorkspaceReader for WorkspaceService {
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.lock().resolve(rel)
     }
-    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
-        let state = self.lock();
-        resolve_path(path, state.path_base(), Some(state.workspace_root()), false)
-    }
-    fn resolve_file_path_authorized(
+    fn resolve_file_path(
         &self,
         path: &Path,
-        allow_outside_workspace: bool,
+        auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
         resolve_path(
             path,
             state.path_base(),
-            (!allow_outside_workspace).then_some(state.workspace_root()),
+            (!auth.allow_outside_workspace).then_some(state.workspace_root()),
             false,
         )
     }
-    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
-        let state = self.lock();
-        resolve_path(path, state.path_base(), Some(state.workspace_root()), true)
-    }
-    fn resolve_search_path_authorized(
+    fn resolve_search_path(
         &self,
         path: &Path,
-        allow_outside_workspace: bool,
+        auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
         let resolved = resolve_path(
             path,
             state.path_base(),
-            (!allow_outside_workspace).then_some(state.workspace_root()),
+            (!auth.allow_outside_workspace).then_some(state.workspace_root()),
             true,
         )?;
         if !resolved.is_dir() {
@@ -253,12 +245,16 @@ impl WorkspaceReader for WorkspaceService {
 }
 
 impl WorkspaceControl for WorkspaceService {
-    fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError> {
+    fn change_directory(
+        &self,
+        path: PathBuf,
+        auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<(), share::error::DomainError> {
         let _control = self.lock_control();
         // 先克隆快照再编排：git IO 与路径 canonicalize 都在锁外，
         // 只读访问全程不被阻塞（并发不变量由 enter_during_git_io_* 测试锁定）。
         let live = self.candidate();
-        let next = application::change_directory(&live, path)?;
+        let next = application::change_directory(&live, path, auth)?;
         self.commit(next);
         Ok(())
     }
@@ -385,7 +381,10 @@ mod tests {
         let outside = unique_temp_dir("resolve_authorized_outside").join("outside.rs");
         let service = WorkspaceService::with_git(root, Arc::new(FakeGit::default()));
 
-        let result = service.resolve_file_path_authorized(&outside, true);
+        let result = service.resolve_file_path(
+            &outside,
+            share::tools_vocab::AuthorizationContext::ALLOW_ALL,
+        );
 
         assert_eq!(result.unwrap(), outside);
     }
@@ -395,7 +394,10 @@ mod tests {
         let root = unique_temp_dir("resolve_outside_root");
         let service = WorkspaceService::with_git(root.clone(), Arc::new(FakeGit::default()));
 
-        let result = service.resolve_file_path(Path::new("../outside.rs"));
+        let result = service.resolve_file_path(
+            Path::new("../outside.rs"),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        );
 
         let error = result.unwrap_err();
         assert!(
@@ -411,7 +413,10 @@ mod tests {
         let service = WorkspaceService::with_git(root.clone(), Arc::new(FakeGit::default()));
 
         let path = service
-            .resolve_file_path(Path::new("deep/missing/new.rs"))
+            .resolve_file_path(
+                Path::new("deep/missing/new.rs"),
+                share::tools_vocab::AuthorizationContext::STANDARD,
+            )
             .unwrap();
 
         assert_eq!(path, root.join("deep/missing/new.rs"));
@@ -423,7 +428,8 @@ mod tests {
         let outside = unique_temp_dir("search_outside_target");
         let service = WorkspaceService::with_git(root, Arc::new(FakeGit::default()));
 
-        let result = service.resolve_search_path(&outside);
+        let result = service
+            .resolve_search_path(&outside, share::tools_vocab::AuthorizationContext::STANDARD);
 
         let error = result.unwrap_err();
         assert!(
@@ -442,7 +448,10 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &link).unwrap();
         let service = WorkspaceService::with_git(root, Arc::new(FakeGit::default()));
 
-        let result = service.resolve_file_path(Path::new("escape/file.rs"));
+        let result = service.resolve_file_path(
+            Path::new("escape/file.rs"),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        );
 
         let error = result.unwrap_err();
         assert!(
@@ -517,7 +526,8 @@ mod tests {
             let workspace = workspace.clone();
             let target = target.clone();
             thread::spawn(move || {
-                let result = workspace.change_directory(target);
+                let result = workspace
+                    .change_directory(target, share::tools_vocab::AuthorizationContext::STANDARD);
                 second_done_tx.send(()).unwrap();
                 result
             })

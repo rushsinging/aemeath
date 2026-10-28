@@ -19,13 +19,14 @@ use crate::domain::git::GitWorktreeOps;
 use crate::domain::state::{WorkspaceRestoreData, WorkspaceState};
 use crate::domain::types::WorkspaceData;
 
-/// 变更当前工作目录：候选状态上校验 containment，成功后返回新状态。
+/// 变更当前工作目录：候选状态上校验 containment（按授权），成功后返回新状态。
 pub fn change_directory(
     live: &WorkspaceState,
     path: PathBuf,
+    auth: share::tools_vocab::AuthorizationContext,
 ) -> Result<WorkspaceState, DomainError> {
     let mut candidate = live.clone();
-    candidate.change_directory(path)?;
+    candidate.change_directory(path, auth)?;
     Ok(candidate)
 }
 

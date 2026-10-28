@@ -41,10 +41,10 @@ impl TypedTool for FileReadTool {
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
         let requested_path = args.file_path.as_str();
-        let path = match ctx.workspace_read().resolve_file_path_authorized(
-            Path::new(requested_path),
-            ctx.authorization().allow_outside_workspace,
-        ) {
+        let path = match ctx
+            .workspace_read()
+            .resolve_file_path(Path::new(requested_path), ctx.authorization())
+        {
             Ok(path) => path,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };

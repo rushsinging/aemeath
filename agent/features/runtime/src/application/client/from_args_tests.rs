@@ -549,7 +549,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let original = workspace.clone();
     workspace
         .control()
-        .change_directory(sub.clone())
+        .change_directory(
+            sub.clone(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
         .expect("change workspace to subdirectory");
 
     let args = ChatBootstrapArgs {
@@ -710,7 +713,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
 
     original
         .control()
-        .change_directory(root.clone())
+        .change_directory(
+            root.clone(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
         .expect("change original clone back to root");
     assert_eq!(
         client.inner.shell.workspace.read().current_path_base(),

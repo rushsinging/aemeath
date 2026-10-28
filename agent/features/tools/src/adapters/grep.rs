@@ -61,10 +61,9 @@ impl TypedTool for GrepTool {
         let workspace = ctx.workspace_read();
         let workspace_root = workspace.current_workspace_root();
         let search_path = match args.path.as_deref() {
-            Some(path) => match workspace.resolve_search_path_authorized(
-                std::path::Path::new(path),
-                ctx.authorization().allow_outside_workspace,
-            ) {
+            Some(path) => match workspace
+                .resolve_search_path(std::path::Path::new(path), ctx.authorization())
+            {
                 Ok(path) => path,
                 Err(error) => return TypedToolResult::error(error.to_string()),
             },

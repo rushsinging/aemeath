@@ -121,12 +121,17 @@ impl WorkspaceReader for TestWorkspace {
     fn resolve(&self, path: &std::path::Path) -> std::path::PathBuf {
         self.root.join(path)
     }
-    fn resolve_file_path(&self, path: &std::path::Path) -> Result<std::path::PathBuf, DomainError> {
+    fn resolve_file_path(
+        &self,
+        path: &std::path::Path,
+        _auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<std::path::PathBuf, DomainError> {
         Ok(self.resolve(path))
     }
     fn resolve_search_path(
         &self,
         path: &std::path::Path,
+        _auth: share::tools_vocab::AuthorizationContext,
     ) -> Result<std::path::PathBuf, DomainError> {
         Ok(self.resolve(path))
     }

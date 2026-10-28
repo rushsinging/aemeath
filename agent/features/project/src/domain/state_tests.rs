@@ -212,9 +212,54 @@ fn change_directory_canonicalizes_and_keeps_root() {
         WorktreeKind::NonGit,
         root.join(".worktrees"),
     );
-    s.change_directory(sub.clone()).unwrap();
+    s.change_directory(
+        sub.clone(),
+        share::tools_vocab::AuthorizationContext::STANDARD,
+    )
+    .unwrap();
     assert_eq!(s.path_base, sub.canonicalize().unwrap());
     assert_eq!(s.workspace_root, root);
+}
+
+#[test]
+fn change_directory_authorized_outside_follows_path_base_and_keeps_root() {
+    // AllowAll（决议直贯）：cd 出 workspace root 时 path_base 跟随、
+    // workspace_root 保持不变；standard 授权仍必须拒绝。
+    let root = unique_temp_dir("cd_authorized_root");
+    let outside = unique_temp_dir("cd_authorized_outside");
+    let mut s = WorkspaceState::from_verified(
+        ProjectIdentityData::default(),
+        root.clone(),
+        root.clone(),
+        WorktreeKind::NonGit,
+        root.join(".worktrees"),
+    );
+    let outside_canonical = outside.canonicalize().unwrap();
+
+    let error = s
+        .change_directory(
+            outside.clone(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
+        .unwrap_err();
+    assert!(
+        error.message().starts_with("路径 "),
+        "standard 授权越界 cd 必须被拒绝，got {}",
+        error.message()
+    );
+
+    s.change_directory(
+        outside.clone(),
+        share::tools_vocab::AuthorizationContext::ALLOW_ALL,
+    )
+    .unwrap();
+    assert_eq!(s.path_base, outside_canonical);
+    assert_eq!(
+        s.workspace_root, root,
+        "授权越界 cd 不得改动 workspace_root"
+    );
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(outside);
 }
 
 #[test]
@@ -352,11 +397,20 @@ fn prepare_restore_path_not_found_keeps_live_state() {
 
 #[test]
 fn prepare_restore_path_outside_root_keeps_live_state() {
-    // #894: path_base 越出 workspace_root -> PathOutsideWorkspaceRoot，live state 不变。
+    // #894: path_base 越出 workspace_root 且无回退资格（Linked、栈非空）->
+    // PathOutsideWorkspaceRoot，live state 不变。
+    // 普通会话（Primary、空栈）的越界回退语义见
+    // restore_falls_back_to_workspace_root_when_primary_path_base_outside_root。
     let root = unique_temp_dir("prep_outside_root");
     let outside = unique_temp_dir("prep_outside_other"); // 真实存在但不在 root 内
     let common = "/repo/.git";
-    let dto = valid_git_dto(&root, &outside, common);
+    let mut dto = valid_git_dto(&root, &outside, common);
+    dto.worktree_kind = WorktreeKind::Linked;
+    dto.context_stack = vec![share::session_types::PersistedWorkspaceFrame {
+        workspace_root: root.display().to_string(),
+        path_base: root.display().to_string(),
+        worktree_kind: WorktreeKind::Primary,
+    }];
     let git = git_ops_for(&root, common);
 
     let live = st("/repo");
@@ -371,6 +425,26 @@ fn prepare_restore_path_outside_root_keeps_live_state() {
         "expected PathOutsideWorkspaceRoot, got {result:?}"
     );
     assert_eq!(live.workspace_root, before);
+}
+
+#[test]
+fn restore_falls_back_to_workspace_root_when_primary_path_base_outside_root() {
+    // AllowAll 下 bash cd 出工作区的 path_base 被持久化后越界（2026-10-28 拍板）：
+    // 普通会话（Primary、空栈）回退 workspace_root，而不是 fail-closed 整个 resume。
+    let root = unique_temp_dir("fallback_outside");
+    let outside = unique_temp_dir("fallback_outside_target"); // 真实存在但不在 root 内
+    let common = "/repo/.git";
+    let dto = valid_git_dto(&root, &outside, common);
+    let git = git_ops_for(&root, common);
+
+    let mut live = st("/repo");
+    let prepared: crate::domain::state::WorkspaceRestoreData =
+        WorkspaceState::prepare_restore(&live, &dto, &git)
+            .expect("越界 path_base 必须回退 workspace_root 而非拒绝恢复");
+    live.commit_restore(prepared);
+    assert_eq!(live.path_base, root.canonicalize().unwrap());
+    assert_eq!(live.workspace_root, root.canonicalize().unwrap());
+    let _ = std::fs::remove_dir_all(outside);
 }
 
 #[test]
