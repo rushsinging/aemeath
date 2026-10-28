@@ -99,6 +99,16 @@ impl SessionRepository for InMemorySessionRepository {
         })
     }
 
+    async fn current_revision(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, String> {
+        let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+        Ok(sessions
+            .get(session_id.as_str())
+            .map(|state| SessionRevision::new(state.revision)))
+    }
+
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,

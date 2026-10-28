@@ -614,6 +614,22 @@ fn terminal_run_rejects_new_steps() {
 }
 
 #[test]
+fn finalizing_step_can_fail_instead_of_staying_active_forever() {
+    // 收口阶段自身出错（如 session revision 冲突）时，Run 必须能
+    // 失败收口；否则会永久停在 FinalizingStep，活动卡片也永远收不了尾。
+    let mut run = run_at_status(RunStatus::FinalizingStep);
+
+    run.fail("收口阶段失败").unwrap();
+
+    assert_eq!(run.status(), RunStatus::Failed);
+    assert_eq!(run.steps()[0].status(), RunStepStatus::Failed);
+    assert!(run
+        .events()
+        .iter()
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Failed { .. })));
+}
+
+#[test]
 fn parent_identity_is_carried_by_every_domain_event() {
     let parent = RunId::new_v7();
     let mut run = Run::new(

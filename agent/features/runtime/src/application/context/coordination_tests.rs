@@ -106,6 +106,15 @@ impl ContextAppendPort for RecordingPort {
         Ok(())
     }
 
+    async fn current_revision(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, ContextPortError> {
+        self.calls.lock().unwrap().push("current_revision");
+        assert!(!session_id.as_str().is_empty());
+        Ok(Some(SessionRevision::new(7)))
+    }
+
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
@@ -154,6 +163,22 @@ fn request() -> ContextRequestData {
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
+}
+
+#[tokio::test]
+async fn coordinator_exposes_current_revision_for_step_cas_baseline() {
+    // Step 收口前刷新 CAS 基准，避免窗口快照 revision 落后于本 step
+    // 自身 accepted-input / 工具回执推进后被误判成并发冲突。
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
+
+    let revision = coordinator
+        .current_revision(&SessionId::new("session"))
+        .await
+        .unwrap();
+
+    assert_eq!(revision, Some(SessionRevision::new(7)));
+    assert!(port.calls.lock().unwrap().contains(&"current_revision"));
 }
 
 #[tokio::test]

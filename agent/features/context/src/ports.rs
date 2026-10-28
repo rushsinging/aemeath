@@ -39,6 +39,18 @@ pub(crate) struct SessionItem {
 #[async_trait]
 pub(crate) trait SessionRepository: Send + Sync {
     async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String>;
+
+    /// 会话当前提交修订号：Step 收口提交的 CAS 基准。
+    ///
+    /// 调用方持有的是构建窗口时的旧快照，而本 step 自身的 accepted-input 与
+    /// 工具回执推进都会递增修订号；收口前取一次当前值，避免把自己的写入
+    /// 误判成并发冲突。`None` 表示实现不向调用方暴露修订号。
+    async fn current_revision(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, String> {
+        Ok(None)
+    }
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,

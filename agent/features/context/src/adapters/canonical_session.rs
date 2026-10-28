@@ -684,6 +684,17 @@ impl SessionRepository for CanonicalSessionRepository {
         })
     }
 
+    async fn current_revision(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, String> {
+        let session = self.session.read().map_err(|error| error.to_string())?;
+        if session.id != session_id.as_str() {
+            return Ok(None);
+        }
+        Ok(Some(SessionRevision::new(session.revision)))
+    }
+
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
