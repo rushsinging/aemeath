@@ -6,6 +6,7 @@ mod cases;
 mod constants;
 mod dataset;
 mod feedback;
+mod quiz;
 mod recall;
 mod run;
 mod score;
@@ -67,6 +68,14 @@ async fn run_compact(command: CompactEvalCommands) {
             limit,
             model,
         } => run::run(cases, output_dir, limit, model).await,
+        CompactEvalCommands::Quiz {
+            cases,
+            summaries,
+            model,
+            judge,
+            limit,
+            output,
+        } => quiz::run(cases, summaries, model, judge, limit, output).await,
         CompactEvalCommands::Recall {
             root,
             limit,

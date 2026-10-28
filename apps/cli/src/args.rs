@@ -231,6 +231,34 @@ pub enum CompactEvalCommands {
         model: Option<String>,
     },
 
+    /// 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，
+    /// 判卷=独立 --judge 模型（无默认值，未指定拒绝运行）
+    Quiz {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// run 产生的 summary 目录（<case_id>.summary.txt）
+        #[arg(long)]
+        summaries: PathBuf,
+
+        /// 出题与答题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 独立判卷模型 selection（评测时显式指定，不设默认）
+        #[arg(long)]
+        judge: String,
+
+        /// 最多评多少个 case
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 输出 JSON 路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
     /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）
     Recall {
         /// session 根目录（默认 ~/.agents/session）

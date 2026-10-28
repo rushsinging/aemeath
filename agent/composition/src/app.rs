@@ -1168,6 +1168,61 @@ pub struct EvalCompactOutcome {
     pub quality: String,
 }
 
+/// 评测装配（#2133）：加载配置并构建与生产同源的 compact 模型解析器。
+///
+/// 同时幂等初始化日志（评测进程独立运行，否则降级/调用诊断全部丢失）。
+async fn eval_compact_resolver() -> Result<runtime::CompactModelResolver, String> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let agents_dir = share::config::paths::global_agents_dir();
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store(&agents_dir).map_err(|error| error.to_string())?,
+        config::CliConfigInputData::default(),
+    )
+    .await
+    .map_err(|error| format!("加载配置失败：{error}"))?;
+    let gateways = FeatureGateways::wire_default(configured_policy(&config));
+    let _ = init_logging(
+        &config.reader().committed_snapshot(),
+        sdk::LoggingOutputMode::File,
+        sdk::NativeStderrMode::default(),
+        &agents_dir.join("logs"),
+    );
+    Ok(runtime::CompactModelResolver::new(
+        config.reader(),
+        gateways.provider.clone(),
+        runtime::SessionModelSlotData::new(),
+    ))
+}
+
+/// 评测用通用文本调用（#2133 P3 续接问答）：按显式 selection 完成一次补全。
+/// 结构化任务由调用方在 prompt 内约束输出 JSON；reasoning 固定 Off
+/// （server_effort_map 归并为权威，#2148）。
+pub async fn eval_llm_complete(
+    selection: &str,
+    system: &str,
+    user_prompt: &str,
+    max_output_tokens: u32,
+) -> Result<String, String> {
+    let resolver = eval_compact_resolver().await?;
+    let binding = resolver
+        .resolve_explicit_binding(selection)
+        .map_err(|error| format!("解析模型 {selection} 失败：{error}"))?;
+    let mut request = provider::ProviderRequestData::new(
+        binding.model.model.clone(),
+        vec![share::message::Message::user(user_prompt.to_string())],
+        max_output_tokens,
+        share::reasoning::ReasoningLevel::Off,
+    );
+    request.system = system.to_string();
+    let output = binding
+        .invoker
+        .invoke_text(&binding.model, &request)
+        .await
+        .map_err(|error| format!("LLM 调用失败：{error}"))?;
+    Ok(output.text)
+}
+
 /// 评测执行入口（#2133）：对一批消息跑一次真实压缩。
 ///
 /// - 模型解析与生产同路径（`CompactModelResolver` + `context.compact_model`）；
@@ -1179,29 +1234,7 @@ pub async fn run_compact_for_eval(
     previous_summary: Option<&str>,
     selection: Option<&str>,
 ) -> Result<EvalCompactOutcome, String> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let agents_dir = share::config::paths::global_agents_dir();
-    let config = config::wire_project_config_with_cli(
-        &cwd,
-        wire_config_override_store(&agents_dir).map_err(|error| error.to_string())?,
-        config::CliConfigInputData::default(),
-    )
-    .await
-    .map_err(|error| format!("加载配置失败：{error}"))?;
-    let gateways = FeatureGateways::wire_default(configured_policy(&config));
-    // 评测进程独立运行：初始化与生产一致的日志（否则压缩/降级诊断全部丢失）。
-    let snapshot = config.reader().committed_snapshot();
-    let _ = init_logging(
-        &snapshot,
-        sdk::LoggingOutputMode::File,
-        sdk::NativeStderrMode::default(),
-        &share::config::paths::global_agents_dir().join("logs"),
-    );
-    let resolver = runtime::CompactModelResolver::new(
-        config.reader(),
-        gateways.provider.clone(),
-        runtime::SessionModelSlotData::new(),
-    );
+    let resolver = eval_compact_resolver().await?;
     let binding = match selection {
         // P2 多模型矩阵：显式 selection，失败 MUST 报错（不静默降级）。
         Some(selection) => resolver

@@ -25,6 +25,13 @@ aemeath eval compact score \
 aemeath eval compact run \
     --cases /tmp/compact-cases --output-dir /tmp/compact-run --limit 3
 
+# 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，判卷=独立 --judge
+aemeath eval compact quiz \
+    --cases /tmp/compact-cases --summaries /tmp/compact-run \
+    --model "Zhipu Coding Plan/glm-5.3" \
+    --judge "Bailian Token Plan/qwen3.8-max" \
+    --limit 1 --output eval/compact/results/quiz.json
+
 # 真实摘要质量（must_keep 召回 + 压缩率，用已落盘摘要，不重跑压缩）
 aemeath eval compact recall \
     --root ~/.agents/session --limit 200 \
@@ -71,7 +78,7 @@ eval/compact/
 | P0 | 遥测基线 | ✅ Rust 实现，10 月真实数据已入库 |
 | P1 | case 导出 + 确定性指标 + 单测 + 真实压缩执行面 | ✅ Rust 实现（metrics 待 #2136） |
 | P2 | 多模型对照 | ✅ 由多次 `run --model X` 收集（无一次性矩阵命令：单模型失败不牵连其他） |
-| P3 | 续接问答 e2e（判官 `--judge` 指定） | ⏳ |
+| P3 | 续接问答 e2e（判官 `--judge` 指定） | ✅ 已落地（判官校准集待做） |
 | P4 | 回归门禁（确定性指标不劣于基线） | ⏳ |
 | 生产反馈 | 重问率/重复读取/错误率/中断/不满/成本 | ✅ 已实现（趋势口径，不进 CI 门禁） |
 | 摘要质量 | 真实摘要的 must_keep 召回 + 压缩率 | ✅ 已实现（不重跑压缩） |
@@ -131,6 +138,12 @@ eval/compact/
 「effective≤requested」校验冲突：Zhipu 系 compact LLM 调用必失败、五块全降级、
 1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
 PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**。
+
+### 续接问答（P3 首跑，1 case，Bailian summary + glm-5.3 答题 + qwen3.8-max 判卷）
+
+5 题答 5、判对 2、correct_rate **0.4**。判错项（分篇时长细节、角色定名细节、
+改版历史）与 recall 0.078 的信号一致：细粒度事实难以在摘要中保留。
+correct_rate 是续接可用性代理，只做版本间对比。
 
 ### 摘要质量（199 个 session，13 个有压缩；已落盘摘要）
 

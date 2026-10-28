@@ -27,6 +27,8 @@ pub(crate) struct Case {
     must_keep: Vec<String>,
     must_keep_source: String,
     messages_path: String,
+    /// 压缩点之前的消息数（被摘要覆盖的 early 历史长度；0=未压缩）。
+    compacted_message_count: usize,
 }
 
 pub(crate) fn extract_identifiers(texts: &[String]) -> Vec<String> {
@@ -112,6 +114,7 @@ fn build_case(
         must_keep: rank_identifiers(&texts, limit),
         must_keep_source: "auto_identifiers".to_string(),
         messages_path: format!("{}/messages.jsonl", session.session_id),
+        compacted_message_count: session.compacted_message_count,
     };
     let case_json = serde_json::to_string_pretty(&case).map_err(|error| error.to_string())?;
     std::fs::write(case_dir.join("case.json"), format!("{case_json}\n"))

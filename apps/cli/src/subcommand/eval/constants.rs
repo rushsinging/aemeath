@@ -86,5 +86,14 @@ pub(crate) const INJECTION_PREFIXES: [&str; 4] = [
     "<task-progress",
 ];
 
+/// 续接问答（P3）：出题者可见的 early 历史预算（估算 token）。
+pub(crate) const QUIZ_SOURCE_TOKEN_BUDGET: usize = 60_000;
+
+/// 续接问答（P3）：答题者可见的 summary + tail 预算（估算 token）。
+pub(crate) const ANSWER_SOURCE_TOKEN_BUDGET: usize = 60_000;
+
+/// 续接问答（P3）：单 case 出题数。
+pub(crate) const QUIZ_QUESTION_COUNT: usize = 5;
+
 /// 读取类工具：路径集合差分用于衡量「压缩后重复读取」。
 pub(crate) const TOOL_READ_NAMES: [&str; 3] = ["Read", "Grep", "Glob"];
