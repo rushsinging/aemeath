@@ -836,7 +836,8 @@ async fn llm_generate(
     let output = binding
         .invoker
         .invoke_text(&binding.model, &{
-            let mut request = compact_invoke_request(request, binding.max_output_tokens);
+            let mut request =
+                compact_invoke_request(&binding.model.model, request, binding.max_output_tokens);
             // 取消真相源单通道（#2146）：端口无独立取消参数。
             request.cancellation = cancel.clone();
             request
@@ -1021,7 +1022,7 @@ async fn llm_extract_facts_or_local_fallback(
         Err(error @ CompactLlmError::InvalidSummary(_)) => {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+                "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} detail={error} input_messages={} input_tokens={}",
                 chunk_index + 1,
                 total_chunks,
                 error.kind_label(),
@@ -1327,7 +1328,7 @@ async fn compact_messages_map_reduce(
     for (chunk_index, error) in failed_chunks {
         log::warn!(
             target: crate::LOG_TARGET,
-            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} detail={error} input_messages={} input_tokens={}",
             chunk_index + 1,
             total_chunks,
             error.kind_label(),
@@ -1515,11 +1516,14 @@ mod compact_summary_tests;
 
 /// 组 compact LLM 调用请求（Off reasoning；取消由调用方 token 传入）。
 fn compact_invoke_request(
+    model: &str,
     messages: Vec<Message>,
     max_output_tokens: u32,
 ) -> provider::ProviderRequestData {
+    // #2146 端口收敛后 request.model 参与 InvocationScope 校验（非空），
+    // 必须携带 binding 的模型 id，否则所有 compact LLM 调用必失败并静默降级。
     provider::ProviderRequestData::new(
-        String::new(),
+        model.to_string(),
         messages,
         max_output_tokens,
         share::reasoning::ReasoningLevel::Off,

@@ -1154,6 +1154,91 @@ fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigS
     Ok(config::wire_config_override_store(blob))
 }
 
+/// 评测执行结果（#2133）：`metrics` 为 `CompactMetricsData` 的 JSON 投影，
+/// #2136 合入前为 `None`。
+#[derive(Debug, serde::Serialize)]
+pub struct EvalCompactOutcome {
+    pub model: String,
+    pub context_size: usize,
+    pub summary: String,
+    pub recent_message_count: usize,
+    /// `CompactSummaryQuality` 的 Debug 投影：`Llm` 为纯 LLM 路径；
+    /// `LocalFallback`/`PartialMapFallback`/`LocalOnly` 表示发生了降级，
+    /// 评测结果 MUST 标注降级，不得当作纯 LLM 基线。
+    pub quality: String,
+}
+
+/// 评测执行入口（#2133）：对一批消息跑一次真实压缩。
+///
+/// - 模型解析与生产同路径（`CompactModelResolver` + `context.compact_model`）；
+/// - 压缩走生产管线 `compact_messages_with_llm`，不用简化替身；
+/// - 未配置 compact 模型时返回 Err（评测不静默降级为本地压缩）；
+/// - 消息以 dataset 原始 JSON 传入，由组合根反序列化（cli 不依赖 context/share）。
+pub async fn run_compact_for_eval(
+    messages_json: Vec<serde_json::Value>,
+    previous_summary: Option<&str>,
+) -> Result<EvalCompactOutcome, String> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let agents_dir = share::config::paths::global_agents_dir();
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store(&agents_dir).map_err(|error| error.to_string())?,
+        config::CliConfigInputData::default(),
+    )
+    .await
+    .map_err(|error| format!("加载配置失败：{error}"))?;
+    let gateways = FeatureGateways::wire_default(configured_policy(&config));
+    // 评测进程独立运行：初始化与生产一致的日志（否则压缩/降级诊断全部丢失）。
+    let snapshot = config.reader().committed_snapshot();
+    let _ = init_logging(
+        &snapshot,
+        sdk::LoggingOutputMode::File,
+        sdk::NativeStderrMode::default(),
+        &share::config::paths::global_agents_dir().join("logs"),
+    );
+    let resolver = runtime::CompactModelResolver::new(
+        config.reader(),
+        gateways.provider.clone(),
+        runtime::SessionModelSlotData::new(),
+    );
+    let Some(binding) = resolver.to_llm_binding() else {
+        return Err(
+            "未解析到 compact 模型：请配置 context.compact_model 后重试（评测不静默降级为本地压缩）"
+                .to_string(),
+        );
+    };
+    let model = format!("{}/{}", binding.model.provider, binding.model.model);
+    let context_size = binding.model.context_limit.unwrap_or_default();
+
+    let messages: Vec<share::message::Message> = messages_json
+        .iter()
+        .map(|value| serde_json::from_value(value.clone()))
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("消息反序列化失败：{error}"))?;
+
+    let tail = context::compact::CompactTail::from_context(&[], context_size);
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let outcome = context::compact::compact_messages_with_llm(
+        &messages,
+        previous_summary,
+        context_size,
+        Some(&binding),
+        None,
+        None,
+        &cancel,
+        tail,
+    )
+    .await
+    .ok_or_else(|| "压缩返回 None（消息过少或被取消）".to_string())?;
+    Ok(EvalCompactOutcome {
+        model,
+        context_size,
+        summary: outcome.summary,
+        recent_message_count: outcome.recent_messages.len(),
+        quality: format!("{:?}", outcome.quality),
+    })
+}
+
 fn logging_settings_from_snapshot(
     snapshot: &ConfigSnapshot,
     default_logs_dir: &Path,

@@ -23,7 +23,7 @@ pub(crate) struct Case {
     committed_step_count: usize,
     message_count: usize,
     estimated_tokens: u64,
-    previous_summary_chars: usize,
+    previous_summary: String,
     must_keep: Vec<String>,
     must_keep_source: String,
     messages_path: String,
@@ -108,11 +108,7 @@ fn build_case(
         committed_step_count: session.committed_step_count,
         message_count: session.messages.len(),
         estimated_tokens,
-        previous_summary_chars: session
-            .previous_summary
-            .as_deref()
-            .map(str::len)
-            .unwrap_or_default(),
+        previous_summary: session.previous_summary.clone().unwrap_or_default(),
         must_keep: rank_identifiers(&texts, limit),
         must_keep_source: "auto_identifiers".to_string(),
         messages_path: format!("{}/messages.jsonl", session.session_id),

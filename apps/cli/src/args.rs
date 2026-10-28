@@ -211,6 +211,21 @@ pub enum CompactEvalCommands {
         output: Option<PathBuf>,
     },
 
+    /// 对导出的 case 跑一次真实压缩（走生产装配与管线）
+    Run {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// summary 输出目录（写 <case_id>.summary.txt 与 run_summary.json）
+        #[arg(long)]
+        output_dir: PathBuf,
+
+        /// 最多跑多少个 case
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+    },
+
     /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）
     Recall {
         /// session 根目录（默认 ~/.agents/session）

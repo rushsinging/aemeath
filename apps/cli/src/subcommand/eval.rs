@@ -7,6 +7,7 @@ mod constants;
 mod dataset;
 mod feedback;
 mod recall;
+mod run;
 mod score;
 mod telemetry;
 
@@ -24,13 +25,13 @@ fn default_session_root() -> std::path::PathBuf {
     dirs::home_dir().unwrap_or_default().join(".agents/session")
 }
 
-pub(crate) fn run(command: EvalCommands) {
+pub(crate) async fn run(command: EvalCommands) {
     match command {
-        EvalCommands::Compact { command } => run_compact(command),
+        EvalCommands::Compact { command } => run_compact(command).await,
     }
 }
 
-fn run_compact(command: CompactEvalCommands) {
+async fn run_compact(command: CompactEvalCommands) {
     let result = match command {
         CompactEvalCommands::Telemetry { log, since, output } => {
             telemetry::run(log.unwrap_or_else(default_log_path), since, output)
@@ -60,6 +61,11 @@ fn run_compact(command: CompactEvalCommands) {
             limit,
             output,
         } => feedback::run(root.unwrap_or_else(default_session_root), limit, output),
+        CompactEvalCommands::Run {
+            cases,
+            output_dir,
+            limit,
+        } => run::run(cases, output_dir, limit).await,
         CompactEvalCommands::Recall {
             root,
             limit,
