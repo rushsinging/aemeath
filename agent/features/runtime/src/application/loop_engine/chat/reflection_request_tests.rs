@@ -14,7 +14,8 @@ use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
 use crate::ports::{
-    ProviderBindingData, ProviderError, ProviderPort, ProviderRequestData, ProviderResponseStream,
+    LlmInvokePort, ModelInfo, ProviderBindingData, ProviderError, ProviderRequestData,
+    ProviderResponseStream,
 };
 
 #[derive(Default)]
@@ -23,11 +24,11 @@ struct RequestParameterRecorder {
 }
 
 #[async_trait::async_trait]
-impl ProviderPort for RequestParameterRecorder {
-    async fn invoke(
+impl LlmInvokePort for RequestParameterRecorder {
+    async fn invoke_stream(
         &self,
-        request: ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &ModelInfo,
+        request: &ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         self.requests
             .lock()
@@ -46,7 +47,6 @@ impl ProviderPort for RequestParameterRecorder {
 fn recording_binding(recorder: Arc<RequestParameterRecorder>) -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
         provider: recorder,
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model: provider::ModelInfo {
             provider: "reflection-parameter-test".to_string(),
             model: "reflection-parameter-model".to_string(),

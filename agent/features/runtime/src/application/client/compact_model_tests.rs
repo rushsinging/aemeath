@@ -76,7 +76,6 @@ impl ProviderFactory for RecordingFactory {
         self.builds.fetch_add(1, Ordering::SeqCst);
         Ok(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
-            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -160,7 +159,6 @@ fn session_state(
         resolved,
         Arc::new(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
-            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: "local".into(),
                 model: model_id,
@@ -371,10 +369,10 @@ fn to_llm_binding_returns_none_when_session_model_unbound() {
 }
 
 #[tokio::test]
-async fn to_llm_binding_carries_binding_text_invoker() {
-    // invoker 与 model 必须同源（#2142 双句柄）：投影携带的 invoker 即
-    // resolve 出的 binding 自带的 text_invoker（此处为占位实现，调用返回
-    // ModelUnavailable——真实 transport 匹配由 composition 装配测试覆盖）。
+async fn to_llm_binding_carries_binding_invoke_port() {
+    // invoker 与 model 必须同源（#2146 单端口）：投影携带的 invoker 即
+    // resolve 出的 binding 自带的 provider，文本消费走默认方法
+    // invoke_text（此处 fake 返回 "hello"，证明收口链路通）。
     let snapshot = snapshot_with(Some("local/compact-model"));
     let slot = bound_slot(&snapshot);
     let (resolver, _builds, _reader) = resolver(snapshot, slot);
@@ -391,11 +389,9 @@ async fn to_llm_binding_carries_binding_text_invoker() {
                 1,
                 share::reasoning::ReasoningLevel::Off,
             ),
-            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
-    assert!(matches!(
-        result,
-        Err(ref e) if e.kind == provider::ProviderErrorKind::ModelUnavailable
-    ));
+    let output = result.expect("默认 invoke_text 收口必须成功");
+    assert_eq!(output.text, "hello");
+    assert_eq!(output.completion_reason.as_deref(), Some("end_turn"));
 }

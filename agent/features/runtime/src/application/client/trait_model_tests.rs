@@ -84,20 +84,20 @@ async fn model_switch_reads_injected_snapshot_once() {
 // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
 fn test_factory() -> Arc<dyn ProviderFactory> {
     use crate::ports::provider_port::{
-        CancellationSignal, ProviderError, ProviderErrorKind, ProviderRequestData,
-        ProviderResponseStream, ReasoningLevel,
+        ProviderError, ProviderErrorKind, ProviderRequestData, ProviderResponseStream,
+        ReasoningLevel,
     };
-    use crate::ports::ProviderPort as ProviderPortTrait;
+    use crate::ports::LlmInvokePort as ProviderPortTrait;
 
     // 能力查询已删除（#1880）：binding 持全量 ModelInfo，port 只负责 invoke。
     struct TestPort;
 
     #[async_trait::async_trait]
-    impl ProviderPortTrait for TestPort {
-        async fn invoke(
+    impl crate::ports::LlmInvokePort for TestPort {
+        async fn invoke_stream(
             &self,
-            _request: ProviderRequestData,
-            _cancellation: &dyn CancellationSignal,
+            _model: &crate::ports::ModelInfo,
+            _request: &ProviderRequestData,
         ) -> std::result::Result<ProviderResponseStream, ProviderError> {
             Err(ProviderError::fatal(
                 ProviderErrorKind::UpstreamUnavailable,
@@ -130,7 +130,6 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
             let port: Arc<dyn ProviderPortTrait> = Arc::new(TestPort);
             Ok(crate::ports::ProviderBindingData {
                 provider: port,
-                text_invoker: provider::composition::unsupported_text_invoker(),
                 model,
                 max_tokens: spec.max_tokens,
                 requested_reasoning: spec.requested_reasoning,

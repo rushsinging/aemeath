@@ -186,13 +186,12 @@ struct FixedTextInvoker {
 }
 
 #[async_trait::async_trait]
-impl provider::composition::LlmTextInvokePort for FixedTextInvoker {
-    async fn invoke_text(
+impl provider::LlmInvokePort for FixedTextInvoker {
+    async fn invoke_stream(
         &self,
         _model: &provider::ModelInfo,
         _request: &provider::ProviderRequestData,
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
         if let Some(started) = self.started.lock().unwrap().take() {
             let _ = started.send(());
         }
@@ -200,19 +199,18 @@ impl provider::composition::LlmTextInvokePort for FixedTextInvoker {
         if self.fail_with_cancel {
             return Err(provider::ProviderError::cancelled());
         }
-        Ok(provider::composition::LlmTextOutputData {
-            text: self.text.clone(),
-            completion_reason: Some("end_turn".to_string()),
-            text_delta_count: 1,
-            non_text_delta_count: 0,
-            stream_completed: true,
-        })
+        Ok(Box::pin(futures_util::stream::iter(vec![
+            provider::ProviderResponseChunk::Content(provider::ProviderContentData::Text(
+                self.text.clone(),
+            )),
+            provider::ProviderResponseChunk::Stop(provider::ResponseStopReason::EndTurn),
+        ])))
     }
 }
 
 /// 构造测试 binding（fixed invoker）。
 fn test_llm_binding(
-    invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    invoker: std::sync::Arc<dyn provider::LlmInvokePort>,
 ) -> Option<crate::domain::CompactLlmBinding> {
     Some(crate::domain::CompactLlmBinding {
         invoker,
@@ -238,13 +236,12 @@ struct ProviderFailingInvoker {
 }
 
 #[async_trait::async_trait]
-impl provider::composition::LlmTextInvokePort for ProviderFailingInvoker {
-    async fn invoke_text(
+impl provider::LlmInvokePort for ProviderFailingInvoker {
+    async fn invoke_stream(
         &self,
         _model: &provider::ModelInfo,
         _request: &provider::ProviderRequestData,
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
         use std::sync::atomic::Ordering;
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(provider::ProviderError::fatal(

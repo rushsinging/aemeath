@@ -10,13 +10,13 @@ impl runtime::ProviderFactory for TestProviderFactory {
     ) -> Result<runtime::ProviderBindingData, provider::ProviderError> {
         struct UnusedPort;
         #[async_trait::async_trait]
-        impl runtime::ProviderPort for UnusedPort {
+        impl provider::LlmInvokePort for UnusedPort {
             // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
-            async fn invoke(
+            async fn invoke_stream(
                 &self,
-                _request: provider::ProviderRequestData,
-                _cancellation: &dyn runtime::CancellationSignal,
+                _model: &provider::ModelInfo,
+                _request: &provider::ProviderRequestData,
             ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
                 Err(provider::ProviderError::fatal(
                     provider::ProviderErrorKind::UpstreamUnavailable,
@@ -26,7 +26,6 @@ impl runtime::ProviderFactory for TestProviderFactory {
         }
         Ok(runtime::ProviderBindingData {
             provider: Arc::new(UnusedPort),
-            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

@@ -305,7 +305,6 @@ fn thinking_binding(
     };
     crate::ports::ProviderBindingData {
         provider: Arc::new(crate::ports::provider_port::fake::FakeProvider::new()),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 4_096,
         requested_reasoning: share::reasoning::ReasoningLevel::Medium,

@@ -6,7 +6,7 @@ use crate::application::loop_engine::chat::{
 };
 use crate::ports::{
     Policy, PolicyDecisionData, PolicyRequestData, ProviderBindingData, ProviderBuildSpecData,
-    ProviderError, ProviderFactory, ProviderPort,
+    ProviderError, ProviderFactory,
 };
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
@@ -61,13 +61,13 @@ impl crate::ports::ContextAppendPort for FakeContextPort {
 pub(crate) struct FakeProviderPort;
 
 #[async_trait::async_trait]
-impl ProviderPort for FakeProviderPort {
+impl crate::ports::LlmInvokePort for FakeProviderPort {
     // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
-    async fn invoke(
+    async fn invoke_stream(
         &self,
-        _request: crate::ports::ProviderRequestData,
-        _cancellation: &dyn crate::ports::CancellationSignal,
+        _model: &crate::ports::ModelInfo,
+        _request: &crate::ports::ProviderRequestData,
     ) -> Result<crate::ports::ProviderResponseStream, ProviderError> {
         Err(ProviderError::cancelled())
     }
@@ -76,7 +76,6 @@ impl ProviderPort for FakeProviderPort {
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
         provider: Arc::new(FakeProviderPort),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model: crate::ports::ModelInfo {
             provider: "test-provider".into(),
             model: "test-model".into(),
@@ -99,7 +98,6 @@ impl ProviderFactory for FakeProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
             provider: Arc::new(FakeProviderPort),
-            text_invoker: provider::composition::unsupported_text_invoker(),
             model: crate::ports::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

@@ -39,13 +39,13 @@ pub(crate) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistor
 pub(crate) struct StaticReflectionProvider;
 
 #[async_trait::async_trait]
-impl crate::ports::ProviderPort for StaticReflectionProvider {
+impl crate::ports::LlmInvokePort for StaticReflectionProvider {
     // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
-    async fn invoke(
+    async fn invoke_stream(
         &self,
-        _request: crate::ports::provider_port::ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &crate::ports::provider_port::ModelInfo,
+        _request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
@@ -64,7 +64,6 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
 pub(crate) fn static_reflection_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(StaticReflectionProvider),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "reflection-test-model".to_string(),

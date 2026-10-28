@@ -155,12 +155,12 @@ pub(crate) async fn advance_until_retry_condition(
 /// without writing bespoke provider port impls.
 ///
 /// Uses `for<'a>` HRTB so closures can capture the borrowed `&ProviderRequestData`
-/// / `&dyn CancellationSignal` into their returned `Future + 'a`.
+/// into their returned `Future + 'a`（#2146：取消走 `request.cancellation`，
+/// 端口无独立取消参数）。
 pub(crate) type TestInvocationFn = Arc<
     dyn for<'a> Fn(
             usize,
             &'a crate::ports::provider_port::ProviderRequestData,
-            &'a dyn crate::ports::provider_port::CancellationSignal,
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
@@ -210,14 +210,14 @@ impl TestProviderPort {
 }
 
 #[async_trait]
-impl crate::ports::ProviderPort for TestProviderPort {
+impl crate::ports::LlmInvokePort for TestProviderPort {
     // `capabilities()` 已删除（#1880）：fake 与生产一致——binding 持全量
     // ModelInfo，运行时零查询（unknown model 门禁在装配时）。
 
-    async fn invoke(
+    async fn invoke_stream(
         &self,
-        request: crate::ports::provider_port::ProviderRequestData,
-        cancellation: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &crate::ports::provider_port::ModelInfo,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
@@ -234,16 +234,16 @@ impl crate::ports::ProviderPort for TestProviderPort {
         }
         // Custom invocation hook overrides default dispatch.
         if let Some(ref f) = self.invocation_fn {
-            return f(call_index, &request, cancellation).await;
+            return f(call_index, request).await;
         }
         if let Some(ref e) = self.error {
             return Err(e.clone());
         }
         if self.blocking {
-            cancellation.cancelled().await;
+            request.cancellation.cancelled().await;
             return Err(ProviderError::cancelled());
         }
-        if cancellation.is_cancelled() {
+        if request.cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
         let text = self
@@ -261,7 +261,6 @@ pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBi
     let port = Arc::new(TestProviderPort::new(responses, model.clone()));
     Arc::new(crate::ports::ProviderBindingData {
         provider: port,
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
@@ -274,7 +273,6 @@ pub(crate) fn test_binding_from_port(
     let model = port.model.clone();
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(port),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
@@ -330,7 +328,7 @@ pub(crate) fn constant_factory(
 
 // ─── ScriptedLlmProvider → ProviderPort adapter (#907 loop test migration) ────
 
-/// Adapter that implements [`crate::ports::ProviderPort`] by delegating to an
+/// Adapter that implements [`crate::ports::LlmInvokePort`] by delegating to an
 /// existing runtime-local [`ScriptedLlmProvider`] scripted fake.
 ///
 /// Used only by `runtime` lib tests as a minimal bridge so the scripted
@@ -348,18 +346,17 @@ impl ScriptedProviderPortAdapter {
 }
 
 #[async_trait]
-impl crate::ports::ProviderPort for ScriptedProviderPortAdapter {
-    async fn invoke(
+impl crate::ports::LlmInvokePort for ScriptedProviderPortAdapter {
+    async fn invoke_stream(
         &self,
-        request: crate::ports::provider_port::ProviderRequestData,
-        cancellation: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &crate::ports::provider_port::ModelInfo,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
     > {
-        // 取消语义经 request.cancellation 表达（advisory 信号忽略）。
-        let _ = cancellation;
-        self.provider.scripted_invocation_stream(&request).await
+        // 取消语义经 request.cancellation 表达（端口无独立取消参数）。
+        self.provider.scripted_invocation_stream(request).await
     }
 }
 
@@ -385,7 +382,6 @@ pub(crate) fn binding_from_llm_provider(
     };
     std::sync::Arc::new(crate::ports::ProviderBindingData {
         provider: std::sync::Arc::new(ScriptedProviderPortAdapter::new(provider)),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,

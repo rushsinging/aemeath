@@ -44,9 +44,9 @@ mod ports;
 pub mod published_language;
 
 pub use published_language::{
-    ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind, ProviderRequestData,
-    ProviderResponse, ProviderResponseChunk, ProviderResponseStream, ResponseStopReason,
-    TokenUsageData,
+    LlmInvokePort, LlmTextOutputData, ModelInfo, ProviderContentData, ProviderError,
+    ProviderErrorKind, ProviderRequestData, ProviderResponse, ProviderResponseChunk,
+    ProviderResponseStream, ResponseStopReason, TokenUsageData,
 };
 
 pub(crate) use domain::capability::ProviderDriverKind;
@@ -57,8 +57,7 @@ pub mod composition {
     pub use crate::adapters::pool::TransportPool;
     pub use crate::adapters::probe::wire_test_provider_client;
     #[cfg(any(test, feature = "dev"))]
-    pub use crate::adapters::text_invoke::{unsupported_text_invoker, UnsupportedTextInvoker};
-    pub use crate::adapters::text_invoke::{LlmTextInvokePort, LlmTextOutputData};
+    pub use crate::adapters::text_invoke::{unsupported_llm_invoke_port, UnsupportedLlmInvokePort};
 }
 
 #[derive(Debug, thiserror::Error)]

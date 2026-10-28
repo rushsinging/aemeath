@@ -1,62 +1,12 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use provider::composition::{LlmClient, ProviderClientSpecData};
-use provider::{
-    ModelInfo, ProviderError, ProviderErrorKind, ProviderRequestData, ProviderResponseStream,
-};
+use provider::composition::ProviderClientSpecData;
+use provider::{ModelInfo, ProviderError, ProviderErrorKind};
 
 use runtime::{
     ProviderBindingData, ProviderBuildSpecData, ProviderFactory as ProviderFactoryTrait,
-    ProviderPort,
 };
 use share::reasoning::ReasoningLevel;
-
-// ─── New adapter: ProviderPort via LlmClient ────────────────
-
-/// Composition-owned adapter: wraps the Provider construction handle together
-/// with the binding's single `ModelInfo` to expose the `runtime::ports::ProviderPort`
-/// contract.
-///
-/// 每 binding 一个 adapter 实例（单模型绑定）：invoke 用持有的 `ModelInfo`
-/// 直调 client——运行时零查询（#1880：能力查询随 capabilities() 删除）。
-///
-/// The adapter lives in the Composition crate because the dependency
-/// direction is `runtime → provider`; Composition depends on both.
-pub struct ProviderAdapter {
-    client: Arc<LlmClient>,
-    model: ModelInfo,
-}
-
-impl ProviderAdapter {
-    /// Create a new adapter over an opaque LLM client and the bound model metadata.
-    pub fn new(client: Arc<LlmClient>, model: ModelInfo) -> Self {
-        Self { client, model }
-    }
-}
-
-/// Production factory: accepts an opaque Provider construction handle plus the
-/// bound model's `ModelInfo`, returns `Arc<dyn ProviderPort>` backed by a
-/// Composition-owned adapter.
-pub fn provider_port(client: Arc<LlmClient>, model: ModelInfo) -> Arc<dyn ProviderPort> {
-    Arc::new(ProviderAdapter::new(client, model))
-}
-
-#[async_trait]
-impl ProviderPort for ProviderAdapter {
-    async fn invoke(
-        &self,
-        request: ProviderRequestData,
-        cancellation: &dyn runtime::CancellationSignal,
-    ) -> Result<ProviderResponseStream, ProviderError> {
-        // fast path：调用方信号已触发。
-        if cancellation.is_cancelled() {
-            return Err(ProviderError::cancelled());
-        }
-        // #1880 v3：runtime 消费流式（渐进 UI），转发 invoke_stream 片段流。
-        self.client.invoke_stream(&self.model, &request).await
-    }
-}
 
 // ─── ProviderFactory implementation ─────────────────────
 
@@ -134,15 +84,13 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
         let (client, model) =
             provider::composition::wire_provider_client(config, model, self.pool.as_ref())?;
 
-        // #2142 双句柄：同一 `Arc<LlmClient>` 同时交出 ProviderPort（会话对话）
-        // 与 LlmTextInvokePort（compact 等按模型文本调用）——invoker 与 model
-        // 恒同源 wire，跨 driver 的 compact_model 配置天然 transport 匹配。
-        let port = provider_port(Arc::clone(&client), model.clone());
-        let text_invoker: Arc<dyn provider::composition::LlmTextInvokePort> = client;
+        // #2146 单端口：同一 `Arc<LlmClient>` 既是会话流式通道（invoke_stream）
+        // 也是 compact 文本通道（invoke_text 默认方法）——能力与 model 恒同源
+        // wire，跨 driver 的 compact_model 配置天然 transport 匹配。
+        let provider: Arc<dyn provider::LlmInvokePort> = client;
 
         Ok(ProviderBindingData {
-            provider: port,
-            text_invoker,
+            provider,
             model,
             max_tokens: spec.max_tokens,
             // #1861 v4：binding 档位从 spec 直取（原 wiring.requested_reasoning
@@ -169,7 +117,7 @@ impl ProviderProbeAdapter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ProviderProbePort for ProviderProbeAdapter {
     async fn probe(
         &self,

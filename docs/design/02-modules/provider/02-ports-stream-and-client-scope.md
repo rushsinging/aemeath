@@ -2,14 +2,14 @@
 
 > 层级：02-modules / provider（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#788（S2）
-> 本文定义 ProviderPort 调用契约、流式与取消语义、Runtime/Provider 重试边界，以及不可变 Transport + Invocation Scope 生命周期。签名用于表达职责，不锁定具体 Rust API。
+> 本文定义 `LlmInvokePort` 调用契约（#2146 单端口：流式 verb + 文本默认方法）、流式与取消语义、Runtime/Provider 重试边界，以及不可变 Transport + Invocation Scope 生命周期。签名用于表达职责，不锁定具体 Rust API。
 
-## 1. ProviderPort
+## 1. LlmInvokePort
 
-`ProviderPort` 是 Agent Runtime 拥有的出站端口（Runtime-owned），Provider adapter 只负责实现该签名。唯一权威 trait 定义在 [Runtime 端口与装配 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约)；本文 **NEVER** 复制第二份 trait 真相，只展开 Provider 侧调用语义、流事件类型与关联 Published Language：
+`LlmInvokePort` 由 Provider crate 唯一定义（#2146 收敛：流式 `invoke_stream` 是唯一必须实现的 verb，文本 `invoke_text` 是端口默认方法——取消真相源单通道 `request.cancellation`）。trait 真相源在 [Runtime 端口与装配 §2.1](../runtime/06-ports-and-adapters.md#21-provider-defined-lllminvokeport2146-收敛)；本文 **NEVER** 复制第二份 trait 真相，只展开 Provider 侧调用语义、流事件类型与关联 Published Language：
 
 ```rust
-// 权威签名见 ../runtime/06-ports-and-adapters.md §2（trait ProviderPort），
+// 权威签名见 runtime/06-ports-and-adapters.md §2.1（trait LlmInvokePort），
 // 本文不重复定义：capabilities / resolve_invocation_options / invoke 三个方法。
 
 enum InvocationEvent {
@@ -77,7 +77,7 @@ Created
 
 > **当前落地**：Provider 已用 crate-private `HttpAttemptExecutor`（`adapters/http_attempt.rs`）统一单 attempt 的机械发送、cancellation、status/error body 判定与单一 diagnostic 记录，driver 之间不再各自复制这段逻辑。跨调用 retry/backoff 与 stream→non-stream fallback 的所有权已迁至 Runtime，错误分类统一收口。Provider 生产 stream adapter 由引擎规则 `pattern.provider.no-pull-stream-retry-loop` 禁止恢复 retry loop、backoff sleep 或 fallback 发起逻辑。
 
-ProviderPort 的一次 invoke 只允许一次上游语义请求。Provider 不实现“stream 失败后自动 non-stream 重发”，因为第二次请求可能产生不同文本、工具调用或副作用意图，也会让 Runtime 无法准确记录 attempt 和 usage。
+`LlmInvokePort` 的一次 invoke 只允许一次上游语义请求。Provider 不实现“stream 失败后自动 non-stream 重发”，因为第二次请求可能产生不同文本、工具调用或副作用意图，也会让 Runtime 无法准确记录 attempt 和 usage。
 
 任何第二次调用（普通 retry 或 non-stream fallback）都必须由 Runtime 显式开始新的 attempt，并满足：
 
@@ -135,7 +135,7 @@ Runtime 负责：
 
 1. 创建 attempt 与 cancellation scope；
 2. 发出 `ModelInvocationStarted`；
-3. 调 ProviderPort 并把 delta 应用到本 attempt；
+3. 调 `LlmInvokePort` 并把 delta 应用到本 attempt；
 4. 跟踪本 attempt 的 delta 是否已提交到 EventSink；只有未提交或已原子回滚时，才根据 ProviderErrorKind、retryable、retry_after 决定重试；
 5. 退避期间保持可取消；
 6. 发出 `ModelInvocationRetrying{attempt}`；

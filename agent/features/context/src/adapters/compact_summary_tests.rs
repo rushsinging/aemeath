@@ -2,30 +2,40 @@ use super::*;
 use std::sync::Arc;
 
 /// 测试 helper：文本 → LlmTextOutputData。
+/// 测试 helper：把文本结果投影为端口流（#2146 单端口后 fake 实现
+/// `invoke_stream`；测试语义只看文本与终止，delta 计数由默认收口决定）。
+fn text_stream(text: &str, reason: Option<&str>) -> provider::ProviderResponseStream {
+    let mut chunks: Vec<provider::ProviderResponseChunk> = Vec::new();
+    if !text.is_empty() {
+        chunks.push(provider::ProviderResponseChunk::Content(
+            provider::ProviderContentData::Text(text.to_string()),
+        ));
+    }
+    let stop = match reason {
+        Some("tool_use") => provider::ResponseStopReason::ToolUse,
+        Some("max_output_tokens") => provider::ResponseStopReason::MaxOutputTokens,
+        Some("content_filtered") => provider::ResponseStopReason::ContentFiltered,
+        Some("stop_sequence") => provider::ResponseStopReason::StopSequence,
+        None => provider::ResponseStopReason::EndTurn,
+        Some(other) => provider::ResponseStopReason::Other(other.to_string()),
+    };
+    chunks.push(provider::ProviderResponseChunk::Stop(stop));
+    Box::pin(futures_util::stream::iter(chunks))
+}
+
 /// 测试 helper：completed 静态构造替代。
 fn text_output_completed(
     text: &str,
     reason: Option<&str>,
-    text_deltas: usize,
-    non_text_deltas: usize,
-) -> provider::composition::LlmTextOutputData {
-    provider::composition::LlmTextOutputData {
-        text: text.to_string(),
-        completion_reason: reason.map(str::to_string),
-        text_delta_count: text_deltas,
-        non_text_delta_count: non_text_deltas,
-        stream_completed: true,
-    }
+    _text_deltas: usize,
+    _non_text_deltas: usize,
+) -> provider::ProviderResponseStream {
+    text_stream(text, reason)
 }
 
-fn text_output(text: impl Into<String>) -> provider::composition::LlmTextOutputData {
-    provider::composition::LlmTextOutputData {
-        text: text.into(),
-        completion_reason: Some("end_turn".to_string()),
-        text_delta_count: 1,
-        non_text_delta_count: 0,
-        stream_completed: true,
-    }
+fn text_output(text: impl Into<String>) -> provider::ProviderResponseStream {
+    let text = text.into();
+    text_stream(&text, Some("end_turn"))
 }
 
 /// 测试闭包 invoker。
@@ -33,23 +43,22 @@ fn text_output(text: impl Into<String>) -> provider::composition::LlmTextOutputD
 struct FnInvoker<F>(F);
 
 #[async_trait::async_trait]
-impl<F> provider::composition::LlmTextInvokePort for FnInvoker<F>
+impl<F> provider::LlmInvokePort for FnInvoker<F>
 where
     F: Fn(&provider::ProviderRequestData) -> Result<String, provider::ProviderError> + Send + Sync,
 {
-    async fn invoke_text(
+    async fn invoke_stream(
         &self,
         _model: &provider::ModelInfo,
         request: &provider::ProviderRequestData,
-        _cancel: &CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
         Ok(text_output((self.0)(request)?))
     }
 }
 
 /// 测试 binding 构造。
 fn summary_test_binding(
-    invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    invoker: std::sync::Arc<dyn provider::LlmInvokePort>,
     window: Option<usize>,
 ) -> crate::domain::CompactLlmBinding {
     crate::domain::CompactLlmBinding {
@@ -203,13 +212,12 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
         window: Option<usize>,
     }
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for CountingGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for CountingGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(text_output(typed_response_for_request(&request.messages)))
         }
@@ -286,13 +294,12 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         window: Option<usize>,
     }
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for BulkyFactsGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for BulkyFactsGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let text = request
                 .messages
                 .first()
@@ -404,13 +411,12 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         calls: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for CountingGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for CountingGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let _ = request.messages;
             Ok(text_output(typed_response_for_request(&request.messages)))
@@ -808,13 +814,12 @@ fn checkpoint_cascade_keeps_previous_sections_in_place() {
 async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
     struct FlakyChunkGenerator;
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for FlakyChunkGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for FlakyChunkGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .first()
@@ -1415,13 +1420,12 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for LocalReduceGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for LocalReduceGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .first()
@@ -1494,13 +1498,12 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         call_count: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for ObservingGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for ObservingGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_concurrent.fetch_max(active, Ordering::SeqCst);
             self.call_count.fetch_add(1, Ordering::SeqCst);
@@ -1588,13 +1591,12 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
         call_count: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for ShrinkingGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for ShrinkingGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             let text = request
                 .messages
@@ -1657,13 +1659,12 @@ struct MockGenerator {
 }
 
 #[async_trait::async_trait]
-impl provider::composition::LlmTextInvokePort for MockGenerator {
-    async fn invoke_text(
+impl provider::LlmInvokePort for MockGenerator {
+    async fn invoke_stream(
         &self,
         _model: &provider::ModelInfo,
         request: &provider::ProviderRequestData,
-        _cancel: &CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
         self.requests.lock().unwrap().push(
             request
                 .messages
@@ -1723,13 +1724,12 @@ async fn compact_cancelled_generator_does_not_fallback() {
 
     struct CancelledGenerator;
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for CancelledGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for CancelledGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             _request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             Err(provider::ProviderError::cancelled())
         }
     }
@@ -1761,13 +1761,12 @@ async fn compact_falls_back_when_generator_errors() {
 
     struct FailingGenerator;
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for FailingGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for FailingGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             _request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             Err(provider::ProviderError::fatal(
                 provider::ProviderErrorKind::UpstreamUnavailable,
                 "simulated LLM failure",
@@ -1868,13 +1867,12 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
         calls: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for NeverShrinkingGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for NeverShrinkingGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let text = request
                 .messages
@@ -1951,13 +1949,12 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
 
     struct EchoGenerator;
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for EchoGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for EchoGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
@@ -2041,13 +2038,12 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
 
     struct EchoGenerator;
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for EchoGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for EchoGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
@@ -2105,13 +2101,12 @@ async fn empty_single_map_retries_once_with_original_history() {
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for EmptyThenValidGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for EmptyThenValidGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .iter()
@@ -2178,13 +2173,12 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for PartiallyEmptyGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for PartiallyEmptyGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .iter()
@@ -2249,13 +2243,12 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
     struct SuccessfulMapGenerator;
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for SuccessfulMapGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for SuccessfulMapGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             _request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             Ok(text_output(VALID_MAP_FACTS))
         }
     }
@@ -2307,13 +2300,12 @@ async fn partial_map_fallback_preserves_previous_constraints() {
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for EmptyFirstChunkGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for EmptyFirstChunkGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .iter()
@@ -2375,13 +2367,12 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for RepairingMapGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for RepairingMapGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .first()
@@ -2445,13 +2436,12 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
     struct MapOnlyGenerator(Arc<AtomicUsize>);
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for MapOnlyGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for MapOnlyGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .first()
@@ -2506,13 +2496,12 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for InvalidRefreshThenUnavailable {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for InvalidRefreshThenUnavailable {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let prompt = request
                 .messages
@@ -2600,13 +2589,12 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for RepairingRefreshGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for RepairingRefreshGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             let prompt = request
                 .messages
                 .first()
@@ -2679,13 +2667,12 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
     }
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for CancelDuringRepairGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for CancelDuringRepairGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             _request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.cancel.cancel();
             Ok(text_output(r#"{"facts":"not-an-array"}"#))
@@ -2726,13 +2713,12 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
     struct AlwaysInvalidGenerator(Arc<AtomicUsize>);
 
     #[async_trait::async_trait]
-    impl provider::composition::LlmTextInvokePort for AlwaysInvalidGenerator {
-        async fn invoke_text(
+    impl provider::LlmInvokePort for AlwaysInvalidGenerator {
+        async fn invoke_stream(
             &self,
             _model: &provider::ModelInfo,
             _request: &provider::ProviderRequestData,
-            _cancel: &CancellationToken,
-        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(text_output(r#"{"facts":"not-an-array"}"#))
         }
@@ -2866,13 +2852,12 @@ fn latest_main_user_request_skips_blank_text_and_truncates_long_text() {
 struct FactsWithoutObjective;
 
 #[async_trait::async_trait]
-impl provider::composition::LlmTextInvokePort for FactsWithoutObjective {
-    async fn invoke_text(
+impl provider::LlmInvokePort for FactsWithoutObjective {
+    async fn invoke_stream(
         &self,
         _model: &provider::ModelInfo,
         request: &provider::ProviderRequestData,
-        _cancel: &CancellationToken,
-    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
         let text = request
             .messages
             .first()

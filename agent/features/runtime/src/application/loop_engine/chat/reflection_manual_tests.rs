@@ -29,7 +29,6 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
 fn fake_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(crate::application::reflection::test_support::StaticReflectionProvider),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "manual-test-model".to_string(),
@@ -250,13 +249,13 @@ struct RecordingReflectionProvider {
 }
 
 #[async_trait::async_trait]
-impl crate::ports::ProviderPort for RecordingReflectionProvider {
+impl crate::ports::LlmInvokePort for RecordingReflectionProvider {
     // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
-    async fn invoke(
+    async fn invoke_stream(
         &self,
-        request: crate::ports::provider_port::ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &crate::ports::provider_port::ModelInfo,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
@@ -282,7 +281,6 @@ impl crate::ports::ProviderPort for RecordingReflectionProvider {
 fn recording_binding(prompts: Arc<Mutex<Vec<String>>>) -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(RecordingReflectionProvider { prompts }),
-        text_invoker: provider::composition::unsupported_text_invoker(),
         model: provider::ModelInfo {
             provider: "manual-reflect-test".to_string(),
             model: "manual-test-model".to_string(),

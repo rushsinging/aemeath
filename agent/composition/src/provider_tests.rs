@@ -23,7 +23,6 @@ use super::*;
 use provider::composition::{wire_provider_client, ProviderClientSpecData, TransportPool};
 use provider::{ModelInfo, ProviderErrorKind, ProviderRequestData};
 use share::reasoning::ReasoningLevel;
-use tokio_util::sync::CancellationToken;
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -45,7 +44,7 @@ fn test_model_info() -> ModelInfo {
 /// Adapter 自有逻辑测试只走 fast-path，不触发上游调用；LlmProvider 构造面已
 /// 撤空（见文件头迁移记录），客户端经组合根唯一装配入口
 /// `wire_provider_client` 构造。
-fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn ProviderPort>, ModelInfo) {
+fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn provider::LlmInvokePort>, ModelInfo) {
     let (client, _) = wire_provider_client(
         ProviderClientSpecData {
             driver: "openai".to_string(),
@@ -64,11 +63,12 @@ fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn ProviderPort>, Model
         &TransportPool::new(),
     )
     .expect("test client must wire through the composition entry");
-    (provider_port(client, model.clone()), model)
+    let port: Arc<dyn provider::LlmInvokePort> = client;
+    (port, model)
 }
 
 /// Build a port for tests that only exercise adapter-owned behaviour.
-fn build_port() -> (Arc<dyn ProviderPort>, ModelInfo) {
+fn build_port() -> (Arc<dyn provider::LlmInvokePort>, ModelInfo) {
     build_port_with_model_info(test_model_info())
 }
 
@@ -86,11 +86,10 @@ fn factory_returns_provider_port_that_is_send_sync() {
 async fn invoke_returns_cancelled_when_signal_already_set() {
     let (port, model) = build_port();
 
-    let request = ProviderRequestData::new(model.model, vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-    cancel.cancel();
+    let request = ProviderRequestData::new(model.model.clone(), vec![], 8192, ReasoningLevel::Off);
+    request.cancellation.cancel();
 
-    let result = port.invoke(request, &cancel).await;
+    let result = port.invoke_stream(&model, &request).await;
     assert!(
         matches!(result, Err(ref e) if e.is_cancelled()),
         "expected cancelled error"
@@ -142,10 +141,10 @@ fn factory_build_valid_spec_returns_binding() {
 }
 
 #[test]
-fn factory_build_returns_text_invoker_sharing_the_wired_client() {
-    // #2142 双句柄契约：一次 build 同时交出 ProviderPort（会话对话）与
-    // LlmTextInvokePort（compact 等按模型文本调用），两者来自同一次
-    // wire_provider_client——invoker 与 model 恒同源，跨 driver 的
+fn factory_build_returns_port_serving_both_stream_and_text() {
+    // #2146 单端口契约：一次 build 交出的 provider 同时服务流式
+    // （invoke_stream，会话对话/反思）与文本（invoke_text 默认收口，
+    // compact 等）——两者与 model 恒同源 wire，跨 driver 的
     // compact_model 配置天然 transport 匹配。
     let factory = super::provider_factory();
     let binding = factory
@@ -160,14 +159,9 @@ fn factory_build_returns_text_invoker_sharing_the_wired_client() {
         1,
         ReasoningLevel::Off,
     );
-    let result =
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(binding.text_invoker.invoke_text(
-                &binding.model,
-                &request,
-                &CancellationToken::new(),
-            ));
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(binding.provider.invoke_text(&binding.model, &request));
     assert!(
         !matches!(
             result,
@@ -320,8 +314,8 @@ fn model_switch_reuses_pooled_transport_for_same_endpoint_auth_driver() {
         "model switch must not build a second transport"
     );
     assert_ne!(
-        first.provider.as_ref() as *const dyn ProviderPort,
-        second.provider.as_ref() as *const dyn ProviderPort,
+        first.provider.as_ref() as *const dyn provider::LlmInvokePort,
+        second.provider.as_ref() as *const dyn provider::LlmInvokePort,
         "each build returns its own frozen binding port"
     );
 }

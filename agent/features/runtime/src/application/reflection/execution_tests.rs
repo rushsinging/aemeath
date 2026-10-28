@@ -14,14 +14,14 @@ struct StaticProvider {
 }
 
 #[async_trait]
-impl ProviderPort for StaticProvider {
+impl LlmInvokePort for StaticProvider {
     // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询
     // ——unknown model 门禁语义已在装配时。
 
-    async fn invoke(
+    async fn invoke_stream(
         &self,
-        _request: ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &ModelInfo,
+        _request: &ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         Ok(text_completion_stream(self.response.clone(), 11, 22))
     }
@@ -205,11 +205,11 @@ impl ScriptedReflectionProvider {
 }
 
 #[async_trait]
-impl ProviderPort for ScriptedReflectionProvider {
-    async fn invoke(
+impl LlmInvokePort for ScriptedReflectionProvider {
+    async fn invoke_stream(
         &self,
-        request: ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
+        _model: &ModelInfo,
+        request: &ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let messages = request
             .messages

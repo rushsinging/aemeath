@@ -105,11 +105,6 @@ impl CompactModelTarget {
         self.binding.model.context_limit
     }
 
-    /// 与目标模型同源 wire 的 LLM 文本调用句柄（#2142）。
-    pub fn text_invoker(&self) -> std::sync::Arc<dyn provider::composition::LlmTextInvokePort> {
-        std::sync::Arc::clone(&self.binding.text_invoker)
-    }
-
     /// 日志用模型标识（`provider/model`），不含 prompt 或凭据。
     pub fn model_identity(&self) -> String {
         format!(
@@ -242,7 +237,7 @@ impl CompactModelResolver {
                     }
                 });
                 Some(context::CompactLlmBinding {
-                    invoker: target.text_invoker(),
+                    invoker: std::sync::Arc::clone(&binding.provider),
                     model: binding.model.clone(),
                     max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
                         .min(binding.max_tokens.max(1)),

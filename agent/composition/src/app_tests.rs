@@ -159,13 +159,13 @@ struct ReportedUsageProvider {
 }
 
 #[async_trait::async_trait]
-impl runtime::ProviderPort for ReportedUsageProvider {
+impl provider::LlmInvokePort for ReportedUsageProvider {
     // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
-    async fn invoke(
+    async fn invoke_stream(
         &self,
-        _request: provider::ProviderRequestData,
-        _cancellation: &dyn runtime::CancellationSignal,
+        _model: &provider::ModelInfo,
+        _request: &provider::ProviderRequestData,
     ) -> Result<provider::ProviderResponseStream, ProviderError> {
         let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
         // v3 拆帧：原 Completed{output, usage, stop} → Content… + Usage + Stop。
@@ -240,7 +240,6 @@ impl ProviderFactory for ReportedUsageProviderFactory {
             provider: Arc::new(ReportedUsageProvider {
                 invocation_count: self.invocation_count.clone(),
             }),
-            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -700,11 +699,11 @@ struct DirectLogScriptProvider {
 }
 
 #[async_trait]
-impl runtime::ProviderPort for DirectLogScriptProvider {
-    async fn invoke(
+impl provider::LlmInvokePort for DirectLogScriptProvider {
+    async fn invoke_stream(
         &self,
-        _request: provider::ProviderRequestData,
-        _cancellation: &dyn runtime::CancellationSignal,
+        _model: &provider::ModelInfo,
+        _request: &provider::ProviderRequestData,
     ) -> Result<provider::ProviderResponseStream, ProviderError> {
         let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
         let (output, usage, stop_reason) = match invocation_index {
@@ -763,7 +762,6 @@ impl ProviderFactory for DirectLogProviderFactory {
             provider: Arc::new(DirectLogScriptProvider {
                 invocation_count: self.invocation_count.clone(),
             }),
-            text_invoker: provider::composition::unsupported_text_invoker(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
