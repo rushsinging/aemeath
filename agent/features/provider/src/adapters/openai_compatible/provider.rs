@@ -88,6 +88,9 @@ impl OpenAICompatibleProvider {
             crate::ProviderDriverKind::Minimax
                 | crate::ProviderDriverKind::Mimo
                 | crate::ProviderDriverKind::Agnes
+                // OpenCode Go 的 baseUrl 自带 /v1（.../go/openai/v1），
+                // 剥掉会拼出 .../go/openai/chat/completions（404）。
+                | crate::ProviderDriverKind::OpencodeGo
         ) {
             raw_base_url.trim_end_matches('/').to_string()
         } else {

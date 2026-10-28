@@ -303,6 +303,28 @@ fn opencode_go_driver_uses_openai_compatible_chat_suffix() {
 }
 
 #[test]
+fn opencode_go_chat_url_keeps_v1_segment() {
+    // OpenCode Go 的 baseUrl 以 /v1 结尾（.../go/openai/v1）；通用剥尾规则
+    // 会丢掉 /v1 → 请求打到 .../go/openai/chat/completions（404）。该 driver
+    // MUST 保留 /v1 段。
+    let provider = OpenAICompatibleProvider::new_with_user_agent(
+        OpenAIProviderConfig::from_driver(ProviderDriverKind::OpencodeGo, "OpenCode"),
+        "test-key".to_string(),
+        Some("https://opencode.ai/inference/go/openai/v1".to_string()),
+        Some("deepseek-v4.1-flash".to_string()),
+        20000,
+        true,
+        None,
+        300,
+        "aemeath-test".to_string(),
+    );
+    assert_eq!(
+        provider.chat_url(),
+        "https://opencode.ai/inference/go/openai/v1/chat/completions"
+    );
+}
+
+#[test]
 fn opencode_go_headers_carry_session_id_and_other_drivers_do_not() {
     use reqwest::header::HeaderName;
 
