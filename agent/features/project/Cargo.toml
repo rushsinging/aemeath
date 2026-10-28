@@ -3,6 +3,9 @@ name = "project"
 version.workspace = true
 edition.workspace = true
 
+[features]
+dev = []
+
 [dependencies]
 share = { path = "../../shared" }
 utils = { path = "../../../packages/global/utils" }

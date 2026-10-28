@@ -40,6 +40,7 @@ futures-util = { workspace = true }
 provider = { path = "../provider", features = ["dev"] }
 memory = { path = "../memory", features = ["dev"] }
 storage = { path = "../storage", features = ["dev"] }
+project = { path = "../project", features = ["dev"] }
 tempfile = "3"
 
 # 继承 workspace 零容忍 lint 基线（#1995）。

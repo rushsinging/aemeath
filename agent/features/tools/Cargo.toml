@@ -41,6 +41,7 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 proc-macro2 = "1"
 
 [dev-dependencies]
+project = { path = "../project", features = ["dev"] }
 tempfile = "3"
 
 # 继承 workspace 零容忍 lint 基线（#1995）。

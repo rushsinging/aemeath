@@ -77,9 +77,7 @@ use crate::domain::{
     ToolListProvider, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
-use project::WorkspaceReader;
-use share::error::DomainError;
-use share::session_types::{ProjectIdentityData, WorkspaceId};
+use share::session_types::WorkspaceId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use systemone::{ScoringAnswer, ScoringPort, ScoringQuestion, ScoringState, UnavailableKind};
@@ -95,54 +93,6 @@ impl crate::domain::CancellationSignal for TestCancellation {
     }
     fn child_signal(&self) -> Arc<dyn crate::domain::CancellationSignal> {
         Arc::new(Self)
-    }
-}
-
-struct TestWorkspace {
-    root: std::path::PathBuf,
-}
-
-impl WorkspaceReader for TestWorkspace {
-    fn current_workspace_root(&self) -> std::path::PathBuf {
-        self.root.clone()
-    }
-    fn workspace_id(&self) -> WorkspaceId {
-        WorkspaceId::new("tool-search-test")
-    }
-    fn project_identity(&self) -> ProjectIdentityData {
-        ProjectIdentityData {
-            initial_cwd: self.root.display().to_string(),
-            git_common_dir: None,
-        }
-    }
-    fn current_path_base(&self) -> std::path::PathBuf {
-        self.root.clone()
-    }
-    fn resolve(&self, path: &std::path::Path) -> std::path::PathBuf {
-        self.root.join(path)
-    }
-    fn resolve_file_path(
-        &self,
-        path: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<std::path::PathBuf, DomainError> {
-        Ok(self.resolve(path))
-    }
-    fn resolve_search_path(
-        &self,
-        path: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<std::path::PathBuf, DomainError> {
-        Ok(self.resolve(path))
-    }
-    fn in_worktree(&self) -> bool {
-        false
-    }
-    fn current_branch(&self) -> Result<Option<String>, DomainError> {
-        Ok(None)
-    }
-    fn initial_cwd(&self) -> std::path::PathBuf {
-        self.root.clone()
     }
 }
 
@@ -214,9 +164,9 @@ fn search_context(
     .build();
     let ports = ToolExecutionPorts::new(
         Arc::new(TestCancellation),
-        WorkspaceReadAccess::new(Arc::new(TestWorkspace {
-            root: std::path::PathBuf::from("/tmp"),
-        })),
+        WorkspaceReadAccess::new(Arc::new(project::test_support::FakeWorkspace::new(
+            std::env::temp_dir(),
+        ))),
         Arc::new(MutexReadSet(Arc::new(std::sync::Mutex::new(
             Default::default(),
         )))),
@@ -342,9 +292,9 @@ async fn no_catalog_returns_empty_for_nonempty_query_without_skills() {
     // 生产回归：未注入 catalog 时非空 query 不得误命中。
     let ports = crate::domain::ToolExecutionPorts::new(
         Arc::new(TestCancellation),
-        crate::domain::WorkspaceReadAccess::new(Arc::new(TestWorkspace {
-            root: std::path::PathBuf::from("/tmp"),
-        })),
+        crate::domain::WorkspaceReadAccess::new(Arc::new(
+            project::test_support::FakeWorkspace::new(std::env::temp_dir()),
+        )),
         Arc::new(crate::domain::MutexReadSet(Arc::new(
             std::sync::Mutex::new(Default::default()),
         ))),

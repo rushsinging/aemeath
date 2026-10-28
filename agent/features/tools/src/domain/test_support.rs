@@ -3,10 +3,9 @@ use crate::domain::{
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
-use project::{WorkspaceControl, WorkspaceData, WorkspaceReader};
-use share::session_types::{ProjectIdentityData, WorkspaceId};
+use project::{WorkspaceControl, WorkspaceReader};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
@@ -25,142 +24,9 @@ impl CancellationSignal for FakeCancellation {
     }
 }
 
-#[derive(Clone)]
-struct FakeWorkspace {
-    initial_root: PathBuf,
-    current: Arc<Mutex<PathBuf>>,
-}
-
-impl FakeWorkspace {
-    fn new(root: PathBuf) -> Self {
-        let root = root.canonicalize().unwrap_or(root);
-        Self {
-            initial_root: root.clone(),
-            current: Arc::new(Mutex::new(root)),
-        }
-    }
-
-    fn current(&self) -> PathBuf {
-        self.current.lock().expect("fake workspace lock").clone()
-    }
-
-    fn normalized(&self, path: &Path) -> PathBuf {
-        let candidate = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.current().join(path)
-        };
-        candidate.canonicalize().unwrap_or(candidate)
-    }
-}
-
-impl WorkspaceReader for FakeWorkspace {
-    fn workspace_id(&self) -> WorkspaceId {
-        WorkspaceId::new(format!("test-workspace:{}", self.initial_root.display()))
-    }
-    fn project_identity(&self) -> ProjectIdentityData {
-        ProjectIdentityData {
-            initial_cwd: self.initial_root.display().to_string(),
-            git_common_dir: None,
-        }
-    }
-    fn current_workspace_root(&self) -> PathBuf {
-        self.initial_root.clone()
-    }
-    fn current_path_base(&self) -> PathBuf {
-        self.current()
-    }
-    fn resolve(&self, rel: &Path) -> PathBuf {
-        self.normalized(rel)
-    }
-    fn resolve_file_path(
-        &self,
-        path: &Path,
-        auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        let resolved = self.normalized(path);
-        if auth.allow_outside_workspace || resolved.starts_with(&self.initial_root) {
-            Ok(resolved)
-        } else {
-            Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径 {} 超出工作区根", resolved.display()),
-            ))
-        }
-    }
-    fn resolve_search_path(
-        &self,
-        path: &Path,
-        auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        let resolved = self.resolve_file_path(path, auth)?;
-        if !resolved.exists() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不存在 {}", resolved.display()),
-            ));
-        }
-        if !resolved.is_dir() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不是目录 {}", resolved.display()),
-            ));
-        }
-        Ok(resolved)
-    }
-    fn in_worktree(&self) -> bool {
-        false
-    }
-    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
-        Ok(None)
-    }
-    fn initial_cwd(&self) -> PathBuf {
-        self.initial_root.clone()
-    }
-}
-
-impl WorkspaceControl for FakeWorkspace {
-    fn change_directory(
-        &self,
-        path: PathBuf,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<(), share::error::DomainError> {
-        let resolved = self.normalized(&path);
-        if !resolved.exists() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不存在 {}", resolved.display()),
-            ));
-        }
-        if !resolved.is_dir() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不是目录 {}", resolved.display()),
-            ));
-        }
-        *self.current.lock().expect("fake workspace lock") = resolved;
-        Ok(())
-    }
-    fn enter(
-        &self,
-        _path: Option<PathBuf>,
-        _branch: Option<String>,
-        _base: Option<String>,
-    ) -> Result<WorkspaceData, share::error::DomainError> {
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-    fn exit(&self) -> Result<WorkspaceData, share::error::DomainError> {
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-}
-
-fn fake_workspace_read_access(workspace: FakeWorkspace) -> WorkspaceReadAccess {
+fn fake_workspace_read_access(
+    workspace: project::test_support::FakeWorkspace,
+) -> WorkspaceReadAccess {
     fake_controls()
         .lock()
         .expect("fake workspace controls")
@@ -229,7 +95,7 @@ impl TestToolExecutionContextBuilder {
         } else {
             crate::domain::context::AuthorizationContext::STANDARD
         };
-        let workspace = FakeWorkspace::new(self.root);
+        let workspace = project::test_support::FakeWorkspace::new(self.root);
         let scope = ExecutionScope::builder(
             "test-run",
             workspace.workspace_id(),

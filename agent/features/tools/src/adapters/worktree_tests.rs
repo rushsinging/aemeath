@@ -1,46 +1,5 @@
 use super::*;
 use share::session_types::WorktreeKind;
-use std::sync::Mutex;
-
-type EnterArgs = (Option<PathBuf>, Option<String>, Option<String>);
-
-#[derive(Default)]
-struct RecordingWorkspaceControl {
-    enter_args: Mutex<Option<EnterArgs>>,
-}
-
-impl WorkspaceControl for RecordingWorkspaceControl {
-    fn change_directory(
-        &self,
-        _path: PathBuf,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<(), share::error::DomainError> {
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-
-    fn enter(
-        &self,
-        path: Option<PathBuf>,
-        branch: Option<String>,
-        base: Option<String>,
-    ) -> Result<project::WorkspaceData, share::error::DomainError> {
-        *self.enter_args.lock().expect("recording control lock") = Some((path, branch, base));
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-
-    fn exit(&self) -> Result<project::WorkspaceData, share::error::DomainError> {
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-}
 
 /// Build an isolated real-git command without mutating process-wide env/cwd.
 fn test_git_command(path: &Path) -> std::process::Command {
@@ -185,7 +144,9 @@ fn test_enter_worktree_schema() {
 async fn enter_worktree_normalizes_blank_path_and_preserves_base_for_project() {
     let temp = tempfile::tempdir().expect("temp workspace");
     let ctx = build_ctx(temp.path().to_path_buf());
-    let control = Arc::new(RecordingWorkspaceControl::default());
+    let control = Arc::new(project::test_support::FakeWorkspace::new(
+        std::env::temp_dir(),
+    ));
     let tool = EnterWorktreeTool {
         control: control.clone(),
     };
@@ -202,8 +163,8 @@ async fn enter_worktree_normalizes_blank_path_and_preserves_base_for_project() {
         .await;
 
     assert_eq!(
-        *control.enter_args.lock().expect("recording control lock"),
-        Some((None, Some("fix/example".into()), Some(String::new())))
+        control.enter_calls(),
+        vec![(None, Some("fix/example".into()), Some(String::new()))]
     );
 }
 

@@ -1,9 +1,6 @@
-use share::session_types::ProjectIdentityData;
-use share::session_types::WorkspaceId;
 use std::{
     collections::HashMap,
     future::Future,
-    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -626,62 +623,6 @@ impl CancellationSignal for ManualCancellation {
     }
 }
 
-struct FakeWorkspace {
-    root: PathBuf,
-    id: WorkspaceId,
-}
-impl FakeWorkspace {
-    fn new() -> Self {
-        Self {
-            root: std::env::temp_dir(),
-            id: WorkspaceId::new("contract-workspace"),
-        }
-    }
-}
-impl WorkspaceReader for FakeWorkspace {
-    fn current_workspace_root(&self) -> PathBuf {
-        self.root.clone()
-    }
-    fn workspace_id(&self) -> WorkspaceId {
-        self.id.clone()
-    }
-    fn project_identity(&self) -> ProjectIdentityData {
-        ProjectIdentityData {
-            initial_cwd: self.root.display().to_string(),
-            git_common_dir: None,
-        }
-    }
-    fn current_path_base(&self) -> PathBuf {
-        self.root.clone()
-    }
-    fn resolve(&self, path: &std::path::Path) -> PathBuf {
-        self.root.join(path)
-    }
-    fn resolve_file_path(
-        &self,
-        path: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        Ok(self.resolve(path))
-    }
-    fn resolve_search_path(
-        &self,
-        path: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        Ok(self.resolve(path))
-    }
-    fn in_worktree(&self) -> bool {
-        false
-    }
-    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
-        Ok(None)
-    }
-    fn initial_cwd(&self) -> PathBuf {
-        self.root.clone()
-    }
-}
-
 fn context_for_profile(profile: &str) -> ToolExecutionContext {
     context_for_profile_with_cancellation(profile, Arc::new(ManualCancellation::default()))
 }
@@ -734,7 +675,9 @@ fn context_for_run_profile_cancellation_and_selection(
     cancellation: Arc<dyn CancellationSignal>,
     selection: ToolSelection,
 ) -> ToolExecutionContext {
-    let workspace = Arc::new(FakeWorkspace::new());
+    let workspace = Arc::new(project::test_support::FakeWorkspace::new(
+        std::env::temp_dir(),
+    ));
     let scope = ExecutionScope::builder(
         run_id,
         workspace.workspace_id(),

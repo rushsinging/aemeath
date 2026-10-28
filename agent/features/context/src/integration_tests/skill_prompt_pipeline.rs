@@ -142,51 +142,11 @@ async fn chinese_header_and_budget_are_deterministic() {
     assert_eq!(crate::skill_prompt_budget(8_000), 1_024);
 }
 
-struct FakeWorkspace(PathBuf);
-impl project::WorkspaceReader for FakeWorkspace {
-    fn workspace_id(&self) -> share::session_types::WorkspaceId {
-        share::session_types::WorkspaceId::default()
-    }
-    fn project_identity(&self) -> share::session_types::ProjectIdentityData {
-        share::session_types::ProjectIdentityData::default()
-    }
-    fn current_workspace_root(&self) -> PathBuf {
-        self.0.clone()
-    }
-    fn current_path_base(&self) -> PathBuf {
-        self.0.clone()
-    }
-    fn resolve(&self, rel: &std::path::Path) -> PathBuf {
-        self.0.join(rel)
-    }
-    fn resolve_file_path(
-        &self,
-        rel: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        Ok(self.0.join(rel))
-    }
-    fn resolve_search_path(
-        &self,
-        rel: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        Ok(self.0.join(rel))
-    }
-    fn in_worktree(&self) -> bool {
-        false
-    }
-    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
-        Ok(None)
-    }
-    fn initial_cwd(&self) -> PathBuf {
-        self.0.clone()
-    }
-}
-
 #[test]
 fn query_factory_reads_live_workspace_root() {
-    let factory = WorkspaceSkillQueryFactory::new(Arc::new(FakeWorkspace(PathBuf::from("/live"))));
+    let factory = WorkspaceSkillQueryFactory::new(Arc::new(
+        project::test_support::FakeWorkspace::new(PathBuf::from("/live")),
+    ));
     assert_eq!(
         factory.query(&base_request()).project_root,
         PathBuf::from("/live")

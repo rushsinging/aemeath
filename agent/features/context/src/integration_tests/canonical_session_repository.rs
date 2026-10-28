@@ -14,7 +14,6 @@ use crate::{
 };
 use crate::{CanonicalSessionRepository, CanonicalSessionWriter};
 use async_trait::async_trait;
-use project::{WorkspaceRestoreData, WorkspaceWriter};
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -104,24 +103,6 @@ impl TaskPersist for EmptyTask {
     }
 
     fn commit_restore(&self, _token: PreparedTaskRestoreData) {}
-}
-
-struct FixedWorkspace(PersistedWorkspaceContext);
-impl WorkspaceWriter for FixedWorkspace {
-    fn snapshot(&self) -> PersistedWorkspaceContext {
-        self.0.clone()
-    }
-
-    fn prepare_restore(
-        &self,
-        _dto: &PersistedWorkspaceContext,
-    ) -> Result<WorkspaceRestoreData, share::error::DomainError> {
-        panic!("not used")
-    }
-
-    fn commit_restore(&self, _prepared: WorkspaceRestoreData) {
-        panic!("not used")
-    }
 }
 
 fn workspace() -> PersistedWorkspaceContext {
@@ -318,7 +299,7 @@ fn repository_with_session(
         CanonicalSessionRepository::new(
             holder.clone(),
             Arc::new(EmptyTask),
-            Arc::new(FixedWorkspace(workspace())),
+            Arc::new(project::test_support::FixedWorkspaceWriter(workspace())),
             writer,
             Arc::new(tokio::sync::Mutex::new(())),
         ),

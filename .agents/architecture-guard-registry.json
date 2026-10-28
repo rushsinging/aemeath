@@ -1119,7 +1119,8 @@
         "domain.rs",
         "lib.rs",
         "lib_tests.rs",
-        "service.rs"
+        "service.rs",
+        "test_support.rs"
       ],
       "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵；application.rs 用例编排层 / service.rs 持锁状态容器，#1746 归位）",
       "profile": "fast"
@@ -3098,27 +3099,20 @@
         {
           "trait_name": "WorkspaceControl",
           "owner_crate": "project",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "t"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "WorkspaceReader",
           "owner_crate": "project",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "c",
-            "t"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "WorkspaceWriter",
           "owner_crate": "project",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "c"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         }
       ],
       "reason": "#2146 实现权治理：sealed 由编译器（Sealed trait）强制，本表为双保险与未 seal trait 的实现 crate 白名单（injected-host 宿主 / comp-bridge 桥接 / fake-pending 存量待收敛，收敛完成即转 sealed）；未登记 trait 不校验，登记即锁",
