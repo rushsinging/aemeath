@@ -974,7 +974,10 @@ impl Run {
     }
 
     pub fn fail(&mut self, error: impl Into<String>) -> Result<(), RunTransitionError> {
-        if self.rejects_controlled_work() {
+        // 兜底失败允许从任意非终态进入（含 CancellingStep / FinalizingStep /
+        // Terminating）：控制流程自身出错时若不能失败收口，Run 会永久停在
+        // FinalizingStep，活动卡片也永远等不到终态事件。
+        if self.status.is_terminal() {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "run state transition rejected: run_id={} parent_run_id={} from={:?} requested_to={:?} reason={:?}",

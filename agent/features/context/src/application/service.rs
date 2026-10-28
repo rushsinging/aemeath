@@ -10,7 +10,8 @@ use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
     CompactionDecisionData, ContextAppendData, ContextAppendError, ContextMessage,
     ContextPortError, ContextRequestData, ContextWindowData, RunId, SessionAppendReceiptData,
-    SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    SessionRevision, SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData,
 };
 use crate::ports::{
     ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
@@ -443,6 +444,16 @@ impl ContextAppendPort for ContextApplicationService {
             *frozen = None;
         }
         Ok(cleared)
+    }
+
+    async fn current_revision(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, ContextPortError> {
+        self.session
+            .current_revision(session_id)
+            .await
+            .map_err(ContextPortError::SessionRepository)
     }
 
     async fn append_accepted_input(

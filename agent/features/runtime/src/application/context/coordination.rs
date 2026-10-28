@@ -193,6 +193,16 @@ impl ContextCoordinator {
         self.ports.append.advance_tool_receipt(mutation).await
     }
 
+    /// 会话当前提交修订号：Step 收口前刷新 CAS 基准，避免把本 step 自身的
+    /// accepted-input / 工具回执推进误判为并发冲突。`None` 表示实现对调用方
+    /// 不暴露修订号（由调用方沿用窗口快照值）。
+    pub(crate) async fn current_revision(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, ContextPortError> {
+        self.ports.append.current_revision(session_id).await
+    }
+
     pub(crate) async fn step_receipts(
         &self,
         request: &ContextRequestData,

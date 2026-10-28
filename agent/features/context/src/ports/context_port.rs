@@ -40,6 +40,18 @@ pub trait ContextCompactPort: Send + Sync {
 pub trait ContextAppendPort: Send + Sync {
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 
+    /// 会话当前提交修订号：Step 收口提交的 CAS 基准。
+    ///
+    /// Runtime 持有的是构建窗口时的旧快照，而本 step 自身的 accepted-input
+    /// 与工具回执推进都会递增修订号；收口前取一次当前值，避免把自己的写入
+    /// 误判成并发冲突。`None` 表示该实现不暴露修订号（沿用调用方快照值）。
+    async fn current_revision(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Option<SessionRevision>, ContextPortError> {
+        Ok(None)
+    }
+
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,

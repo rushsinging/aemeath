@@ -1017,6 +1017,40 @@ async fn accepted_input_advances_revision_and_returns_post_commit_revision() {
 }
 
 #[tokio::test]
+async fn current_revision_reports_latest_committed_revision() {
+    // Runtime 在 Step 收口前用它刷新 CAS 基准：窗口快照 revision
+    // 早于本 step 自身的 accepted-input / 工具回执推进。
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+    let session_id = SessionId::new("session");
+
+    assert_eq!(
+        repository.current_revision(&session_id).await.unwrap(),
+        Some(SessionRevision::new(0))
+    );
+
+    repository
+        .append_accepted_input(&accepted_input())
+        .await
+        .unwrap();
+    let committed = SessionRevision::new(holder.read().unwrap().revision);
+    assert_eq!(committed, SessionRevision::new(1));
+    assert_eq!(
+        repository.current_revision(&session_id).await.unwrap(),
+        Some(committed)
+    );
+
+    // 未知会话不报错，返回 None 让调用方沿用快照值。
+    assert_eq!(
+        repository
+            .current_revision(&SessionId::new("missing"))
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
 async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, _) = repository(writer);
