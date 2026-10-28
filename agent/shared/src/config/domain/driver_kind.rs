@@ -21,6 +21,10 @@ pub enum DriverKind {
     Kimi,
     Agnes,
     Ollama,
+    /// OpenCode Go 订阅通道（`https://opencode.ai/inference/go/openai/v1`）：
+    /// 与 openai driver 协议同形，但强制要求 `x-opencode-session` 头，且
+    /// 端点路径含 `/go` 段，故独立成 driver（用户拍板，2026-10-28）。
+    OpencodeGo,
 }
 
 impl DriverKind {
@@ -38,6 +42,7 @@ impl DriverKind {
             "kimi" => Some(DriverKind::Kimi),
             "agnes" => Some(DriverKind::Agnes),
             "ollama" => Some(DriverKind::Ollama),
+            "opencode-go" => Some(DriverKind::OpencodeGo),
             _ => None,
         }
     }
@@ -56,11 +61,12 @@ impl DriverKind {
             DriverKind::Kimi => "kimi",
             DriverKind::Agnes => "agnes",
             DriverKind::Ollama => "ollama",
+            DriverKind::OpencodeGo => "opencode-go",
         }
     }
 
     /// 全部已知 driver（一致性测试与目录校验用）。
-    pub const ALL: [DriverKind; 11] = [
+    pub const ALL: [DriverKind; 12] = [
         DriverKind::Anthropic,
         DriverKind::OpenAI,
         DriverKind::Zhipu,
@@ -72,6 +78,7 @@ impl DriverKind {
         DriverKind::Kimi,
         DriverKind::Agnes,
         DriverKind::Ollama,
+        DriverKind::OpencodeGo,
     ];
 }
 

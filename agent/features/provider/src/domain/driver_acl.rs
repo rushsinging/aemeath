@@ -55,7 +55,8 @@ impl DriverSpec {
             | ProviderDriverKind::Mimo
             | ProviderDriverKind::DeepSeek
             | ProviderDriverKind::Kimi
-            | ProviderDriverKind::Agnes => ProtocolFamily::OpenAi(api_style),
+            | ProviderDriverKind::Agnes
+            | ProviderDriverKind::OpencodeGo => ProtocolFamily::OpenAi(api_style),
         };
         Ok(Self { kind, family })
     }

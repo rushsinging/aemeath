@@ -8,6 +8,17 @@ fn driver_kind_parse_as_str_round_trips_for_all_variants() {
 }
 
 #[test]
+fn opencode_go_driver_round_trips_and_is_registered() {
+    // OpenCode Go 订阅专用 driver：内置 Go 端点与 x-opencode-session 头。
+    assert_eq!(
+        DriverKind::parse("opencode-go"),
+        Some(DriverKind::OpencodeGo)
+    );
+    assert_eq!(DriverKind::OpencodeGo.as_str(), "opencode-go");
+    assert!(DriverKind::ALL.contains(&DriverKind::OpencodeGo));
+}
+
+#[test]
 fn driver_kind_parse_rejects_unknown_and_case_sensitive() {
     assert_eq!(DriverKind::parse("not-a-driver"), None);
     // 身份词表精确匹配：大小写敏感（调用方 lowercase 属其自身语义）。
@@ -28,6 +39,7 @@ fn driver_env_mapping_is_pinned_per_driver_kind() {
         (DriverKind::DeepSeek, "DEEPSEEK_API_KEY"),
         (DriverKind::Agnes, "AGNES_API_KEY"),
         (DriverKind::Ollama, "OLLAMA_API_KEY"),
+        (DriverKind::OpencodeGo, "OPENCODE_GO_API_KEY"),
     ];
     for (kind, env) in pinned {
         assert_eq!(driver_api_key_env_name(kind.as_str()), Some(env));

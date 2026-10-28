@@ -21,6 +21,8 @@ mod usage;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use constants::SESSION_ID;
 pub use provider::OpenAICompatibleProvider;
 pub use reasoning::ReasoningConfig;
 pub(crate) use responses_stream::parse_responses_stream;

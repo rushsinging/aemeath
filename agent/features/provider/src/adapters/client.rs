@@ -258,6 +258,8 @@ impl OpenAIProviderConfig {
                 ProviderDriverKind::Mimo => "/chat/completions".to_string(),
                 ProviderDriverKind::DeepSeek => "/chat/completions".to_string(),
                 ProviderDriverKind::Agnes => "/chat/completions".to_string(),
+                // OpenCode Go：baseUrl 自带 /inference/go/openai/v1，只拼 suffix。
+                ProviderDriverKind::OpencodeGo => "/chat/completions".to_string(),
                 // Kimi（platform.kimi.com）：coding 端点 baseUrl 自带 /v1，
                 // 剥尾后拼 /v1/chat/completions。
                 ProviderDriverKind::Kimi => "/v1/chat/completions".to_string(),
