@@ -4,8 +4,13 @@
 //! 扁平事件流（`SessionEventRecord`），交 domain 聚合。只读落盘，
 //! NEVER 依赖主进程内存态；流式逐成员解析，NEVER 全量载入。
 
-use crate::constants::{EVIDENCE_EXCERPT_BOUND, SESSION_CONTEXT_SOURCE_CHARS};
-use crate::domain::evidence::{EvidenceSourceRef, SessionContextExcerpt, SessionEventRecord};
+use crate::constants::{
+    EVIDENCE_EXCERPT_BOUND, SESSION_CONTEXT_NEIGHBOR_CHARS, SESSION_CONTEXT_SOURCE_CHARS,
+    SESSION_CONTEXT_TARGET_CHARS,
+};
+use crate::domain::evidence::{
+    truncate_with_marker, EvidenceSourceRef, SessionContextExcerpt, SessionEventRecord,
+};
 
 /// 轻量提取 dataset 的 run id 清单（有序去重；只读 cursor，NEVER 全量解析成员体）。
 pub fn dataset_run_ids(dataset_dir: &std::path::Path) -> Vec<String> {
@@ -69,18 +74,42 @@ impl SessionDatasetScanner {
                 // 非 step 成员（manifest/state/metadata）——不是事件来源
                 continue;
             };
-            let run_id = member
+            let Some(cursor_run_id) = member
                 .pointer("/cursor/run_id")
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let step_id = member
+            else {
+                report.skipped_members += 1;
+                continue;
+            };
+            let Some(cursor_step_id) = member
                 .pointer("/cursor/step_id")
-                .or_else(|| member.pointer("/step/step_id"))
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            Self::extract_step_events(&session_id, &run_id, &step_id, step, &mut report.events);
+            else {
+                report.skipped_members += 1;
+                continue;
+            };
+            // cursor 是回读来源的唯一稳定身份；step 本体不一致时视为损坏成员，
+            // NEVER 退化成 unknown 去绑定另一条记录。
+            if let Some(body_step_id) = member
+                .pointer("/step/step_id")
+                .and_then(|value| value.as_str())
+            {
+                if body_step_id != cursor_step_id {
+                    report.skipped_members += 1;
+                    continue;
+                }
+            }
+            if session_id == "unknown" || cursor_run_id.is_empty() || cursor_step_id.is_empty() {
+                report.skipped_members += 1;
+                continue;
+            }
+            Self::extract_step_events(
+                &session_id,
+                cursor_run_id,
+                cursor_step_id,
+                step,
+                &mut report.events,
+            );
         }
         report
     }
@@ -168,6 +197,30 @@ impl SessionDatasetScanner {
             });
         }
     }
+    /// 在 datasets root 内安全定位 session；session id MUST 是单一 Normal
+    /// `.dataset` 成员，canonicalize 后仍在 root 内（防 `..`/绝对路径/symlink 逃逸）。
+    pub fn read_step_context_under_root(
+        datasets_root: &std::path::Path,
+        source: &EvidenceSourceRef,
+    ) -> Option<SessionContextExcerpt> {
+        let session_path = std::path::Path::new(&source.session_id);
+        if session_path.components().count() != 1
+            || !session_path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+            || !source.session_id.ends_with(".dataset")
+        {
+            return None;
+        }
+        let dataset_dir = datasets_root.join(session_path);
+        let root_canonical = datasets_root.canonicalize().ok()?;
+        let dataset_canonical = dataset_dir.canonicalize().ok()?;
+        if !dataset_canonical.starts_with(&root_canonical) {
+            return None;
+        }
+        Self::read_step_context(&dataset_canonical, source)
+    }
+
     /// 回读来源 step 及相邻 step 的有界上下文（只读落盘，NEVER 全量载入）。
     pub fn read_step_context(
         dataset_dir: &std::path::Path,
@@ -195,17 +248,28 @@ impl SessionDatasetScanner {
             if run_id != source.run_id {
                 continue;
             }
-            let step_id = member
+            let Some(step_id) = member
                 .pointer("/cursor/step_id")
-                .or_else(|| member.pointer("/step/step_id"))
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown")
-                .to_string();
+            else {
+                continue;
+            };
+            if step_id.is_empty() {
+                continue;
+            }
+            if let Some(body_step_id) = member
+                .pointer("/step/step_id")
+                .and_then(|value| value.as_str())
+            {
+                if body_step_id != step_id {
+                    continue;
+                }
+            }
             let revision = member
                 .pointer("/step/outcome/committed_revision")
                 .and_then(|value| value.as_u64())
                 .unwrap_or_default();
-            steps.push((revision, step_id, path));
+            steps.push((revision, step_id.to_string(), path));
         }
         steps.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         let target_index = steps
@@ -213,24 +277,27 @@ impl SessionDatasetScanner {
             .position(|(_, step_id, _)| step_id == &source.step_id)?;
         let start = target_index.saturating_sub(1);
         let end = (target_index + 2).min(steps.len());
-        let mut lines: Vec<String> = Vec::new();
-        for (_, step_id, path) in steps.iter().skip(start).take(end - start) {
+        let mut segments: Vec<String> = Vec::new();
+        for (selected_index, (_, step_id, path)) in
+            steps.iter().enumerate().skip(start).take(end - start)
+        {
             let Ok(raw) = std::fs::read_to_string(path) else {
                 continue;
             };
             let Ok(member): Result<serde_json::Value, _> = serde_json::from_str(&raw) else {
                 continue;
             };
-            lines.push(format!("[{step_id}]"));
+            let mut lines = vec![format!("[{step_id}]")];
             append_accepted_input_context(&member, &mut lines);
             append_outcome_context(&member, &mut lines);
+            let budget = if selected_index == target_index {
+                SESSION_CONTEXT_TARGET_CHARS
+            } else {
+                SESSION_CONTEXT_NEIGHBOR_CHARS
+            };
+            segments.push(truncate_with_marker(&lines.join("\n"), budget));
         }
-        let mut text = lines.join("\n");
-        if text.chars().count() > SESSION_CONTEXT_SOURCE_CHARS {
-            let mut bounded: String = text.chars().take(SESSION_CONTEXT_SOURCE_CHARS).collect();
-            bounded.push('…');
-            text = bounded;
-        }
+        let text = truncate_with_marker(&segments.join("\n"), SESSION_CONTEXT_SOURCE_CHARS);
         Some(SessionContextExcerpt {
             source: source.clone(),
             text,
@@ -241,7 +308,7 @@ impl SessionDatasetScanner {
 /// 追加 accepted_input 中的用户意图摘要。
 fn append_accepted_input_context(member: &serde_json::Value, lines: &mut Vec<String>) {
     let Some(messages) = member
-        .pointer("/accepted_input/messages")
+        .pointer("/step/accepted_input/messages")
         .and_then(|value| value.as_array())
     else {
         return;
@@ -334,14 +401,9 @@ fn append_message_blocks(message: &serde_json::Value, actor: &str, lines: &mut V
     }
 }
 
-/// 文本有界截断（字符数口径，避免 UTF-8 边界切片）。
+/// 文本有界截断（字符数口径，省略号计入预算）。
 fn bounded_text(text: &str, bound: usize) -> String {
-    if text.chars().count() <= bound {
-        return text.to_string();
-    }
-    let mut bounded: String = text.chars().take(bound).collect();
-    bounded.push('…');
-    bounded
+    truncate_with_marker(text, bound)
 }
 
 /// JSON 值紧凑摘要（缺失返回空字符串）。

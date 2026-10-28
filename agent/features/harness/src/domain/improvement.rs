@@ -596,7 +596,7 @@ async fn run_block(
                         &reason,
                         cycle_ref,
                         recorder,
-                        evidence_bindings.clone(),
+                        &|_| evidence_bindings.clone(),
                     );
                     (
                         Some(AcceptedBlock {
@@ -640,6 +640,58 @@ fn evidence_bindings_for(
         .collect()
 }
 
+/// Compose 只能修正本周期已采纳的组件，并把被修正提案的真实证据带到新 lesson。
+/// `signal_ids` 可空（继承采纳证据）；非空时必须是采纳证据的子集。
+fn compose_evidence_by_component(
+    change_set: &ChangeSet,
+    adoptions: &[crate::domain::task::AdoptionRecord],
+    signal_ids: &[String],
+) -> Result<Vec<(crate::domain::component::ComponentId, Vec<EvidenceBinding>)>, HarnessError> {
+    let all_signal_ids: Vec<&str> = adoptions
+        .iter()
+        .flat_map(|adoption| adoption.evidence.iter())
+        .map(|binding| binding.signal_id.as_str())
+        .filter(|signal_id| !signal_id.is_empty())
+        .collect();
+    let mut seen_signals: Vec<&str> = Vec::new();
+    for signal_id in signal_ids {
+        if seen_signals.contains(&signal_id.as_str()) {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("Compose signal_ids 重复引用：{signal_id}"),
+            ));
+        }
+        if !all_signal_ids.contains(&signal_id.as_str()) {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("Compose 引用了采纳证据中不存在的 signal id：{signal_id}"),
+            ));
+        }
+        seen_signals.push(signal_id);
+    }
+
+    let mut by_component = Vec::new();
+    for edit in &change_set.edits {
+        let id = match edit {
+            crate::domain::changeset::ComponentEdit::Upsert { id, .. }
+            | crate::domain::changeset::ComponentEdit::Delete { id } => id,
+        };
+        let evidence: Vec<EvidenceBinding> = adoptions
+            .iter()
+            .filter(|adoption| &adoption.id == id)
+            .flat_map(|adoption| adoption.evidence.iter().cloned())
+            .collect();
+        if evidence.is_empty() {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("Compose 只能修正本周期已采纳组件，禁止改 {id}"),
+            ));
+        }
+        by_component.push((id.clone(), evidence));
+    }
+    Ok(by_component)
+}
+
 /// 采纳回写：每条采纳的 edit MUST 产生带证据的 Active lesson。
 /// 回写失败只 warn（经验库 IO 故障 NEVER 作废已落盘的组件变更）。
 fn record_adopted_lesson(
@@ -648,24 +700,26 @@ fn record_adopted_lesson(
     reason: &str,
     cycle_ref: &str,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
-    evidence_bindings: Vec<EvidenceBinding>,
+    evidence_for: &dyn Fn(&crate::domain::component::ComponentId) -> Vec<EvidenceBinding>,
 ) {
-    // Compose 仲裁可能不引入新执行证据；Block 采纳则 MUST 有结构化 signal 绑定。
-    let evidence_bindings = if evidence_bindings.is_empty() {
-        vec![EvidenceBinding {
-            run_ref: cycle_ref.to_string(),
-            signal: crate::domain::evidence::SignalKind::CycleObservation,
-            excerpt: reason.chars().take(200).collect(),
-            signal_id: String::new(),
-            source: None,
-        }]
-    } else {
-        evidence_bindings
-    };
     for edit in &change_set.edits {
         let (id, action) = match edit {
             crate::domain::changeset::ComponentEdit::Upsert { id, .. } => (id, "upsert"),
             crate::domain::changeset::ComponentEdit::Delete { id } => (id, "delete"),
+        };
+        let evidence_bindings = {
+            let bindings = evidence_for(id);
+            if bindings.is_empty() {
+                vec![EvidenceBinding {
+                    run_ref: cycle_ref.to_string(),
+                    signal: crate::domain::evidence::SignalKind::CycleObservation,
+                    excerpt: reason.chars().take(200).collect(),
+                    signal_id: String::new(),
+                    source: None,
+                }]
+            } else {
+                bindings
+            }
         };
         let entry = LessonEntry::new(
             format!("{cycle_ref}:{id}"),
@@ -1082,6 +1136,8 @@ pub(crate) struct SimilarCandidatePair {
     pub left_text: String,
     pub right_label: String,
     pub right_text: String,
+    pub left_source: Option<crate::domain::evidence::EvidenceSourceRef>,
+    pub right_source: Option<crate::domain::evidence::EvidenceSourceRef>,
     pub left_context: Option<String>,
     pub right_context: Option<String>,
     pub score: f64,
@@ -1108,9 +1164,6 @@ pub(crate) fn select_similar_candidate_pairs(
             .map(|binding| binding.signal_id.clone())
             .unwrap_or_default();
         let text = format!("{} {}", adoption.reason, signal_id);
-        if proposals.iter().any(|existing| existing.text == text) {
-            continue;
-        }
         proposals.push(SimilarItem {
             label: format!("本周期提案：{}", adoption.id),
             text,
@@ -1129,9 +1182,6 @@ pub(crate) fn select_similar_candidate_pairs(
                 .unwrap_or_default()
         };
         let text = format!("{} {} {}", lesson.lesson, lesson.component_kind, signal_id);
-        if lesson_items.iter().any(|existing| existing.text == text) {
-            continue;
-        }
         lesson_items.push(SimilarItem {
             label: format!("Active lesson：{}", lesson.id),
             text,
@@ -1182,6 +1232,8 @@ pub(crate) fn select_similar_candidate_pairs(
                 left_text: left.text,
                 right_label: right.label,
                 right_text: right.text,
+                left_source: left.source,
+                right_source: right.source,
                 left_context,
                 right_context,
                 score,
@@ -1235,17 +1287,12 @@ fn take_source_context(
         .entry(key)
         .or_insert_with(|| context_reader.read_context(source))
         .clone()?;
-    if *remaining == 0 {
+    if *remaining == 0 || context.text.trim().is_empty() {
         return None;
     }
-    let text: String = context.text.chars().take(*remaining).collect();
-    let used = text.chars().count();
-    *remaining = remaining.saturating_sub(used);
-    if text.chars().count() < context.text.chars().count() {
-        Some(format!("{text}…"))
-    } else {
-        Some(text)
-    }
+    let text = crate::domain::evidence::truncate_with_marker(&context.text, *remaining);
+    *remaining = remaining.saturating_sub(text.chars().count());
+    Some(text)
 }
 
 /// 渲染 Compose 的候选相似对材料与判定规则。
@@ -1270,16 +1317,30 @@ pub(crate) fn render_compose_similarity_block(pairs: &[SimilarCandidatePair]) ->
         ));
         lines.push(format!("A｜{}：{}", pair.left_label, pair.left_text));
         lines.push(format!(
+            "A 来源（session/run/step）：{}",
+            render_evidence_source(pair.left_source.as_ref())
+        ));
+        lines.push(format!(
             "A 来源上下文：{}",
             pair.left_context.as_deref().unwrap_or("上下文不可用")
         ));
         lines.push(format!("B｜{}：{}", pair.right_label, pair.right_text));
+        lines.push(format!(
+            "B 来源（session/run/step）：{}",
+            render_evidence_source(pair.right_source.as_ref())
+        ));
         lines.push(format!(
             "B 来源上下文：{}",
             pair.right_context.as_deref().unwrap_or("上下文不可用")
         ));
     }
     lines.join("\n")
+}
+
+fn render_evidence_source(source: Option<&crate::domain::evidence::EvidenceSourceRef>) -> String {
+    source
+        .map(|source| format!("{}/{}/{}", source.session_id, source.run_id, source.step_id))
+        .unwrap_or_else(|| "来源不可用".to_string())
 }
 
 /// 周期 Compose 汇总块（#2065 A，对齐 Harness² Compose）：全部数据源块
@@ -1402,8 +1463,28 @@ pub async fn run_compose_phase(
     let label = match parse_block_proposal(&response) {
         Ok(BlockProposal::NoChange { .. }) => "无变更（各块结论一致）",
         Ok(BlockProposal::Propose {
-            reason, change_set, ..
+            reason,
+            signal_ids,
+            change_set,
         }) => {
+            let evidence_by_component =
+                match compose_evidence_by_component(&change_set, adoptions, &signal_ids) {
+                    Ok(by_component) => by_component,
+                    Err(error) => {
+                        let label = "仲裁修正（证据引用无效作废）";
+                        log::warn!(target: crate::LOG_TARGET,
+                            "Compose 证据校验失败：{}", error.message());
+                        if let Some(recorder) = recorder {
+                            recorder.record(&crate::domain::events::RsiCycleEvent::ComposeResult {
+                                label: label.to_string(),
+                            });
+                        }
+                        return Ok(Some(CycleOutcome {
+                            summary: format!("Compose：{label}"),
+                            adopted: Vec::new(),
+                        }));
+                    }
+                };
             if dry_run {
                 for edit in &change_set.edits {
                     let (id, content) = match edit {
@@ -1440,15 +1521,21 @@ pub async fn run_compose_phase(
                 }
                 match apply_change_set(registry, &change_set) {
                     Ok(_) => {
-                        // Compose 无新证据：传空绑定（该 lesson 不参与
-                        // 信号级验证，#2080）
+                        // Compose 修正继承被仲裁采纳的真实证据；NEVER 用空绑定
+                        // 抹掉 lesson 的 signal/source。
                         record_adopted_lesson(
                             lesson_store,
                             &change_set,
                             &reason,
                             &cycle_ref,
                             recorder,
-                            Vec::new(),
+                            &|id| {
+                                evidence_by_component
+                                    .iter()
+                                    .find(|(component, _)| component == id)
+                                    .map(|(_, evidence)| evidence.clone())
+                                    .unwrap_or_default()
+                            },
                         );
                         "仲裁修正（已采纳）"
                     }

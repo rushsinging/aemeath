@@ -78,12 +78,21 @@ pub struct EvidenceSourceRef {
 }
 
 impl EvidenceSourceRef {
-    fn from_event(event: &SessionEventRecord) -> Self {
-        Self {
+    fn from_event(event: &SessionEventRecord) -> Option<Self> {
+        if event.session_id.is_empty()
+            || event.session_id == "unknown"
+            || event.run_id.is_empty()
+            || event.run_id == "unknown"
+            || event.step_id.is_empty()
+            || event.step_id == "unknown"
+        {
+            return None;
+        }
+        Some(Self {
             session_id: event.session_id.clone(),
             run_id: event.run_id.clone(),
             step_id: event.step_id.clone(),
-        }
+        })
     }
 }
 
@@ -114,6 +123,19 @@ fn default_occurrences() -> usize {
 pub struct SessionContextExcerpt {
     pub source: EvidenceSourceRef,
     pub text: String,
+}
+
+/// 按字符数截断；发生截断时省略号计入预算，输出 NEVER 超过 `bound`。
+pub(crate) fn truncate_with_marker(text: &str, bound: usize) -> String {
+    if text.chars().count() <= bound {
+        return text.to_string();
+    }
+    if bound == 0 {
+        return String::new();
+    }
+    let mut output: String = text.chars().take(bound - 1).collect();
+    output.push('…');
+    output
 }
 
 /// 一个证据块（一段 session/run 的聚合结果，#2049 流模型的分块单位）。
@@ -147,11 +169,12 @@ impl SignalAccumulator {
         if let Some(fingerprint) = &event.call_fingerprint {
             self.fingerprint = fingerprint.clone();
         }
-        let source = EvidenceSourceRef::from_event(event);
-        if self.sources.len() < crate::constants::EVIDENCE_SOURCE_REF_LIMIT
-            && !self.sources.contains(&source)
-        {
-            self.sources.push(source);
+        if let Some(source) = EvidenceSourceRef::from_event(event) {
+            if self.sources.len() < crate::constants::EVIDENCE_SOURCE_REF_LIMIT
+                && !self.sources.contains(&source)
+            {
+                self.sources.push(source);
+            }
         }
     }
 }

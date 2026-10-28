@@ -37,7 +37,11 @@ fn make_dataset(root: &std::path::Path) -> std::path::PathBuf {
         "cursor": {"run_id": "run-1", "step_id": "step-2"},
         "step": {
             "step_id": "step-2",
-            "accepted_input": {"messages": []},
+            "accepted_input": {"messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "修复 x.rs 的重复匹配错误"}
+                ]}
+            ]},
             "outcome": {
                 "finalize_cause": "Completed",
                 "messages": [
@@ -121,6 +125,32 @@ fn scan_extracts_paired_tool_events_and_outcomes() {
         .all(|event| event.session_id.contains("0199abcd") && event.run_id == "run-1"));
 }
 
+/// cursor 身份缺失或不一致时跳过成员，NEVER 生成 unknown 来源绑定错误上下文。
+#[test]
+fn scan_skips_missing_or_mismatched_step_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let members = root.path().join("bad.dataset/members");
+    std::fs::create_dir_all(&members).unwrap();
+    for (name, member) in [
+        (
+            "missing-cursor.json",
+            serde_json::json!({"step":{"outcome":{"messages":[]}}}),
+        ),
+        (
+            "mismatch.json",
+            serde_json::json!({
+                "cursor": {"run_id":"run-1","step_id":"step-1"},
+                "step": {"step_id":"step-2","outcome":{"messages":[]}}
+            }),
+        ),
+    ] {
+        std::fs::write(members.join(name), member.to_string()).unwrap();
+    }
+    let report = SessionDatasetScanner::scan_dataset(&root.path().join("bad.dataset"));
+    assert_eq!(report.events.len(), 0);
+    assert_eq!(report.skipped_members, 2);
+}
+
 /// 回读来源 step 的相邻上下文：包含前后 step、用户/assistant/tool 摘要。
 #[test]
 fn read_step_context_includes_neighbor_steps_and_tool_facts() {
@@ -141,6 +171,7 @@ fn read_step_context_includes_neighbor_steps_and_tool_facts() {
     );
     assert!(excerpt.text.contains("[step-2]"));
     assert!(excerpt.text.contains("cargo test"));
+    assert!(excerpt.text.contains("修复 x.rs 的重复匹配错误"));
     assert!(excerpt.text.contains("old_string found 2 times"));
     assert!(excerpt.text.chars().count() <= 1200, "单来源上下文必须有界");
 }
@@ -200,7 +231,58 @@ fn read_step_context_is_bounded_for_large_steps() {
     let excerpt =
         SessionDatasetScanner::read_step_context(&dataset, &source).expect("上下文必须可回读");
     assert!(excerpt.text.chars().count() <= 1200);
+    assert!(excerpt.text.contains("[step-1]"), "目标 step MUST 保留");
     assert!(excerpt.text.ends_with('…'));
+}
+
+/// datasets root 定位 MUST 拒绝绝对路径、父目录引用与 symlink 逃逸。
+#[test]
+fn read_step_context_under_root_rejects_path_escape() {
+    let root = tempfile::tempdir().unwrap();
+    let dataset = make_dataset(root.path());
+    let source = EvidenceSourceRef {
+        session_id: dataset
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("dataset name")
+            .to_string(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    assert!(
+        SessionDatasetScanner::read_step_context_under_root(root.path(), &source).is_some(),
+        "合法 dataset 必须可读"
+    );
+
+    for session_id in [
+        "../escape.dataset",
+        "/tmp/escape.dataset",
+        "nested/escape.dataset",
+    ] {
+        let escaped = EvidenceSourceRef {
+            session_id: session_id.into(),
+            run_id: "run-1".into(),
+            step_id: "step-1".into(),
+        };
+        assert!(
+            SessionDatasetScanner::read_step_context_under_root(root.path(), &escaped).is_none(),
+            "非法 session id 必须拒绝：{session_id}"
+        );
+    }
+
+    let outside = tempfile::tempdir().unwrap();
+    let outside_dataset = make_dataset(outside.path());
+    std::os::unix::fs::symlink(&outside_dataset, root.path().join("symlink.dataset"))
+        .expect("symlink");
+    let symlink_source = EvidenceSourceRef {
+        session_id: "symlink.dataset".into(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    assert!(
+        SessionDatasetScanner::read_step_context_under_root(root.path(), &symlink_source).is_none(),
+        "symlink 指向 root 外 MUST 拒绝"
+    );
 }
 
 /// 缺 members 目录：空报告 NEVER 报错。

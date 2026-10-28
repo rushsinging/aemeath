@@ -455,7 +455,7 @@ fn similar_candidates_recall_chinese_text_with_context() {
     let lesson = active_lesson(
         "old",
         "编辑文件前应读取目标内容，确认上下文后再落笔",
-        "repeated_failure:Edit:old_string",
+        "repeated_failure:Edit:different-signal",
         Some(source_ref("step-2")),
     );
     let stream = fake_stream_with_context("step-1", "提案来源上下文：修改 x.rs");
@@ -465,7 +465,7 @@ fn similar_candidates_recall_chinese_text_with_context() {
         crate::constants::COMPOSE_SIMILAR_PAIR_LIMIT,
         &stream,
     );
-    assert_eq!(pairs.len(), 1, "同 signal 的中文候选必须召回");
+    assert_eq!(pairs.len(), 1, "不同 signal 下中文 bigram 必须召回候选");
     assert!(pairs[0].score >= crate::constants::COMPOSE_SIMILARITY_CANDIDATE_THRESHOLD);
     assert!(
         pairs[0].left_context.is_some(),
@@ -506,6 +506,8 @@ fn compose_similarity_block_carries_context_and_guardrails() {
         left_text: "编辑前先读取".to_string(),
         right_label: "Active lesson：lesson-old".to_string(),
         right_text: "落笔前确认上下文".to_string(),
+        left_source: Some(source_ref("step-1")),
+        right_source: Some(source_ref("step-2")),
         left_context: Some("来源上下文 A：Bash 失败".to_string()),
         right_context: None,
         score: 0.62,
@@ -516,6 +518,10 @@ fn compose_similarity_block_carries_context_and_guardrails() {
     assert!(block.contains("本周期提案：alpha"));
     assert!(block.contains("Active lesson：lesson-old"));
     assert!(block.contains("来源上下文 A：Bash 失败"));
+    assert!(
+        block.contains("s1.dataset/run-1/step-1"),
+        "prompt 必须保留完整来源三元组"
+    );
     assert!(block.contains("上下文不可用"), "缺失上下文必须显式标注");
     assert!(block.contains("相似度只是召回线索"));
     assert!(block.contains("上下文不同或缺失"), "必须禁止据此合并");
@@ -635,6 +641,105 @@ async fn compose_phase_passes_active_lessons_and_context_to_prompt() {
         prompt.contains("历史上下文：同场景反复失败"),
         "prompt 缺 lesson 来源上下文：{prompt}"
     );
+}
+
+/// Compose 修正必须继承被仲裁采纳的真实 signal/source，不能写成空绑定。
+#[tokio::test]
+async fn compose_correction_preserves_adoption_evidence() {
+    let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前先读取文件内容",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
+    );
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"propose","reason":"合并后精炼","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = crate::domain::improvement::run_compose_phase(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &[proposal],
+        &[],
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("Compose 必须成功")
+    .expect("Compose 结果");
+    assert!(outcome.summary.contains("已采纳"), "{}", outcome.summary);
+    let lessons = lesson_store.load_active().expect("lessons");
+    assert_eq!(lessons.len(), 1);
+    assert_eq!(
+        lessons[0].evidence[0].signal_id,
+        "repeated_failure:Edit:old_string"
+    );
+    assert!(lessons[0].evidence[0]
+        .source
+        .as_ref()
+        .is_some_and(|source| source.step_id == "step-1"));
+}
+
+/// Compose 只能修正本周期已采纳组件，且 signal_ids 非空时必须来自采纳证据。
+#[tokio::test]
+async fn compose_rejects_unadopted_component_and_unknown_signal() {
+    for response in [
+        r#"{"decision":"propose","reason":"越界","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"beta"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        r#"{"decision":"propose","reason":"未知信号","signal_ids":["repeated_failure:Edit:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+    ] {
+        let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+        let proposal = adoption_record(
+            "alpha",
+            "编辑前先读取文件内容",
+            "repeated_failure:Edit:old_string",
+            Some(source_ref("step-1")),
+        );
+        let llm = ScriptedLlm::new(vec![response.to_string()]);
+        let lesson_store = crate::domain::lesson::LessonStore::new(
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("library.jsonl"),
+        );
+        let outcome = crate::domain::improvement::run_compose_phase(
+            &mut registry,
+            &llm,
+            &lesson_store,
+            &[proposal],
+            &[],
+            &crate::domain::stream_port::FakeEvidenceStream::default(),
+            false,
+            &mut Vec::new(),
+            None,
+            None,
+        )
+        .await
+        .expect("Compose 必须成功")
+        .expect("Compose 结果");
+        assert!(
+            outcome.summary.contains("证据引用无效"),
+            "{}",
+            outcome.summary
+        );
+        assert_eq!(
+            registry
+                .content_of(&id("alpha"))
+                .map(|content| content.body.clone()),
+            Some("old".to_string()),
+            "校验失败必须零落盘"
+        );
+        assert!(lesson_store.load_active().expect("lessons").is_empty());
+    }
 }
 
 // ---- dry-run 富预览（实在总结：前后规模 + 要点 + 依据）----

@@ -447,8 +447,8 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
         &self,
         source: &harness::domain::evidence::EvidenceSourceRef,
     ) -> Option<harness::domain::evidence::SessionContextExcerpt> {
-        harness::adapters::session_scanner::SessionDatasetScanner::read_step_context(
-            &self.datasets_root.join(&source.session_id),
+        harness::adapters::session_scanner::SessionDatasetScanner::read_step_context_under_root(
+            &self.datasets_root,
             source,
         )
     }

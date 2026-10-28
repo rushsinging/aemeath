@@ -34,6 +34,12 @@ pub(crate) const EVIDENCE_SOURCE_REF_LIMIT: usize = 3;
 /// 单个来源 step 回读的上下文上限（含相邻 step）。
 pub(crate) const SESSION_CONTEXT_SOURCE_CHARS: usize = 1200;
 
+/// 目标 step 的上下文字符预算（保证目标事实不被超大邻居挤掉）。
+pub(crate) const SESSION_CONTEXT_TARGET_CHARS: usize = 800;
+
+/// 单个相邻 step 的上下文字符预算。
+pub(crate) const SESSION_CONTEXT_NEIGHBOR_CHARS: usize = 200;
+
 /// Compose 相似候选 pair 上限。
 pub(crate) const COMPOSE_SIMILAR_PAIR_LIMIT: usize = 8;
 

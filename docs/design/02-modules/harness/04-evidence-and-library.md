@@ -32,7 +32,7 @@
 
 投影器只读 dataset（manifest 定位成员、按成员清单流式扫描），NEVER 依赖主进程内存态。
 
-**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。单来源上下文 1200 字符，最多含目标 step 与前后各一步；缺失来源显式标记不可用。
+**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。上下文读取 `step/accepted_input/messages` 与 `step/outcome/messages`，包含目标 step 与前后各一步：目标 step 800 字符、单邻居 200 字符、单来源总计 1200 字符，目标事实 MUST 保留；缺失来源显式标记不可用。生产读取 MUST 以 datasets root 为基准验证 session id 是单一 Normal `.dataset` 成员，且 canonicalize 后仍在 root 内（拒绝 `..`、绝对路径与 symlink 逃逸）。
 
 ### 2A.2 投影器（`SessionEvidenceProjector`，harness crate）
 
@@ -73,7 +73,14 @@ enum SignalKind {
 }
 ```
 
-`run_ref` 保留周期/来源兼容字段；真实来源由 `EvidenceBinding.signal_id + source` 承载（source = session/run/step）。采纳回写只使用结构化 `signal_ids` 对应的真实信号；`CycleObservation` 仅用于 Compose 仲裁等无新增执行证据的场景。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
+`run_ref` 保留周期/来源兼容字段；真实来源由 `EvidenceBinding.signal_id + source` 承载（source = session/run/step）。采纳回写只使用结构化 `signal_ids` 对应的真实信号；`CycleObservation` 仅作为遗留/兜底信号，正常 Block 与 Compose 采纳 NEVER 再以空绑定抹掉真实证据。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
+
+### 2A.4a Compose 证据继承与历史快照
+
+- 周期在首个 Block 前保存 Active lesson 快照；Compose 使用该快照对照。Block 采纳会退役旧 lesson 并追加本周期 lesson，采纳后再读取会丢失历史并制造「当前提案 ↔ 自身派生 lesson」的伪候选。
+- Compose 只能修正本周期已采纳的组件；修正未采纳组件整份作废且零落盘。
+- Compose `signal_ids` 可为空，表示继承被仲裁采纳的证据；非空时必须是采纳证据 signal id 的去重子集，未知/重复引用整份作废。
+- Compose 修正回写 lesson 时按被修正组件继承对应 `EvidenceBinding`，保留真实 signal/source；NEVER 用 `CycleObservation + signal_id="" + source=None` 覆盖证据链。
 
 ### 2A.4b 验证阶段（#2080）
 
@@ -221,7 +228,8 @@ struct LessonEntry {
 
 - 证据装配（2A）：投影器从真实 dataset fixture 提取聚合信号（L2）；材料含 evidence 块、空证据兜底渲染（L2）；真模型在有证据材料下提案引用 signal id、lesson 落盘带真实 SignalKind（e2e，#2046 前置）。
 - 证据不变量：无证据提案被拒（L2）；采纳 lesson 均含 EvidenceBinding（L2 + e2e）。
-- 来源回读：`SessionEventRecord` 保留 session/run/step，`EvidenceSignal.sources` 有界且去重（L2）；scanner 从真实形态 dataset 回读目标 step 与相邻上下文并截断至 1200 字符，来源缺失/损坏成员不阻断（L2 + 真实 fixture）。
+- 来源回读：`SessionEventRecord` 保留 session/run/step，`EvidenceSignal.sources` 有界且去重（L2）；scanner 从真实形态 dataset 回读目标 step 与相邻上下文（含 `step/accepted_input` 用户任务）并保证目标 step 在 1200 字符预算内，来源缺失/损坏成员不阻断（L2 + 真实 fixture）。
 - 提案门禁：空、重复、未知 `signal_ids` 整份作废且零落盘副作用；合法引用绑定真实 signal kind 与 source（L2）。
+- Compose 证据继承：修正未采纳组件或引用未知 signal 作废且零落盘；修正已采纳组件时新 lesson 保留原 signal/source（L2）。完整周期必须在首个 Block 前保存 Active lesson 快照，Compose prompt 含历史 lesson 与双方上下文，且不含本周期自身派生 lesson（L2）。
 - 真模型 e2e：一次完整循环后经验库出现带证据的 Active lesson，且下一次改进周期的材料分块消费到该 lesson。
 - JSON 兜底：空组件树/无信号时 daemon 仍输出合法 JSON 结构（对齐反思空 corpus 兜底教训，NEVER 自然语言解释）。

@@ -256,6 +256,15 @@ impl RsiTask for HarnessRsiCycleTask {
             ));
             report_lines.push(format!("—— 数据源分块：{} 块", blocks.len()));
         }
+        // Compose 必须对照采纳前的历史经验：Block 采纳会退役旧 lesson 并追加
+        // 本周期自身 lesson，采纳后再读取会同时丢历史并制造 proposal-self 候选。
+        let active_lessons_before_cycle = match self.lesson_store.load_active() {
+            Ok(lessons) => lessons,
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "Compose 历史 Active lesson 读取失败（按空经验继续）：{error}");
+                Vec::new()
+            }
+        };
         for (block_index, block) in blocks.iter().enumerate() {
             let evidence = block_evidences[block_index].clone();
             if let Some(recorder) = &self.recorder {
@@ -323,19 +332,12 @@ impl RsiTask for HarnessRsiCycleTask {
         }
         // #2065 A：周期 Compose 汇总块——纵观全部采纳仲裁矛盾/合并/精炼
         if !all_adoptions.is_empty() {
-            let active_lessons = match self.lesson_store.load_active() {
-                Ok(lessons) => lessons,
-                Err(error) => {
-                    log::warn!(target: crate::LOG_TARGET, "Compose Active lesson 读取失败（按空经验继续）：{error}");
-                    Vec::new()
-                }
-            };
             if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
                 registry,
                 self.llm.as_ref(),
                 &self.lesson_store,
                 &all_adoptions,
-                &active_lessons,
+                &active_lessons_before_cycle,
                 self.stream_port.as_ref(),
                 self.dry_run,
                 &mut preview_lines,

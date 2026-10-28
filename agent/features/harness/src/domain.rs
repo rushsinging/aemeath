@@ -7,6 +7,8 @@ pub mod component;
 #[cfg(test)]
 mod component_tests;
 pub mod cycle_task;
+#[cfg(test)]
+mod cycle_task_tests;
 pub mod daemon_protocol;
 #[cfg(test)]
 mod daemon_protocol_tests;
