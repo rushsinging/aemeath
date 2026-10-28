@@ -18,6 +18,33 @@ fn copy_text_reports_chinese_error_or_succeeds() {
     }
 }
 
+// ---- 系统剪贴板可用性判定 ----
+
+/// macOS / Windows 自带原生剪贴板实现，不通过 `DISPLAY` / `WAYLAND_DISPLAY` 表达图形会话，
+/// 空环境变量也 MUST 判为系统剪贴板可用（否则本地非 SSH 会话被误判降级到 OSC 52）。
+#[test]
+fn uses_system_clipboard_trusts_native_clipboard_platforms() {
+    assert!(uses_system_clipboard(true, None, None));
+    assert!(uses_system_clipboard(true, Some("   "), Some("")));
+}
+
+/// 其余平台（Linux 等）仍按图形会话环境变量判定，SSH / tty（两者皆空）降级 OSC 52。
+#[test]
+fn uses_system_clipboard_requires_graphic_session_elsewhere() {
+    assert!(!uses_system_clipboard(false, None, None));
+    assert!(!uses_system_clipboard(false, Some("   "), Some("")));
+    assert!(uses_system_clipboard(false, Some(":0"), None));
+    assert!(uses_system_clipboard(false, None, Some("wayland-0")));
+}
+
+/// 当前测试平台的原生剪贴板判定必须与 `arboard` 支持面一致：
+/// macOS / Windows 恒真（不需要 `DISPLAY`），其余平台跟随环境变量。
+#[test]
+fn native_clipboard_target_matches_current_platform_capability() {
+    let expected = cfg!(any(target_os = "macos", target_os = "windows"));
+    assert_eq!(native_clipboard_target(), expected);
+}
+
 // ---- OSC 52 终端剪贴板（SSH / 无图形会话路径） ----
 
 #[test]
@@ -203,6 +230,35 @@ fn process_image_file_infers_png_media_type_and_keeps_bytes() {
 
     assert_eq!(image.media_type, "image/png");
     assert_eq!(image.data, b"png-bytes");
+}
+
+/// 真机往返：原生剪贴板平台上 `copy_text` MUST 写系统剪贴板（而非降级 OSC 52），内容可读回。
+/// 会覆盖当前剪贴板文本，因此跑完恢复原内容；默认忽略（CI 无剪贴板环境）。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[test]
+#[ignore = "需要真实系统剪贴板：本地手动 cargo test -p cli -- --ignored 运行"]
+fn copy_text_uses_system_clipboard_on_native_platforms() {
+    let previous = {
+        let mut clipboard = arboard::Clipboard::new().expect("连接系统剪贴板");
+        clipboard.get_text().ok()
+    };
+
+    let text = "aemeath clipboard smoke test";
+    let outcome = copy_text(text).expect("复制成功");
+    assert!(
+        matches!(outcome, CopyOutcome::SystemClipboard),
+        "原生剪贴板平台 MUST 写系统剪贴板，实际降级为 OSC 52"
+    );
+
+    let mut clipboard = arboard::Clipboard::new().expect("连接系统剪贴板");
+    assert_eq!(clipboard.get_text().expect("读回剪贴板文本"), text);
+
+    match previous {
+        Some(previous) => clipboard.set_text(previous).expect("恢复原剪贴板文本"),
+        None => {
+            clipboard.clear().ok();
+        }
+    }
 }
 
 /// 真机往返：写入系统剪贴板 → 读回 → 校验像素。

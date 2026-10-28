@@ -179,30 +179,38 @@ fn executor_routes_terminal_notification_to_injected_writer() {
     );
 }
 
-/// CopyToClipboard 接线契约：executor 必须按 `CopyOutcome` 区分系统剪贴板与终端
-/// OSC 52 两条成功提示。NEVER 在测试中直接执行该 Effect——它向真实 stdout /
-/// 系统剪贴板写入；字节契约由 `clipboard_tests` 的注入 writer 测试覆盖。
+/// CopyToClipboard 接线契约：成功一律提示「已复制选中内容」，仅失败时透出原因；
+/// 降级到 OSC 52 只写日志，NEVER 出现在用户可见提示里。
+/// NEVER 在测试中直接执行该 Effect——它向真实 stdout / 系统剪贴板写入；
+/// 字节契约由 `clipboard_tests` 的注入 writer 测试覆盖。
 #[test]
-fn executor_maps_copy_outcome_to_distinct_notices() {
+fn executor_shows_single_success_notice_for_copy() {
     let source = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/effect/executor.rs"),
     )
     .expect("read executor source");
 
     assert!(
-        source.contains("CopyOutcome::SystemClipboard"),
-        "executor 必须区分 SystemClipboard 结果"
-    );
-    assert!(
         source.contains("CopyOutcome::TerminalOsc52"),
-        "executor 必须区分 TerminalOsc52 结果"
+        "executor 仍需识别 TerminalOsc52 以便记录降级日志"
+    );
+    assert_eq!(
+        source
+            .matches("StatusNotice::success(\"已复制选中内容\")")
+            .count(),
+        1,
+        "成功提示必须收敛为唯一构造点（两条分支共用），实际源码: {source}"
     );
     assert!(
-        source.contains("已复制选中内容"),
-        "系统剪贴板成功提示必须保留"
+        !source.contains("已通过终端复制") && !source.contains("OSC 52，需终端支持"),
+        "用户可见提示 NEVER 暴露 OSC 52 降级细节"
     );
     assert!(
-        source.contains("已通过终端复制"),
-        "OSC 52 成功提示必须区分于系统剪贴板"
+        source.contains("StatusNotice::warning(err)"),
+        "失败时必须把原因显示给用户"
+    );
+    assert!(
+        source.contains("crate::tui::log_debug!"),
+        "OSC 52 降级事实 MUST 记录到日志而非提示"
     );
 }

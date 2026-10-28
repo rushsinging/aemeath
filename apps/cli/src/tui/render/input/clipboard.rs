@@ -3,12 +3,12 @@ use std::path::Path;
 
 use super::constants::OSC52_MAX_ENCODED_BYTES;
 
-/// 复制落点：系统剪贴板或终端 OSC 52，调用方据此给出不同提示。
+/// 复制落点：系统剪贴板或终端 OSC 52，仅用于日志诊断——用户可见提示不区分两者。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyOutcome {
-    /// 已写入系统剪贴板（有图形会话且 arboard 成功）。
+    /// 已写入系统剪贴板（系统剪贴板可用且 arboard 成功）。
     SystemClipboard,
-    /// 已写入终端 OSC 52 序列（SSH / 无图形会话，或系统剪贴板失败的降级路径）。
+    /// 已写入终端 OSC 52 序列（SSH / 无系统剪贴板，或系统剪贴板失败的降级路径）。
     TerminalOsc52,
 }
 
@@ -36,8 +36,8 @@ pub async fn read_image() -> Result<LocalImage, String> {
     })
 }
 
-/// 复制文本：有图形会话优先系统剪贴板，失败或无图形会话（SSH / tty）时降级
-/// 为终端 OSC 52 序列（`ESC]52;c;<base64>BEL`，由终端模拟器写入**本地**剪贴板）。
+/// 复制文本：系统剪贴板可用时优先写入，失败或不可用（SSH / tty）时降级为
+/// 终端 OSC 52 序列（`ESC]52;c;<base64>BEL`，由终端模拟器写入**本地**剪贴板）。
 ///
 /// OSC 52 是 SSH 远程场景的标准通道；终端不支持时序列无害，**NEVER** 猜测终端能力。
 pub fn copy_text(text: &str) -> Result<CopyOutcome, String> {
@@ -45,22 +45,28 @@ pub fn copy_text(text: &str) -> Result<CopyOutcome, String> {
         return Ok(CopyOutcome::SystemClipboard);
     }
 
-    let graphic_session = graphic_session_present(
+    let use_system_clipboard = uses_system_clipboard(
+        native_clipboard_target(),
         std::env::var("DISPLAY").ok().as_deref(),
         std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
     );
     let mut stdout = io::stdout();
-    copy_text_via(text, graphic_session, system_clipboard_set, &mut stdout)
+    copy_text_via(
+        text,
+        use_system_clipboard,
+        system_clipboard_set,
+        &mut stdout,
+    )
 }
 
-/// `copy_text` 的可测核心：图形会话标志、系统剪贴板写入器与终端 writer 均可注入。
+/// `copy_text` 的可测核心：系统剪贴板可用标志、写入器与终端 writer 均可注入。
 fn copy_text_via(
     text: &str,
-    graphic_session: bool,
+    use_system_clipboard: bool,
     set_system_clipboard: impl FnOnce(&str) -> Result<(), String>,
     writer: &mut impl Write,
 ) -> Result<CopyOutcome, String> {
-    if graphic_session {
+    if use_system_clipboard {
         match set_system_clipboard(text) {
             Ok(()) => return Ok(CopyOutcome::SystemClipboard),
             Err(error) => crate::tui::log_warn!("系统剪贴板不可用，降级为终端 OSC 52：{error}"),
@@ -78,6 +84,23 @@ fn system_clipboard_set(text: &str) -> Result<(), String> {
     clipboard
         .set_text(text)
         .map_err(|error| clipboard_error("写入剪贴板", error))
+}
+
+/// 目标平台是否自带原生剪贴板实现（macOS `NSPasteboard` / Windows Win32）。
+///
+/// 这些平台**不通过** `DISPLAY` / `WAYLAND_DISPLAY` 表达图形会话，用环境变量判定会
+/// 把本地非 SSH 会话误判为「无图形会话」并降级到 OSC 52。
+const fn native_clipboard_target() -> bool {
+    cfg!(any(target_os = "macos", target_os = "windows"))
+}
+
+/// 是否应优先尝试系统剪贴板：原生剪贴板平台恒为真，其余平台按图形会话环境变量判定。
+fn uses_system_clipboard(
+    has_native_clipboard: bool,
+    display: Option<&str>,
+    wayland_display: Option<&str>,
+) -> bool {
+    has_native_clipboard || graphic_session_present(display, wayland_display)
 }
 
 /// 是否存在图形会话（`DISPLAY` / `WAYLAND_DISPLAY` 任一非空）。
