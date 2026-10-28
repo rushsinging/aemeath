@@ -167,7 +167,10 @@ fn split_steps<'a>(
         .iter()
         .position(|step| &(step.run_id.clone(), step.step_id.clone()) == compact_start)
         .unwrap_or(steps.len());
-    (&steps[..index], &steps[index..])
+    // 按 step 边界切分（Vec 索引，非文本切片）。
+    let early = &steps[..index]; // allow unsafe_text_op: Vec slice
+    let tail = &steps[index..]; // allow unsafe_text_op: Vec slice
+    (early, tail)
 }
 
 fn is_interrupted(step: &SessionStepMeta) -> bool {
@@ -179,8 +182,8 @@ fn is_interrupted(step: &SessionStepMeta) -> bool {
 pub(crate) fn evaluate(session: &SessionSnapshot) -> Option<SessionFeedback> {
     let compact_start = session.compact_start.as_ref()?;
     let split = session.compacted_message_count.min(session.messages.len());
-    let early = &session.messages[..split];
-    let tail = &session.messages[split..];
+    let early = &session.messages[..split]; // allow unsafe_text_op: Vec slice
+    let tail = &session.messages[split..]; // allow unsafe_text_op: Vec slice
 
     // 只比较实质请求：短指令（继续/好/ok）之间相似度不可靠，会虚高重问率。
     let early_users: Vec<String> = early
