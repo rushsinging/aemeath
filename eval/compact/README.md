@@ -25,6 +25,13 @@ aemeath eval compact score \
 aemeath eval compact run \
     --cases /tmp/compact-cases --output-dir /tmp/compact-run --limit 3
 
+# P2 多模型矩阵：同一批 case 对多个模型各跑一次真实压缩
+aemeath eval compact matrix \
+    --cases /tmp/compact-cases \
+    --model "Bailian Token Plan/deepseek-v4.1-flash-1017" \
+    --model "Zhipu Coding Plan/glm-5.3-flash" \
+    --limit 2 --output eval/compact/results/matrix.json
+
 # 真实摘要质量（must_keep 召回 + 压缩率，用已落盘摘要，不重跑压缩）
 aemeath eval compact recall \
     --root ~/.agents/session --limit 200 \
@@ -70,7 +77,7 @@ eval/compact/
 |---|---|---|
 | P0 | 遥测基线 | ✅ Rust 实现，10 月真实数据已入库 |
 | P1 | case 导出 + 确定性指标 + 单测 + 真实压缩执行面 | ✅ Rust 实现（metrics 待 #2136） |
-| P2 | 多模型矩阵 + REPORT | ⏳ |
+| P2 | 多模型矩阵 + REPORT | ✅ 矩阵已落地（REPORT 汇总待更多模型数据） |
 | P3 | 续接问答 e2e（判官 `--judge` 指定） | ⏳ |
 | P4 | 回归门禁（确定性指标不劣于基线） | ⏳ |
 | 生产反馈 | 重问率/重复读取/错误率/中断/不满/成本 | ✅ 已实现（趋势口径，不进 CI 门禁） |
@@ -119,6 +126,17 @@ eval/compact/
 | message_count | 648 | 8365 | 8365 |
 | estimated_tokens | 479560 | 2296755 | 2296755 |
 | must_keep（上限 200） | 200 | 200 | 200 |
+
+### 多模型矩阵（首跑，1 case，#2148 修复前）
+
+| 模型 | quality | 耗时 | summary | must_keep 召回 |
+|---|---|---|---|---|
+| Bailian/deepseek-v4.1-flash | Llm | 223.8s | 12941 chars | 0.078 |
+| Zhipu/glm-5.3-flash | **PartialMapFallback ×5** | 1.5s（假完成） | 59670 chars（本地降级） | 0.349（虚高） |
+
+矩阵首跑即暴露 #2148（server_effort_map 抬升 Off 与 InvocationScope 校验冲突：
+Zhipu 系 compact LLM 调用必失败）。**degraded 行的召回不可比**——本地降级拼接
+保留更多原文，召回虚高，矩阵按 degraded 标记排除解读。
 
 ### 摘要质量（199 个 session，13 个有压缩；已落盘摘要）
 

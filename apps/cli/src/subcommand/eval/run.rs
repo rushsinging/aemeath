@@ -37,7 +37,9 @@ pub(crate) struct RunReport {
     cases: Vec<CaseRun>,
 }
 
-fn load_case_json_lines(path: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) fn load_case_json_lines(
+    path: &std::path::Path,
+) -> Result<Vec<serde_json::Value>, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("读取 {}: {error}", path.display()))?;
     text.lines()
@@ -46,7 +48,9 @@ fn load_case_json_lines(path: &std::path::Path) -> Result<Vec<serde_json::Value>
         .collect()
 }
 
-fn load_cases_index(cases_dir: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) fn load_cases_index(
+    cases_dir: &std::path::Path,
+) -> Result<Vec<serde_json::Value>, String> {
     let text = std::fs::read_to_string(cases_dir.join("cases.jsonl"))
         .map_err(|error| format!("读取 cases.jsonl 失败: {error}"))?;
     text.lines()
@@ -59,6 +63,7 @@ fn load_cases_index(cases_dir: &std::path::Path) -> Result<Vec<serde_json::Value
 async fn run_case(
     case: &serde_json::Value,
     cases_dir: &std::path::Path,
+    selection: Option<&str>,
 ) -> Result<composition::app::EvalCompactOutcome, String> {
     let messages_path = case
         .get("messages_path")
@@ -69,7 +74,7 @@ async fn run_case(
         .get("previous_summary")
         .and_then(|value| value.as_str())
         .filter(|text| !text.is_empty());
-    composition::app::run_compact_for_eval(messages, previous)
+    composition::app::run_compact_for_eval(messages, previous, selection)
         .await
         .map_err(|error| error.to_string())
 }
@@ -78,6 +83,7 @@ pub(crate) async fn run(
     cases_dir: PathBuf,
     output_dir: PathBuf,
     limit: usize,
+    model: Option<String>,
 ) -> Result<(), String> {
     std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
     let index = load_cases_index(&cases_dir)?;
@@ -100,7 +106,7 @@ pub(crate) async fn run(
         .map(|messages| messages.len())
         .unwrap_or_default();
         let started = Instant::now();
-        match run_case(case, &cases_dir).await {
+        match run_case(case, &cases_dir, model.as_deref()).await {
             Ok(outcome) => {
                 let elapsed_ms = started.elapsed().as_millis() as u64;
                 report.binding_model = report.binding_model.or(Some(outcome.model.clone()));

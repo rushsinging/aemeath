@@ -1177,6 +1177,7 @@ pub struct EvalCompactOutcome {
 pub async fn run_compact_for_eval(
     messages_json: Vec<serde_json::Value>,
     previous_summary: Option<&str>,
+    selection: Option<&str>,
 ) -> Result<EvalCompactOutcome, String> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let agents_dir = share::config::paths::global_agents_dir();
@@ -1201,11 +1202,15 @@ pub async fn run_compact_for_eval(
         gateways.provider.clone(),
         runtime::SessionModelSlotData::new(),
     );
-    let Some(binding) = resolver.to_llm_binding() else {
-        return Err(
-            "未解析到 compact 模型：请配置 context.compact_model 后重试（评测不静默降级为本地压缩）"
-                .to_string(),
-        );
+    let binding = match selection {
+        // P2 多模型矩阵：显式 selection，失败 MUST 报错（不静默降级）。
+        Some(selection) => resolver
+            .resolve_explicit_binding(selection)
+            .map_err(|error| format!("解析模型 {selection} 失败：{error}"))?,
+        None => resolver.to_llm_binding().ok_or_else(|| {
+            "未解析到 compact 模型：请配置 context.compact_model 或传 --model 后重试（评测不静默降级为本地压缩）"
+                .to_string()
+        })?,
     };
     let model = format!("{}/{}", binding.model.provider, binding.model.model);
     let context_size = binding.model.context_limit.unwrap_or_default();
