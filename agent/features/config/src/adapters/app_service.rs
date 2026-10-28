@@ -508,3 +508,6 @@ impl ProjectConfigParticipant for ConfigAppService {
         }
     }
 }
+
+// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
+impl crate::sealed::Sealed for ConfigAppService {}

@@ -38,24 +38,6 @@ fn text_output(text: impl Into<String>) -> provider::ProviderResponseStream {
     text_stream(&text, Some("end_turn"))
 }
 
-/// 测试闭包 invoker。
-#[allow(dead_code)]
-struct FnInvoker<F>(F);
-
-#[async_trait::async_trait]
-impl<F> provider::LlmInvokePort for FnInvoker<F>
-where
-    F: Fn(&provider::ProviderRequestData) -> Result<String, provider::ProviderError> + Send + Sync,
-{
-    async fn invoke_stream(
-        &self,
-        _model: &provider::ModelInfo,
-        request: &provider::ProviderRequestData,
-    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-        Ok(text_output((self.0)(request)?))
-    }
-}
-
 /// 测试 binding 构造。
 fn summary_test_binding(
     invoker: std::sync::Arc<dyn provider::LlmInvokePort>,

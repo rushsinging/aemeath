@@ -11,6 +11,6 @@ pub trait SkillCatalogPort: Send + Sync {
 
 /// 唯一 Skill Tool 调用时按 identity 加载单个正文。
 #[async_trait]
-pub trait SkillLoadPort: Send + Sync {
+pub trait SkillLoadPort: crate::sealed::Sealed + Send + Sync {
     async fn load(&self, query: SkillLoadQuery) -> Result<LoadedSkill, SkillError>;
 }

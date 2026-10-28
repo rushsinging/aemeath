@@ -309,3 +309,7 @@ async fn trigger_runs_cycle_and_writes_component_file() {
         .expect("daemon 必须优雅退出")
         .expect("join");
 }
+
+// #2146 密封解锁：测试替身（crate 内）。
+impl crate::sealed::Sealed for FastTask {}
+impl crate::sealed::Sealed for SlowTask {}
