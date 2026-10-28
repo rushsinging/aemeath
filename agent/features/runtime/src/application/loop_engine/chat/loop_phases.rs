@@ -39,30 +39,22 @@ where
     match &refresh {
         Ok(ConfigRefreshOutcomeData::Unchanged) => {}
         Ok(ConfigRefreshOutcomeData::Reloaded { scopes, .. }) => {
-            let mut changed_keys = vec!["config:reloaded".to_string()];
-            changed_keys.extend(
-                scopes
-                    .iter()
-                    .map(|scope| format!("config:scope:{}", scope.as_str())),
+            // ConfigReloaded + 可见回显共用统一构造（与即时查询路径一致）。
+            let view = crate::application::client::config_snapshot_to_sdk(
+                &config_reader.committed_snapshot(),
             );
-            sink.send_event(RuntimeStreamEvent::ConfigReloaded {
-                changed_keys,
-                view: crate::application::client::config_snapshot_to_sdk(
-                    &config_reader.committed_snapshot(),
-                ),
-            })
-            .await;
+            for event in
+                crate::application::loop_engine::chat::reload_notification::config_reload_events(
+                    language, scopes, view,
+                )
+            {
+                sink.send_event(event).await;
+            }
             if scopes.contains(
                 &share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired,
             ) {
                 let revision = config_reader.committed_snapshot().revision();
                 session_switch.mark_session_restart_required(revision);
-                let message = match language {
-                    "zh" => "[config] 部分配置将在重启 Session 后生效。当前 Session 继续使用既有基础设施。",
-                    _ => "[config] Some configuration changes take effect after restarting the session. The current session keeps its existing infrastructure.",
-                };
-                sink.send_event(RuntimeStreamEvent::SystemMessage(message.to_string()))
-                    .await;
             }
         }
         // 原 `Rejected` 分支等价行为：仅发一条降级 SystemMessage 通知，
@@ -128,12 +120,23 @@ where
             .collect();
         if !effective_keys.is_empty() {
             sink.send_event(RuntimeStreamEvent::ConfigReloaded {
-                changed_keys: effective_keys,
+                changed_keys: effective_keys.clone(),
                 view: crate::application::client::config_snapshot_to_sdk(
                     &config_reader.committed_snapshot(),
                 ),
             })
             .await;
+            // 组件热载（guidance / instructions / skills）用户可见回显：
+            // 按来源分组只报文件数，NEVER 把组件变更标成 [config]。
+            for notice in
+                crate::application::loop_engine::chat::config_reload::component_reload_notices(
+                    language,
+                    &effective_keys,
+                )
+            {
+                sink.send_event(RuntimeStreamEvent::SystemMessage(notice))
+                    .await;
+            }
         }
     }
     TurnBoundaryConfigOutcome {

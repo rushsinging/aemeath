@@ -87,7 +87,7 @@ fn config_reload_updates_status_policy_from_committed_view() {
 }
 
 #[test]
-fn config_reload_run_scope_shows_next_run_notice_and_refreshes_model_cache() {
+fn config_reload_run_scope_invalidates_model_cache_without_visible_notice() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.session.cache_models(vec![sdk::ModelSummary {
         provider: "Volcengine".to_string(),
@@ -101,31 +101,25 @@ fn config_reload_run_scope_shows_next_run_notice_and_refreshes_model_cache() {
     harness.sdk_runtime_batch([reload("ask")]);
     harness.render();
 
+    // 可见回显由 runtime 的 SystemMessage 负责；ConfigReloaded 不再产生文本，
+    // 也 NEVER 主动推送模型列表（模型清单走「显示时刷新」）。
     let notices = system_notices(&harness);
     assert!(
-        notices.iter().any(|text| text.contains("下次 Run 生效")),
-        "run scope must show next-run notice, notices={notices:?}"
-    );
-    assert!(
-        notices
-            .iter()
-            .all(|text| !text.contains("重启 Session 后生效")),
-        "run-only reload must not claim session restart, notices={notices:?}"
+        notices.iter().all(|text| !text.contains("[config]")),
+        "ConfigReloaded 不得自行生成 [config] 回显，notices={notices:?}"
     );
     assert!(
         harness.app.session.cached_models.is_none(),
-        "run scope must invalidate cached models so /model refetches"
+        "run scope must invalidate cached models so /model refetches on display"
     );
     assert!(
-        harness.effects().iter().any(|effect| {
-            matches!(
-                effect,
-                crate::tui::effect::effect::Effect::SendChatInputEvent {
-                    event: sdk::ChatInputEvent::ListModels
-                }
-            )
-        }),
-        "run scope must request ListModels refresh, effects={:?}",
+        harness.effects().iter().all(|effect| !matches!(
+            effect,
+            crate::tui::effect::effect::Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::ListModels
+            }
+        )),
+        "config reload MUST NOT push a model list refresh, effects={:?}",
         harness.effects()
     );
     assert_eq!(
@@ -182,7 +176,7 @@ fn model_list_after_run_reload_corrects_current_model_display_by_provider_id() {
 }
 
 #[test]
-fn config_reload_session_restart_scope_shows_restart_notice_without_model_refresh() {
+fn session_restart_scope_notice_renders_from_runtime_system_message_only() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.session.cache_models(vec![sdk::ModelSummary {
         provider: "OmniRoute".to_string(),
@@ -192,10 +186,16 @@ fn config_reload_session_restart_scope_shows_restart_notice_without_model_refres
         max_tokens: 8_192,
     }]);
 
-    harness.sdk_runtime_batch([reload_with_scopes(
-        "ask",
-        vec![sdk::ConfigApplicationScopeView::SessionRestartRequired],
-    )]);
+    // 回显单一来源：runtime 生成 i18n 文本 → SystemMessage → TUI 渲染。
+    // 此处按 runtime 输出形状注入（cli 不依赖 share，故用等价文本）。
+    let notice = "[config] 已重载。重启 Session 后生效。".to_string();
+    harness.sdk_runtime_batch([
+        reload_with_scopes(
+            "ask",
+            vec![sdk::ConfigApplicationScopeView::SessionRestartRequired],
+        ),
+        sdk::ChatEvent::SystemMessage(notice),
+    ]);
     harness.render();
 
     let notices = system_notices(&harness);
@@ -203,7 +203,7 @@ fn config_reload_session_restart_scope_shows_restart_notice_without_model_refres
         notices
             .iter()
             .any(|text| text.contains("重启 Session 后生效")),
-        "session_restart_required must show restart notice, notices={notices:?}"
+        "session_restart_required 的可见回显必须来自 runtime SystemMessage，notices={notices:?}"
     );
     assert!(
         notices.iter().all(|text| !text.contains("下次 Run 生效")),

@@ -17,6 +17,7 @@ pub mod memory;
 pub mod merge;
 pub mod models;
 pub mod permissions;
+pub mod reload;
 pub mod runtime;
 pub mod scope;
 pub mod scoring;

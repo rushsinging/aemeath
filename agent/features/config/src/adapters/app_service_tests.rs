@@ -612,3 +612,38 @@ async fn refresh_agent_role_definitions_updated() {
         Some("新描述")
     );
 }
+
+#[tokio::test]
+async fn refresh_exposes_model_added_to_disk_config() {
+    // /model 列表的用户可见数据源：committed 快照的 list_models()。
+    // 磁盘新增模型后 MUST 在 refresh 后可见（显示时刷新的配置侧保证）。
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(
+        &global,
+        r#"{"models":{"providers":{"acme":{"driver":"openai","baseUrl":"https://example.test","models":[{"id":"a1","name":"A1"}]}}}}"#,
+    )
+    .unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+    let before = service.committed_snapshot().list_models();
+    assert_eq!(before.len(), 1, "初始快照应只有 1 个模型: {before:?}");
+
+    std::fs::write(
+        &global,
+        r#"{"models":{"providers":{"acme":{"driver":"openai","baseUrl":"https://example.test","models":[{"id":"a1","name":"A1"},{"id":"b2","name":"B2"}]}}}}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        service.refresh_if_sources_changed().await,
+        Ok(ConfigRefreshOutcomeData::Reloaded { .. })
+    ));
+
+    let after = service.committed_snapshot().list_models();
+    assert!(
+        after
+            .iter()
+            .any(|(provider, model)| provider == "acme" && model.id == "b2"),
+        "refresh 后 MUST 暴露磁盘新增模型 b2: {after:?}"
+    );
+}

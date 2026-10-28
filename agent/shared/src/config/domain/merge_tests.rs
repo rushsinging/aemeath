@@ -628,3 +628,21 @@ fn harness_rsi_patch_merges_fields() {
         crate::config::RsiExecutionMode::DiagnoseOnly
     );
 }
+
+#[test]
+fn language_patch_overrides_default_and_reaches_config() {
+    let patch: ConfigPatch = serde_json::from_str(r#"{"language":"zh"}"#).unwrap();
+    let config = apply_patch(Config::default(), patch);
+    assert_eq!(config.language, "zh");
+    assert_eq!(ConfigSnapshot::new(config).language(), "zh");
+}
+
+#[test]
+fn language_unspecified_in_patch_keeps_lower_layer_value() {
+    let base = apply_patch(
+        Config::default(),
+        serde_json::from_str::<ConfigPatch>(r#"{"language":"zh"}"#).unwrap(),
+    );
+    let config = apply_patch(base, ConfigPatch::default());
+    assert_eq!(config.language, "zh");
+}

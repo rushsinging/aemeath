@@ -19,6 +19,9 @@ pub(crate) struct SessionState {
     pub cached_sessions: Vec<(String, String)>,
     /// /resume 补全数据是否已请求过（按需拉取，防重复触发 list 查询）。
     pub session_list_requested: bool,
+    /// `/model <arg>` 补全是否已在本轮进入时请求过模型列表（显示时刷新，
+    /// 离开补全或缓存失效后复位，避免每次按键都打一次 list 查询）。
+    pub model_completion_list_requested: bool,
     /// /model 对话框在等待 `ModelList` 事件回填后自动打开。
     pub model_selection_pending: bool,
 }
@@ -37,9 +40,10 @@ impl SessionState {
         self.cached_models = Some(models);
     }
 
-    /// 使模型列表缓存失效（回到未回填态），强制下次 `/model` 等待新 `ModelList`。
+    /// 使模型列表缓存失效（回到未回填态），强制下次显示时重新刷新。
     pub(crate) fn invalidate_cached_models(&mut self) {
         self.cached_models = None;
+        self.model_completion_list_requested = false;
     }
 
     /// 在清空模型缓存前，用当前显示名对照缓存解析并记住 `(provider, id)`。

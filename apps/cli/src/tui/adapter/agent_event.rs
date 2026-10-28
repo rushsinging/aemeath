@@ -358,22 +358,17 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ],
             ..Default::default()
         },
-        TuiRuntimeEvent::ConfigReloaded {
-            changed_keys: _,
-            scopes,
-            view,
-        } => {
-            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
-                AppendSystemMessage {
-                    text: config_reload_notice(scopes),
-                },
-            ));
-            mapping.ui_preferences.push(
-                crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
-                    view.markdown_spacing,
-                ),
-            );
-            mapping
+        TuiRuntimeEvent::ConfigReloaded { view, .. } => {
+            // 可见回显由 runtime 以 SystemMessage 生成（i18n + 生效边界）；
+            // 本事件只负责 UI 偏好同步，NEVER 再追加第二条文本。
+            AgentEventMapping {
+                ui_preferences: vec![
+                    crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
+                        view.markdown_spacing,
+                    ),
+                ],
+                ..Default::default()
+            }
         }
         TuiRuntimeEvent::ModelSwitched { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ThinkingChanged { .. } => AgentEventMapping::default(),
@@ -504,25 +499,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — AgentEventMapping constructors
 // ════════════════════════════════════════════════════════════════════
-
-fn config_reload_notice(
-    scopes: &[crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope],
-) -> String {
-    use crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope;
-
-    let mut parts = Vec::new();
-    if scopes.contains(&TuiConfigApplicationScope::Run) {
-        parts.push("下次 Run 生效");
-    }
-    if scopes.contains(&TuiConfigApplicationScope::SessionRestartRequired) {
-        parts.push("重启 Session 后生效");
-    }
-    if parts.is_empty() {
-        "[config] 已重载。".to_string()
-    } else {
-        format!("[config] 已重载。{}。", parts.join("；"))
-    }
-}
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {

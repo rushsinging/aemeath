@@ -532,11 +532,10 @@ impl App {
                 if scopes.contains(
                     &crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope::Run,
                 ) {
+                    // 只失效缓存：模型清单走「显示时刷新」（打开 /model 或进入补全时
+                    // 请求 ListModels），NEVER 由配置事件主动推送。
                     self.session.remember_bound_model_from_cache();
                     self.session.invalidate_cached_models();
-                    extra_effects.push(Effect::SendChatInputEvent {
-                        event: sdk::ChatInputEvent::ListModels,
-                    });
                 }
             }
             TuiRuntimeEvent::SessionResumed {
