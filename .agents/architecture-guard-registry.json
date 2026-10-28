@@ -3002,10 +3002,8 @@
         {
           "trait_name": "SessionManagementPort",
           "owner_crate": "context",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "SkillCatalogPort",

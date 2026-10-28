@@ -131,61 +131,6 @@ fn test_agent_runner_assembly(
 
 struct NoopReflectionHistory;
 
-struct NoopSessionManagement;
-
-#[async_trait::async_trait]
-impl context::SessionManagementPort for NoopSessionManagement {
-    async fn load_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::session::CanonicalSession, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-
-    async fn list_for_project(
-        &self,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<sdk::SessionItemList>, context::SessionManagementError> {
-        Ok(Vec::new())
-    }
-
-    async fn export_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-
-    async fn import_for_project(
-        &self,
-        _bytes: &[u8],
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<sdk::SessionItemList, context::SessionManagementError> {
-        Err(context::SessionManagementError::Storage(
-            "test port".to_string(),
-        ))
-    }
-
-    async fn update_metadata_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-        _update: context::session::SessionMetadata,
-    ) -> Result<sdk::SessionItemList, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-
-    async fn delete_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-}
-
 #[async_trait::async_trait]
 impl memory::api::ReflectionHistoryQuery for NoopReflectionHistory {
     async fn list(
@@ -232,7 +177,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         storage::SafeStorageRoot::open(temp.path()).unwrap(),
     );
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(NoopSessionManagement);
+        Arc::new(context::test_support::UnavailableSessionManagement);
     let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task.persist())),
