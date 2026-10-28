@@ -447,3 +447,102 @@ fn system_now_seconds() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+
+/// Workflow 状态提示 source（#2088）。
+///
+/// 只声明 `workflow_id` 与当前 ActiveMode，不携带 Graph 内容；状态未变
+/// 由 `SkipIfUnchanged` 去重，不重复注入。Inactive / 终态返回 `None`
+/// 不入队。
+pub(crate) struct WorkflowStateReminderSource {
+    probe: Arc<dyn workflow::WorkflowStateProbe>,
+}
+
+impl WorkflowStateReminderSource {
+    pub(crate) fn new(probe: Arc<dyn workflow::WorkflowStateProbe>) -> Self {
+        Self { probe }
+    }
+
+    fn render_body(hint: &workflow::WorkflowStateHint, language: &str) -> String {
+        if language == "zh" {
+            match hint.active_mode {
+                workflow::ActiveMode::Executing => format!(
+                    "当前 Session 的 Active Workflow {} 处于 Executing。执行或更新前先调用 workflow_query 获取当前 Graph、Active Node 与已有结论。",
+                    hint.workflow_id
+                ),
+                workflow::ActiveMode::Replanning => format!(
+                    "当前 Session 的 Active Workflow {} 处于 Replanning。按 system prompt 中的重规划纪律处理：先 workflow_query，再 workflow_replan 或 workflow_update(fail / cancel / deactivate)。",
+                    hint.workflow_id
+                ),
+            }
+        } else {
+            match hint.active_mode {
+                workflow::ActiveMode::Executing => format!(
+                    "Active workflow {} in this session is Executing. Call workflow_query before acting on it to read the current graph, active nodes and existing conclusions.",
+                    hint.workflow_id
+                ),
+                workflow::ActiveMode::Replanning => format!(
+                    "Active workflow {} in this session is Replanning. Follow the replanning discipline from the system prompt: call workflow_query first, then workflow_replan or workflow_update(fail / cancel / deactivate).",
+                    hint.workflow_id
+                ),
+            }
+        }
+    }
+
+    fn serialized_snapshot(hint: &workflow::WorkflowStateHint) -> ReminderSnapshot {
+        ReminderSnapshot {
+            data: serde_json::json!({
+                "workflow_id": hint.workflow_id,
+                "mode": match hint.active_mode {
+                    workflow::ActiveMode::Executing => "executing",
+                    workflow::ActiveMode::Replanning => "replanning",
+                },
+            })
+            .to_string(),
+        }
+    }
+}
+
+impl ReminderSource for WorkflowStateReminderSource {
+    fn kind(&self) -> ReminderKind {
+        ReminderKind::workflow_state()
+    }
+
+    fn policy(&self) -> ReminderPolicy {
+        ReminderPolicy {
+            // 每 step 检查一次：状态变化在下一个 step 边界即可送达，
+            // 未变化时由 SkipIfUnchanged 去重（不重复注入）。
+            refresh: context::RefreshTrigger::OnStepInterval(1),
+            placement: ReminderPlacement::TailUserMessage,
+            inject: InjectBehavior {
+                dedup: ReminderDedup::SkipIfUnchanged,
+                priority: ReminderPriority::workflow_state(),
+            },
+            compact: CompactBehavior::Rebuild,
+        }
+    }
+
+    fn build(&self) -> Option<ReminderSnapshot> {
+        self.probe
+            .active_state()
+            .map(|hint| Self::serialized_snapshot(&hint))
+    }
+
+    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
+        let value: serde_json::Value = match serde_json::from_str(&snapshot.data) {
+            Ok(value) => value,
+            Err(_) => return String::new(),
+        };
+        let workflow_id = value["workflow_id"].as_str().unwrap_or_default();
+        let active_mode = match value["mode"].as_str() {
+            Some("replanning") => workflow::ActiveMode::Replanning,
+            _ => workflow::ActiveMode::Executing,
+        };
+        Self::render_body(
+            &workflow::WorkflowStateHint {
+                workflow_id: workflow_id.to_owned(),
+                active_mode,
+            },
+            language,
+        )
+    }
+}

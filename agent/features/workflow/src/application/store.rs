@@ -138,3 +138,19 @@ impl InMemoryWorkflowStore {
             .count()
     }
 }
+
+impl crate::ports::WorkflowStateProbe for InMemoryWorkflowStore {
+    fn active_state(&self) -> Option<crate::ports::WorkflowStateHint> {
+        let workflows = self.workflows.lock().expect("store lock");
+        workflows.iter().find_map(|(id, aggregate)| {
+            let aggregate = aggregate.lock().expect("aggregate lock");
+            if aggregate.status() != WorkflowStatus::Active {
+                return None;
+            }
+            Some(crate::ports::WorkflowStateHint {
+                workflow_id: id.clone(),
+                active_mode: aggregate.active_mode()?,
+            })
+        })
+    }
+}

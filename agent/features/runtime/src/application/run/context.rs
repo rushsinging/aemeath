@@ -358,6 +358,9 @@ pub struct RuntimeServices {
     /// compact 请求 `llm: None` 走本地压缩。
     pub(crate) compact_model_resolver:
         Option<std::sync::Arc<crate::application::client::CompactModelResolver>>,
+    /// Workflow 状态查询端口（#2088）：六工具开关开启时为 Some，供
+    /// reminder source 读取 Active Workflow 的 id 与模式；关闭为 None。
+    pub workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -465,6 +468,9 @@ pub struct RuntimeContext {
             >,
         >,
     >,
+    /// Workflow 状态查询端口（#2088）：开关开启且装配后可用，供 reminder
+    /// source 读取 Active Workflow 的 id 与模式；关闭时为 None（不注入）。
+    workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
 }
 
 /// Token that gates [`RuntimeContext::new`] — only [`RuntimeContextFactory`]
@@ -518,6 +524,7 @@ impl RuntimeContext {
             policy_triage: services.policy_triage.clone(),
             compact_model_resolver: services.compact_model_resolver.clone(),
             memory_recall: Arc::new(std::sync::OnceLock::new()),
+            workflow_probe: services.workflow_probe.clone(),
         }
     }
 
@@ -588,6 +595,11 @@ impl RuntimeContext {
         >,
     > {
         self.memory_recall.clone()
+    }
+
+    /// Workflow 状态查询端口（#2088；未装配为 None）。
+    pub(crate) fn workflow_probe(&self) -> Option<Arc<dyn workflow::WorkflowStateProbe>> {
+        self.workflow_probe.clone()
     }
 
     /// 已装配的记忆召回 source（未装配为 None）。

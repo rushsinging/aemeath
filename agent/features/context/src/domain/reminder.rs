@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use crate::domain::constants::{
     ENVELOPE_VERSION, KIND_BACKGROUND_PROCESS, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED,
-    KIND_TASK_PROGRESS, PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL,
-    PRIORITY_TASK_STATE,
+    KIND_TASK_PROGRESS, KIND_WORKFLOW_STATE, PRIORITY_ENVIRONMENT, PRIORITY_EVENT,
+    PRIORITY_MEMORY_RECALL, PRIORITY_TASK_STATE, PRIORITY_WORKFLOW_STATE,
 };
 
 /// reminder kind 开放标识：新增 kind 只注册新 source，NEVER 扩展闭合 enum。
@@ -36,6 +36,11 @@ impl ReminderKind {
 
     pub fn background_process() -> Self {
         Self::new(KIND_BACKGROUND_PROCESS)
+    }
+
+    /// Workflow 状态提示（#2088）。
+    pub fn workflow_state() -> Self {
+        Self::new(KIND_WORKFLOW_STATE)
     }
 
     pub fn as_str(&self) -> &str {
@@ -123,6 +128,11 @@ impl ReminderPriority {
     /// 记忆召回（辅助上下文，低于任务状态）。
     pub const fn memory_recall() -> Self {
         Self(PRIORITY_MEMORY_RECALL)
+    }
+
+    /// Workflow 状态提示（#2088）。
+    pub const fn workflow_state() -> Self {
+        Self(PRIORITY_WORKFLOW_STATE)
     }
 
     pub const fn value(self) -> i32 {
