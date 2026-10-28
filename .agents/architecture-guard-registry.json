@@ -1002,6 +1002,7 @@
         "service.rs",
         "service_reflection_tests.rs",
         "service_tests.rs",
+        "test_support.rs",
         "write_lock.rs",
         "write_lock_port_tests.rs"
       ],
@@ -1079,7 +1080,8 @@
         "lib_tests.rs",
         "ports",
         "ports.rs",
-        "test_log.rs"
+        "test_log.rs",
+        "test_support.rs"
       ],
       "reason": "F-3：storage Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -2729,11 +2731,8 @@
         {
           "trait_name": "AtomicBlobPort",
           "owner_crate": "storage",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "c",
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "AtomicDatasetPort",
@@ -2902,10 +2901,8 @@
         {
           "trait_name": "MemoryPort",
           "owner_crate": "memory",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "c"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "MemoryPortSource",

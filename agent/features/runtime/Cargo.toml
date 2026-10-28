@@ -49,6 +49,7 @@ tempfile = "3"
 
 [dev-dependencies]
 provider = { path = "../provider", features = ["dev"] }
+storage = { path = "../storage", features = ["dev"] }
 # 自引用：integration tests（tests/）编译时 lib 不带 --test，
 # test helper 需 dev feature 才可见。
 runtime = { path = ".", features = ["dev"] }

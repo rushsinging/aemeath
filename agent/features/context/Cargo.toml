@@ -38,6 +38,8 @@ futures-util = { workspace = true }
 # 测试经 provider test_support 的脚本化 LlmInvokePort（#2146：该 trait 只允许
 # provider 实现）。
 provider = { path = "../provider", features = ["dev"] }
+memory = { path = "../memory", features = ["dev"] }
+storage = { path = "../storage", features = ["dev"] }
 tempfile = "3"
 
 # 继承 workspace 零容忍 lint 基线（#1995）。

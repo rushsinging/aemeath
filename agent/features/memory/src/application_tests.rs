@@ -496,6 +496,7 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         events: Arc<dyn crate::ports::MemoryEventAppendPort>,
         recorder: Arc<RecordingEventAppend>,
     }
+    impl crate::sealed::Sealed for PortWithEvents {}
 
     #[async_trait]
     impl MemoryPort for PortWithEvents {

@@ -274,7 +274,7 @@ pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
 }
 
 #[async_trait]
-pub trait MemoryPort: Send + Sync {
+pub trait MemoryPort: crate::sealed::Sealed + Send + Sync {
     /// 获取 corpus 写许可（进程内 + 可选 OS flock）。已持许可时必须走
     /// `*_under_permit`，禁止对同一门闩嵌套取锁。
     async fn acquire_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {

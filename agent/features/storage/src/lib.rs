@@ -21,6 +21,10 @@ pub(crate) mod sealed {
     pub trait Sealed {}
 }
 
+/// 测试实现面（#2146：AtomicBlobPort 实现权归本 crate，跨 crate 测试经此）。
+#[cfg(any(test, feature = "dev"))]
+pub mod test_support;
+
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod constants;
 pub(crate) use constants::LOG_TARGET;

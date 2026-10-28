@@ -3,6 +3,11 @@ name = "memory"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# 测试实现面。Consumers add `memory` to `[dev-dependencies]`
+# with `features = ["dev"]`. Never enabled in production.
+dev = []
+
 [dependencies]
 async-trait.workspace = true
 chrono = { workspace = true }
