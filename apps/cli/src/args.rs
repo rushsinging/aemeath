@@ -231,25 +231,6 @@ pub enum CompactEvalCommands {
         model: Option<String>,
     },
 
-    /// 多模型矩阵：同一批 case 对多个 compact 模型各跑一次真实压缩
-    Matrix {
-        /// export 产生的 case 目录
-        #[arg(long)]
-        cases: PathBuf,
-
-        /// 参与对比的模型 selection（可重复传入）
-        #[arg(long = "model")]
-        models: Vec<String>,
-
-        /// 每个 model 最多跑多少个 case
-        #[arg(long, default_value_t = 2)]
-        limit: usize,
-
-        /// 输出 JSON 路径（缺省打印到 stdout）
-        #[arg(long)]
-        output: Option<PathBuf>,
-    },
-
     /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）
     Recall {
         /// session 根目录（默认 ~/.agents/session）

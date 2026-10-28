@@ -37,9 +37,7 @@ pub(crate) struct RunReport {
     cases: Vec<CaseRun>,
 }
 
-pub(crate) fn load_case_json_lines(
-    path: &std::path::Path,
-) -> Result<Vec<serde_json::Value>, String> {
+fn load_case_json_lines(path: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("读取 {}: {error}", path.display()))?;
     text.lines()
@@ -48,9 +46,7 @@ pub(crate) fn load_case_json_lines(
         .collect()
 }
 
-pub(crate) fn load_cases_index(
-    cases_dir: &std::path::Path,
-) -> Result<Vec<serde_json::Value>, String> {
+fn load_cases_index(cases_dir: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
     let text = std::fs::read_to_string(cases_dir.join("cases.jsonl"))
         .map_err(|error| format!("读取 cases.jsonl 失败: {error}"))?;
     text.lines()

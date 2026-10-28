@@ -6,7 +6,6 @@ mod cases;
 mod constants;
 mod dataset;
 mod feedback;
-mod matrix;
 mod recall;
 mod run;
 mod score;
@@ -68,12 +67,6 @@ async fn run_compact(command: CompactEvalCommands) {
             limit,
             model,
         } => run::run(cases, output_dir, limit, model).await,
-        CompactEvalCommands::Matrix {
-            cases,
-            models,
-            limit,
-            output,
-        } => matrix::run(cases, models, limit, output).await,
         CompactEvalCommands::Recall {
             root,
             limit,
