@@ -58,24 +58,14 @@ impl crate::ports::ContextAppendPort for FakeContextPort {
     }
 }
 
-pub(crate) struct FakeProviderPort;
-
-#[async_trait::async_trait]
-impl crate::ports::LlmInvokePort for FakeProviderPort {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-    async fn invoke_stream(
-        &self,
-        _model: &crate::ports::ModelInfo,
-        _request: &crate::ports::ProviderRequestData,
-    ) -> Result<crate::ports::ProviderResponseStream, ProviderError> {
-        Err(ProviderError::cancelled())
-    }
+/// 恒取消的测试调用端口（#2146：实现归 provider test_support）。
+pub(crate) fn fake_provider_port() -> Arc<dyn crate::ports::LlmInvokePort> {
+    provider::test_support::scripted_llm(|_request| Err(ProviderError::cancelled()))
 }
 
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
-        provider: Arc::new(FakeProviderPort),
+        provider: fake_provider_port(),
         model: crate::ports::ModelInfo {
             provider: "test-provider".into(),
             model: "test-model".into(),
@@ -97,7 +87,7 @@ pub(crate) struct FakeProviderFactory;
 impl ProviderFactory for FakeProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
-            provider: Arc::new(FakeProviderPort),
+            provider: fake_provider_port(),
             model: crate::ports::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

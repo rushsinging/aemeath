@@ -211,15 +211,14 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
         #[allow(dead_code)]
         window: Option<usize>,
     }
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for CountingGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(text_output(typed_response_for_request(&request.messages)))
+    impl CountingGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let calls = self.calls.clone();
+            provider::test_support::scripted_llm(move |request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_output(typed_response_for_request(&request.messages)))
+            })
         }
     }
 
@@ -231,10 +230,11 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
     ) -> usize {
         let calls = Arc::new(AtomicUsize::new(0));
         let generator = summary_test_binding(
-            Arc::new(CountingGenerator {
+            CountingGenerator {
                 calls: calls.clone(),
                 window: compact_window,
-            }),
+            }
+            .port(),
             compact_window,
         );
         let _ = compact_messages_with_llm(
@@ -293,51 +293,48 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         #[allow(dead_code)]
         window: Option<usize>,
     }
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for BulkyFactsGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let text = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            if text.contains("<unprotected_checkpoint_details>") {
-                return Ok(text_output(SHORTER_COMPRESSION_PATCH));
-            }
-            if text.contains("<compact_facts>") {
-                return Ok(text_output(VALID_CHECKPOINT_WIRE));
-            }
-            let mut facts = serde_json::json!([
-                {
-                    "sequence": 1,
-                    "source": "main_user",
-                    "kind": "constraint",
-                    "text": "NEVER widen the requested action level.",
-                    "constraint": {
-                        "scope": "session",
-                        "lifecycle": "persistent",
-                        "action": "restrict"
-                    }
-                },
-                {
-                    "sequence": 2,
-                    "source": "main_user",
-                    "kind": "objective",
-                    "text": "Continue the compact checkpoint work."
-                },
-                {
-                    "sequence": 3,
-                    "source": "main_user",
-                    "kind": "resume_candidate",
-                    "text": "Validate the generated checkpoint."
+    impl BulkyFactsGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |request| {
+                let text = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                if text.contains("<unprotected_checkpoint_details>") {
+                    return Ok(text_output(SHORTER_COMPRESSION_PATCH));
                 }
-            ]);
-            for index in 0..12 {
-                facts
+                if text.contains("<compact_facts>") {
+                    return Ok(text_output(VALID_CHECKPOINT_WIRE));
+                }
+                let mut facts = serde_json::json!([
+                    {
+                        "sequence": 1,
+                        "source": "main_user",
+                        "kind": "constraint",
+                        "text": "NEVER widen the requested action level.",
+                        "constraint": {
+                            "scope": "session",
+                            "lifecycle": "persistent",
+                            "action": "restrict"
+                        }
+                    },
+                    {
+                        "sequence": 2,
+                        "source": "main_user",
+                        "kind": "objective",
+                        "text": "Continue the compact checkpoint work."
+                    },
+                    {
+                        "sequence": 3,
+                        "source": "main_user",
+                        "kind": "resume_candidate",
+                        "text": "Validate the generated checkpoint."
+                    }
+                ]);
+                for index in 0..12 {
+                    facts
                     .as_array_mut()
                     .expect("facts array")
                     .push(serde_json::json!({
@@ -346,10 +343,11 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
                         "kind": "committed_fact",
                         "text": format!("Evidence {index}: {}", "durable observation ".repeat(12))
                     }));
-            }
-            Ok(text_output(
-                serde_json::json!({ "facts": facts }).to_string(),
-            ))
+                }
+                Ok(text_output(
+                    serde_json::json!({ "facts": facts }).to_string(),
+                ))
+            })
         }
     }
 
@@ -367,9 +365,10 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         None,
         injection_window,
         Some(&summary_test_binding(
-            Arc::new(BulkyFactsGenerator {
+            BulkyFactsGenerator {
                 window: Some(compact_window),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -410,16 +409,15 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
     struct CountingGenerator {
         calls: Arc<AtomicUsize>,
     }
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for CountingGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let _ = request.messages;
-            Ok(text_output(typed_response_for_request(&request.messages)))
+    impl CountingGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let calls = self.calls.clone();
+            provider::test_support::scripted_llm(move |request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let _ = request.messages;
+                Ok(text_output(typed_response_for_request(&request.messages)))
+            })
         }
     }
 
@@ -430,9 +428,10 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         None,
         64_000,
         Some(&summary_test_binding(
-            Arc::new(CountingGenerator {
+            CountingGenerator {
                 calls: small_calls.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -451,9 +450,10 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         None,
         1_048_576,
         Some(&summary_test_binding(
-            Arc::new(CountingGenerator {
+            CountingGenerator {
                 calls: large_calls.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -642,10 +642,10 @@ async fn compact_summary_renders_committed_decisions_from_llm_facts() {
     let messages = (0..10)
         .map(|index| Message::user(format!("message-{index}")))
         .collect::<Vec<_>>();
-    let generator = summary_test_binding(Arc::new(MockGenerator {
+    let generator = summary_test_binding(MockGenerator {
         text: r#"{"facts":[{"sequence":1,"source":"main_user","kind":"decision","text":"用户拍板引入 ConfirmNode（A 方案）。"},{"sequence":2,"source":"main_user","kind":"objective","text":"继续设计。"},{"sequence":3,"source":"main_user","kind":"resume_candidate","text":"更新文档。"}]}"#.to_string(),
-        requests: std::sync::Mutex::new(Vec::new()),
-    }), None);
+        requests: Arc::new(std::sync::Mutex::new(Vec::new())),
+    }.port(), None);
 
     let result = compact_messages_with_llm(
         &messages,
@@ -813,32 +813,30 @@ fn checkpoint_cascade_keeps_previous_sections_in_place() {
 #[tokio::test]
 async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
     struct FlakyChunkGenerator;
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for FlakyChunkGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            if prompt.contains("POISON-CHUNK") {
-                return Err(provider::ProviderError::fatal(
-                    provider::ProviderErrorKind::UpstreamUnavailable,
-                    "模拟 chunk 级 Provider 失败",
-                ));
-            }
-            let text = if prompt.contains("CHUNK-KEEP-MARKER") {
-                "保留的 chunk 事实"
-            } else {
-                "其他 chunk 事实"
-            };
-            Ok(text_output(format!(
-                r#"{{"facts":[{{"sequence":1,"source":"main_user","kind":"objective","text":"{text}"}},{{"sequence":2,"source":"main_user","kind":"resume_candidate","text":"继续"}}]}}"#
-            )))
+    impl FlakyChunkGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                if prompt.contains("POISON-CHUNK") {
+                    return Err(provider::ProviderError::fatal(
+                        provider::ProviderErrorKind::UpstreamUnavailable,
+                        "模拟 chunk 级 Provider 失败",
+                    ));
+                }
+                let text = if prompt.contains("CHUNK-KEEP-MARKER") {
+                    "保留的 chunk 事实"
+                } else {
+                    "其他 chunk 事实"
+                };
+                Ok(text_output(format!(
+                    r#"{{"facts":[{{"sequence":1,"source":"main_user","kind":"objective","text":"{text}"}},{{"sequence":2,"source":"main_user","kind":"resume_candidate","text":"继续"}}]}}"#
+                )))
+            })
         }
     }
 
@@ -861,7 +859,7 @@ async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
         &messages,
         None,
         100_000,
-        Some(&summary_test_binding(Arc::new(FlakyChunkGenerator), None)),
+        Some(&summary_test_binding(FlakyChunkGenerator.port(), None)),
         None,
         None,
         &cancel,
@@ -1419,25 +1417,24 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         forbidden_full_checkpoint_calls: Arc<AtomicUsize>,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for LocalReduceGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            if prompt.contains("<compact_facts>") {
-                self.forbidden_full_checkpoint_calls
-                    .fetch_add(1, Ordering::SeqCst);
-                return Ok(text_output(VALID_CHECKPOINT_WIRE));
-            }
-            self.map_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(text_output(VALID_MAP_FACTS))
+    impl LocalReduceGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let map_calls = self.map_calls.clone();
+            let forbidden_full_checkpoint_calls = self.forbidden_full_checkpoint_calls.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                if prompt.contains("<compact_facts>") {
+                    forbidden_full_checkpoint_calls.fetch_add(1, Ordering::SeqCst);
+                    return Ok(text_output(VALID_CHECKPOINT_WIRE));
+                }
+                map_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_output(VALID_MAP_FACTS))
+            })
         }
     }
 
@@ -1446,10 +1443,11 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(LocalReduceGenerator {
+            LocalReduceGenerator {
                 map_calls: map_calls.clone(),
                 forbidden_full_checkpoint_calls: forbidden_full_checkpoint_calls.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -1497,26 +1495,32 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         max_concurrent: Arc<AtomicUsize>,
         call_count: Arc<AtomicUsize>,
     }
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for ObservingGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
-            self.max_concurrent.fetch_max(active, Ordering::SeqCst);
-            self.call_count.fetch_add(1, Ordering::SeqCst);
-            // 让并发窗口真实展开
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let text = request
-                .messages
-                .first()
-                .map(|msg| msg.text_content())
-                .unwrap_or_default();
-            self.current.fetch_sub(1, Ordering::SeqCst);
-            let _ = text;
-            Ok(text_output(typed_response_for_request(&request.messages)))
+    impl ObservingGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let current = self.current.clone();
+            let max_concurrent = self.max_concurrent.clone();
+            let call_count = self.call_count.clone();
+            provider::test_support::scripted_llm_async(move |request| {
+                let current = current.clone();
+                let max_concurrent = max_concurrent.clone();
+                let call_count = call_count.clone();
+                Box::pin(async move {
+                    let active = current.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_concurrent.fetch_max(active, Ordering::SeqCst);
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    // 让并发窗口真实展开
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let text = request
+                        .messages
+                        .first()
+                        .map(|msg| msg.text_content())
+                        .unwrap_or_default();
+                    current.fetch_sub(1, Ordering::SeqCst);
+                    let _ = text;
+                    Ok(text_output(typed_response_for_request(&request.messages)))
+                })
+            })
         }
     }
 
@@ -1525,7 +1529,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         max_concurrent: max_concurrent.clone(),
         call_count: call_count.clone(),
     };
-    let generator = summary_test_binding(Arc::new(observing_mock), None);
+    let generator = summary_test_binding(observing_mock.port(), None);
 
     let result = compact_messages_with_llm(
         &messages,
@@ -1590,41 +1594,42 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
     struct ShrinkingGenerator {
         call_count: Arc<AtomicUsize>,
     }
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for ShrinkingGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.call_count.fetch_add(1, Ordering::SeqCst);
-            let text = request
-                .messages
-                .first()
-                .map(|msg| msg.text_content())
-                .unwrap_or_default();
-            if text.contains("<unprotected_checkpoint_details>") {
-                Ok(text_output(SHORTER_COMPRESSION_PATCH))
-            } else {
-                let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
-                batch["facts"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(serde_json::json!({
-                        "sequence": 4,
-                        "source": "tool_result",
-                        "kind": "milestone",
-                        "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
-                    }));
-                Ok(text_output(batch.to_string()))
-            }
+    impl ShrinkingGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let call_count = self.call_count.clone();
+            provider::test_support::scripted_llm(move |request| {
+                call_count.fetch_add(1, Ordering::SeqCst);
+                let text = request
+                    .messages
+                    .first()
+                    .map(|msg| msg.text_content())
+                    .unwrap_or_default();
+                if text.contains("<unprotected_checkpoint_details>") {
+                    Ok(text_output(SHORTER_COMPRESSION_PATCH))
+                } else {
+                    let mut batch: serde_json::Value =
+                        serde_json::from_str(VALID_MAP_FACTS).unwrap();
+                    batch["facts"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(serde_json::json!({
+                            "sequence": 4,
+                            "source": "tool_result",
+                            "kind": "milestone",
+                            "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
+                        }));
+                    Ok(text_output(batch.to_string()))
+                }
+            })
         }
     }
 
     let generator = summary_test_binding(
-        Arc::new(ShrinkingGenerator {
+        ShrinkingGenerator {
             call_count: call_count.clone(),
-        }),
+        }
+        .port(),
         None,
     );
 
@@ -1655,24 +1660,24 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
 /// Generator that returns a canned typed map response regardless of input.
 struct MockGenerator {
     text: String,
-    requests: std::sync::Mutex<Vec<String>>,
+    requests: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
-#[async_trait::async_trait]
-impl provider::LlmInvokePort for MockGenerator {
-    async fn invoke_stream(
-        &self,
-        _model: &provider::ModelInfo,
-        request: &provider::ProviderRequestData,
-    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-        self.requests.lock().unwrap().push(
-            request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default(),
-        );
-        Ok(text_output(self.text.clone()))
+impl MockGenerator {
+    /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+    fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+        let text = self.text.clone();
+        let requests = self.requests.clone();
+        provider::test_support::scripted_llm(move |request| {
+            requests.lock().unwrap().push(
+                request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default(),
+            );
+            Ok(text_output(text.clone()))
+        })
     }
 }
 
@@ -1685,9 +1690,9 @@ async fn compact_with_generator_uses_llm_summary() {
 
     let mock_generator = MockGenerator {
         text: VALID_MAP_FACTS.to_string(),
-        requests: std::sync::Mutex::new(Vec::new()),
+        requests: Arc::new(std::sync::Mutex::new(Vec::new())),
     };
-    let generator = summary_test_binding(Arc::new(mock_generator), None);
+    let generator = summary_test_binding(mock_generator.port(), None);
 
     let result = compact_messages_with_llm(
         &messages,
@@ -1723,14 +1728,12 @@ async fn compact_cancelled_generator_does_not_fallback() {
     cancel.cancel();
 
     struct CancelledGenerator;
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for CancelledGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            _request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            Err(provider::ProviderError::cancelled())
+    impl CancelledGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |_request| {
+                Err(provider::ProviderError::cancelled())
+            })
         }
     }
 
@@ -1738,7 +1741,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
         &messages,
         None,
         100_000,
-        Some(&summary_test_binding(Arc::new(CancelledGenerator), None)),
+        Some(&summary_test_binding(CancelledGenerator.port(), None)),
         None,
         None,
         &cancel,
@@ -1760,17 +1763,15 @@ async fn compact_falls_back_when_generator_errors() {
     let cancel = CancellationToken::new();
 
     struct FailingGenerator;
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for FailingGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            _request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            Err(provider::ProviderError::fatal(
-                provider::ProviderErrorKind::UpstreamUnavailable,
-                "simulated LLM failure",
-            ))
+    impl FailingGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |_request| {
+                Err(provider::ProviderError::fatal(
+                    provider::ProviderErrorKind::UpstreamUnavailable,
+                    "simulated LLM failure",
+                ))
+            })
         }
     }
 
@@ -1778,7 +1779,7 @@ async fn compact_falls_back_when_generator_errors() {
         &messages,
         None,
         100_000,
-        Some(&summary_test_binding(Arc::new(FailingGenerator), None)),
+        Some(&summary_test_binding(FailingGenerator.port(), None)),
         None,
         None,
         &cancel,
@@ -1866,48 +1867,48 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
     struct NeverShrinkingGenerator {
         calls: Arc<AtomicUsize>,
     }
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for NeverShrinkingGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let text = request
-                .messages
-                .first()
-                .map(|msg| msg.text_content())
-                .unwrap_or_default();
-            if text.contains("<unprotected_checkpoint_details>") {
-                return Ok(text_output(
-                    r#"{
+    impl NeverShrinkingGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let calls = self.calls.clone();
+            provider::test_support::scripted_llm(move |request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let text = request
+                    .messages
+                    .first()
+                    .map(|msg| msg.text_content())
+                    .unwrap_or_default();
+                if text.contains("<unprotected_checkpoint_details>") {
+                    return Ok(text_output(
+                        r#"{
                   "committed_facts": [],
                   "uncommitted_working_set": [],
                   "resume_context": [],
                   "required_revalidation": [],
                   "archived_milestones": ["historical detail"]
                 }"#,
-                ));
-            }
-            let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
-            batch["facts"]
-                .as_array_mut()
-                .unwrap()
-                .push(serde_json::json!({
-                    "sequence": 4,
-                    "source": "tool_result",
-                    "kind": "milestone",
-                    "text": format!("Archive abc: {}", "historical detail ".repeat(40_000))
-                }));
-            Ok(text_output(batch.to_string()))
+                    ));
+                }
+                let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
+                batch["facts"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::json!({
+                        "sequence": 4,
+                        "source": "tool_result",
+                        "kind": "milestone",
+                        "text": format!("Archive abc: {}", "historical detail ".repeat(40_000))
+                    }));
+                Ok(text_output(batch.to_string()))
+            })
         }
     }
 
     let generator = summary_test_binding(
-        Arc::new(NeverShrinkingGenerator {
+        NeverShrinkingGenerator {
             calls: calls.clone(),
-        }),
+        }
+        .port(),
         None,
     );
     let result = compact_messages_with_llm(
@@ -1948,14 +1949,12 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     let seen = Arc::new(Mutex::new(Vec::<(String, CompactWorkData)>::new()));
 
     struct EchoGenerator;
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for EchoGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            Ok(text_output(typed_response_for_request(&request.messages)))
+    impl EchoGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |request| {
+                Ok(text_output(typed_response_for_request(&request.messages)))
+            })
         }
     }
 
@@ -1972,7 +1971,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         &messages,
         None,
         100_000,
-        Some(&summary_test_binding(Arc::new(EchoGenerator), None)),
+        Some(&summary_test_binding(EchoGenerator.port(), None)),
         Some(&progress),
         None,
         &cancel,
@@ -2037,14 +2036,12 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     let seen = Arc::new(Mutex::new(Vec::<(String, CompactWorkData)>::new()));
 
     struct EchoGenerator;
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for EchoGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            Ok(text_output(typed_response_for_request(&request.messages)))
+    impl EchoGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |request| {
+                Ok(text_output(typed_response_for_request(&request.messages)))
+            })
         }
     }
 
@@ -2061,7 +2058,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         &messages,
         None,
         100_000,
-        Some(&summary_test_binding(Arc::new(EchoGenerator), None)),
+        Some(&summary_test_binding(EchoGenerator.port(), None)),
         Some(&progress),
         None,
         &cancel,
@@ -2100,31 +2097,30 @@ async fn empty_single_map_retries_once_with_original_history() {
         requests: Arc<Mutex<Vec<String>>>,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for EmptyThenValidGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .iter()
-                .map(Message::text_content)
-                .collect::<Vec<_>>()
-                .join("\n");
-            let mut requests = self.requests.lock().unwrap();
-            requests.push(prompt);
-            if requests.len() == 1 {
-                Ok(text_output_completed("", Some("end_turn"), 0, 1))
-            } else {
-                Ok(text_output_completed(
-                    VALID_MAP_FACTS,
-                    Some("end_turn"),
-                    1,
-                    0,
-                ))
-            }
+    impl EmptyThenValidGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let requests = self.requests.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .iter()
+                    .map(Message::text_content)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let mut requests = requests.lock().unwrap();
+                requests.push(prompt);
+                if requests.len() == 1 {
+                    Ok(text_output_completed("", Some("end_turn"), 0, 1))
+                } else {
+                    Ok(text_output_completed(
+                        VALID_MAP_FACTS,
+                        Some("end_turn"),
+                        1,
+                        0,
+                    ))
+                }
+            })
         }
     }
 
@@ -2133,9 +2129,10 @@ async fn empty_single_map_retries_once_with_original_history() {
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(EmptyThenValidGenerator {
+            EmptyThenValidGenerator {
                 requests: requests.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -2172,29 +2169,28 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         empty_calls: Arc<AtomicUsize>,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for PartiallyEmptyGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .iter()
-                .map(Message::text_content)
-                .collect::<Vec<_>>()
-                .join("\n");
-            if prompt.contains("chunk-marker-0") {
-                self.empty_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(text_output_completed("", Some("end_turn"), 0, 1));
-            }
-            Ok(text_output_completed(
-                r#"{"facts":[{"sequence":700,"source":"tool_result","kind":"committed_fact","text":"successful chunk fact survived"},{"sequence":701,"source":"main_user","kind":"objective","text":"Continue chunk recovery."},{"sequence":702,"source":"main_user","kind":"resume_candidate","text":"Verify partial degradation."}]}"#,
-                Some("end_turn"),
-                1,
-                0,
-            ))
+    impl PartiallyEmptyGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let empty_calls = self.empty_calls.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .iter()
+                    .map(Message::text_content)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if prompt.contains("chunk-marker-0") {
+                    empty_calls.fetch_add(1, Ordering::SeqCst);
+                    return Ok(text_output_completed("", Some("end_turn"), 0, 1));
+                }
+                Ok(text_output_completed(
+                    r#"{"facts":[{"sequence":700,"source":"tool_result","kind":"committed_fact","text":"successful chunk fact survived"},{"sequence":701,"source":"main_user","kind":"objective","text":"Continue chunk recovery."},{"sequence":702,"source":"main_user","kind":"resume_candidate","text":"Verify partial degradation."}]}"#,
+                    Some("end_turn"),
+                    1,
+                    0,
+                ))
+            })
         }
     }
 
@@ -2203,9 +2199,10 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(PartiallyEmptyGenerator {
+            PartiallyEmptyGenerator {
                 empty_calls: empty_calls.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -2242,14 +2239,10 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
 
     struct SuccessfulMapGenerator;
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for SuccessfulMapGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            _request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            Ok(text_output(VALID_MAP_FACTS))
+    impl SuccessfulMapGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            provider::test_support::scripted_llm(move |_request| Ok(text_output(VALID_MAP_FACTS)))
         }
     }
 
@@ -2260,10 +2253,7 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
         &messages,
         Some(&previous),
         100_000,
-        Some(&summary_test_binding(
-            Arc::new(SuccessfulMapGenerator),
-            None,
-        )),
+        Some(&summary_test_binding(SuccessfulMapGenerator.port(), None)),
         None,
         None,
         &CancellationToken::new(),
@@ -2299,30 +2289,30 @@ async fn partial_map_fallback_preserves_previous_constraints() {
         previous_facts: String,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for EmptyFirstChunkGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .iter()
-                .map(Message::text_content)
-                .collect::<Vec<_>>()
-                .join("\n");
-            if prompt.contains("protected-chunk-0")
-                && !prompt.contains("\"kind\":\"working_item\"")
-                && !prompt.contains("## Committed Facts")
-            {
-                self.first_chunk_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(text_output_completed("", Some("end_turn"), 0, 0));
-            }
-            if prompt.contains("<previous_checkpoint>") {
-                return Ok(text_output(self.previous_facts.clone()));
-            }
-            Ok(text_output(VALID_MAP_FACTS))
+    impl EmptyFirstChunkGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let first_chunk_calls = self.first_chunk_calls.clone();
+            let previous_facts = self.previous_facts.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .iter()
+                    .map(Message::text_content)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if prompt.contains("protected-chunk-0")
+                    && !prompt.contains("\"kind\":\"working_item\"")
+                    && !prompt.contains("## Committed Facts")
+                {
+                    first_chunk_calls.fetch_add(1, Ordering::SeqCst);
+                    return Ok(text_output_completed("", Some("end_turn"), 0, 0));
+                }
+                if prompt.contains("<previous_checkpoint>") {
+                    return Ok(text_output(previous_facts.clone()));
+                }
+                Ok(text_output(VALID_MAP_FACTS))
+            })
         }
     }
 
@@ -2335,10 +2325,10 @@ async fn partial_map_fallback_preserves_previous_constraints() {
         &messages,
         Some(&previous),
         100_000,
-        Some(&summary_test_binding(Arc::new(EmptyFirstChunkGenerator {
+        Some(&summary_test_binding(EmptyFirstChunkGenerator {
             first_chunk_calls: first_chunk_calls.clone(),
             previous_facts: r#"{"facts":[{"kind":"constraint","text":"NEVER remove the protected previous constraint.","provenance":{"source":"main_user","order":0},"authority":"main_user","scope":"session","lifecycle":"persistent","action":"never","entity":null,"key":null,"dimension":null}]}"#.to_string(),
-        }), None)),
+        }.port(), None)),
         None,
         None,
         &CancellationToken::new(),
@@ -2366,25 +2356,24 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
         requests: Arc<Mutex<Vec<String>>>,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for RepairingMapGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            let mut requests = self.requests.lock().unwrap();
-            requests.push(prompt.clone());
-            if requests.len() == 1 {
-                Ok(text_output(r#"{"facts":"not-an-array"}"#))
-            } else {
-                Ok(text_output(VALID_MAP_FACTS))
-            }
+    impl RepairingMapGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let requests = self.requests.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                let mut requests = requests.lock().unwrap();
+                requests.push(prompt.clone());
+                if requests.len() == 1 {
+                    Ok(text_output(r#"{"facts":"not-an-array"}"#))
+                } else {
+                    Ok(text_output(VALID_MAP_FACTS))
+                }
+            })
         }
     }
 
@@ -2393,9 +2382,10 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(RepairingMapGenerator {
+            RepairingMapGenerator {
                 requests: requests.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -2435,22 +2425,21 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
 
     struct MapOnlyGenerator(Arc<AtomicUsize>);
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for MapOnlyGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            if prompt.contains("<compact_facts>") || prompt.contains("repairing the reduce") {
-                self.0.fetch_add(1, Ordering::SeqCst);
-            }
-            Ok(text_output(VALID_MAP_FACTS))
+    impl MapOnlyGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let full_checkpoint_calls = self.0.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                if prompt.contains("<compact_facts>") || prompt.contains("repairing the reduce") {
+                    full_checkpoint_calls.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(text_output(VALID_MAP_FACTS))
+            })
         }
     }
 
@@ -2459,7 +2448,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(MapOnlyGenerator(full_checkpoint_calls.clone())),
+            MapOnlyGenerator(full_checkpoint_calls.clone()).port(),
             None,
         )),
         None,
@@ -2495,42 +2484,41 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         calls: Arc<AtomicUsize>,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for InvalidRefreshThenUnavailable {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let prompt = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            if prompt.contains("repairing the refresh") {
-                return Err(provider::ProviderError::fatal(
-                    provider::ProviderErrorKind::UpstreamUnavailable,
-                    "provider upstream unavailable",
-                ));
-            }
-            if prompt.contains("<unprotected_checkpoint_details>") {
-                return Ok(text_output(r#"{"committed_facts":["unterminated""#));
-            }
-            let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
-            let facts = batch["facts"].as_array_mut().unwrap();
-            for fact_index in 0..240 {
-                facts.push(serde_json::json!({
-                    "sequence": fact_index + 10,
-                    "source": "tool_result",
-                    "kind": "committed_fact",
-                    "text": format!(
-                        "Evidence {fact_index}: {}",
-                        "detailed durable observation ".repeat(24)
-                    )
-                }));
-            }
-            Ok(text_output(batch.to_string()))
+    impl InvalidRefreshThenUnavailable {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let calls = self.calls.clone();
+            provider::test_support::scripted_llm(move |request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let prompt = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                if prompt.contains("repairing the refresh") {
+                    return Err(provider::ProviderError::fatal(
+                        provider::ProviderErrorKind::UpstreamUnavailable,
+                        "provider upstream unavailable",
+                    ));
+                }
+                if prompt.contains("<unprotected_checkpoint_details>") {
+                    return Ok(text_output(r#"{"committed_facts":["unterminated""#));
+                }
+                let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
+                let facts = batch["facts"].as_array_mut().unwrap();
+                for fact_index in 0..240 {
+                    facts.push(serde_json::json!({
+                        "sequence": fact_index + 10,
+                        "source": "tool_result",
+                        "kind": "committed_fact",
+                        "text": format!(
+                            "Evidence {fact_index}: {}",
+                            "detailed durable observation ".repeat(24)
+                        )
+                    }));
+                }
+                Ok(text_output(batch.to_string()))
+            })
         }
     }
 
@@ -2541,9 +2529,10 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         None,
         context_size,
         Some(&summary_test_binding(
-            Arc::new(InvalidRefreshThenUnavailable {
+            InvalidRefreshThenUnavailable {
                 calls: calls.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -2588,41 +2577,41 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         repair_seen: Arc<AtomicBool>,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for RepairingRefreshGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            let prompt = request
-                .messages
-                .first()
-                .map(Message::text_content)
-                .unwrap_or_default();
-            if prompt.contains("<compact_facts>") {
-                panic!("Rust-local reduce must not request.messages a full checkpoint");
-            }
-            if prompt.contains("repairing the refresh") {
-                self.refresh_calls.fetch_add(1, Ordering::SeqCst);
-                self.repair_seen.store(true, Ordering::SeqCst);
-                return Ok(text_output(SHORTER_COMPRESSION_PATCH));
-            }
-            if prompt.contains("<unprotected_checkpoint_details>") {
-                self.refresh_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(text_output(r#"{"resume_cursor":{"next_action":[]}}"#));
-            }
-            let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
-            batch["facts"]
-                .as_array_mut()
-                .unwrap()
-                .push(serde_json::json!({
-                    "sequence": 4,
-                    "source": "tool_result",
-                    "kind": "milestone",
-                    "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
-                }));
-            Ok(text_output(batch.to_string()))
+    impl RepairingRefreshGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let refresh_calls = self.refresh_calls.clone();
+            let repair_seen = self.repair_seen.clone();
+            provider::test_support::scripted_llm(move |request| {
+                let prompt = request
+                    .messages
+                    .first()
+                    .map(Message::text_content)
+                    .unwrap_or_default();
+                if prompt.contains("<compact_facts>") {
+                    panic!("Rust-local reduce must not request.messages a full checkpoint");
+                }
+                if prompt.contains("repairing the refresh") {
+                    refresh_calls.fetch_add(1, Ordering::SeqCst);
+                    repair_seen.store(true, Ordering::SeqCst);
+                    return Ok(text_output(SHORTER_COMPRESSION_PATCH));
+                }
+                if prompt.contains("<unprotected_checkpoint_details>") {
+                    refresh_calls.fetch_add(1, Ordering::SeqCst);
+                    return Ok(text_output(r#"{"resume_cursor":{"next_action":[]}}"#));
+                }
+                let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
+                batch["facts"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::json!({
+                        "sequence": 4,
+                        "source": "tool_result",
+                        "kind": "milestone",
+                        "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
+                    }));
+                Ok(text_output(batch.to_string()))
+            })
         }
     }
 
@@ -2631,10 +2620,11 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(RepairingRefreshGenerator {
+            RepairingRefreshGenerator {
                 refresh_calls: refresh_calls.clone(),
                 repair_seen: repair_seen.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -2666,16 +2656,16 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
         cancel: CancellationToken,
     }
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for CancelDuringRepairGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            _request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            self.cancel.cancel();
-            Ok(text_output(r#"{"facts":"not-an-array"}"#))
+    impl CancelDuringRepairGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let calls = self.calls.clone();
+            let cancel = self.cancel.clone();
+            provider::test_support::scripted_llm(move |_request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                cancel.cancel();
+                Ok(text_output(r#"{"facts":"not-an-array"}"#))
+            })
         }
     }
 
@@ -2684,10 +2674,11 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(CancelDuringRepairGenerator {
+            CancelDuringRepairGenerator {
                 calls: calls.clone(),
                 cancel: cancel.clone(),
-            }),
+            }
+            .port(),
             None,
         )),
         None,
@@ -2712,15 +2703,14 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
 
     struct AlwaysInvalidGenerator(Arc<AtomicUsize>);
 
-    #[async_trait::async_trait]
-    impl provider::LlmInvokePort for AlwaysInvalidGenerator {
-        async fn invoke_stream(
-            &self,
-            _model: &provider::ModelInfo,
-            _request: &provider::ProviderRequestData,
-        ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-            self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(text_output(r#"{"facts":"not-an-array"}"#))
+    impl AlwaysInvalidGenerator {
+        /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+        fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+            let calls = self.0.clone();
+            provider::test_support::scripted_llm(move |_request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_output(r#"{"facts":"not-an-array"}"#))
+            })
         }
     }
 
@@ -2729,7 +2719,7 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
         None,
         100_000,
         Some(&summary_test_binding(
-            Arc::new(AlwaysInvalidGenerator(calls.clone())),
+            AlwaysInvalidGenerator(calls.clone()).port(),
             None,
         )),
         None,
@@ -2851,27 +2841,25 @@ fn latest_main_user_request_skips_blank_text_and_truncates_long_text() {
 /// 构造只包含 working_set 的 facts，复现真实缺陷中 map 阶段遗漏 objective 的输出。
 struct FactsWithoutObjective;
 
-#[async_trait::async_trait]
-impl provider::LlmInvokePort for FactsWithoutObjective {
-    async fn invoke_stream(
-        &self,
-        _model: &provider::ModelInfo,
-        request: &provider::ProviderRequestData,
-    ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-        let text = request
-            .messages
-            .first()
-            .map(Message::text_content)
-            .unwrap_or_default();
-        if text.contains("<unprotected_checkpoint_details>") {
-            return Ok(text_output(SHORTER_COMPRESSION_PATCH));
-        }
-        if text.contains("<compact_facts>") {
-            return Ok(text_output(VALID_CHECKPOINT_WIRE));
-        }
-        Ok(text_output(
-            r#"{"facts":[{"sequence":1,"source":"main_user","kind":"working_set","text":"Diff before/after steer in useChatAPIV2.ts."},{"sequence":2,"source":"tool_result","kind":"committed_fact","text":"origin/release/v2.2.0 lacks the segmented-bubble fix."}]}"#,
-        ))
+impl FactsWithoutObjective {
+    /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
+    fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
+        provider::test_support::scripted_llm(move |request| {
+            let text = request
+                .messages
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            if text.contains("<unprotected_checkpoint_details>") {
+                return Ok(text_output(SHORTER_COMPRESSION_PATCH));
+            }
+            if text.contains("<compact_facts>") {
+                return Ok(text_output(VALID_CHECKPOINT_WIRE));
+            }
+            Ok(text_output(
+                r#"{"facts":[{"sequence":1,"source":"main_user","kind":"working_set","text":"Diff before/after steer in useChatAPIV2.ts."},{"sequence":2,"source":"tool_result","kind":"committed_fact","text":"origin/release/v2.2.0 lacks the segmented-bubble fix."}]}"#,
+            ))
+        })
     }
 }
 
@@ -2891,7 +2879,7 @@ async fn compact_keeps_main_user_objective_when_facts_omit_it() {
         &messages_with_leading_objective(objective),
         None,
         200_000,
-        Some(&summary_test_binding(Arc::new(FactsWithoutObjective), None)),
+        Some(&summary_test_binding(FactsWithoutObjective.port(), None)),
         None,
         None,
         &CancellationToken::new(),
@@ -2931,7 +2919,7 @@ async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user
         &messages_with_leading_objective(objective),
         Some(&placeholder_previous),
         200_000,
-        Some(&summary_test_binding(Arc::new(FactsWithoutObjective), None)),
+        Some(&summary_test_binding(FactsWithoutObjective.port(), None)),
         None,
         None,
         &CancellationToken::new(),

@@ -83,27 +83,18 @@ async fn model_switch_reads_injected_snapshot_once() {
 // Test factory — builds a ProviderBindingData wrapping a pure Fake ProviderPort.
 // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
 fn test_factory() -> Arc<dyn ProviderFactory> {
-    use crate::ports::provider_port::{
-        ProviderError, ProviderErrorKind, ProviderRequestData, ProviderResponseStream,
-        ReasoningLevel,
-    };
+    use crate::ports::provider_port::{ProviderError, ProviderErrorKind, ReasoningLevel};
     use crate::ports::LlmInvokePort as ProviderPortTrait;
 
     // 能力查询已删除（#1880）：binding 持全量 ModelInfo，port 只负责 invoke。
-    struct TestPort;
-
-    #[async_trait::async_trait]
-    impl crate::ports::LlmInvokePort for TestPort {
-        async fn invoke_stream(
-            &self,
-            _model: &crate::ports::ModelInfo,
-            _request: &ProviderRequestData,
-        ) -> std::result::Result<ProviderResponseStream, ProviderError> {
+    // #2146：实现归 provider test_support，测试只提供脚本。
+    fn test_port() -> std::sync::Arc<dyn crate::ports::LlmInvokePort> {
+        provider::test_support::scripted_llm(|_request| {
             Err(ProviderError::fatal(
                 ProviderErrorKind::UpstreamUnavailable,
                 "test provider does not support invocation",
             ))
-        }
+        })
     }
 
     struct TestFactory;
@@ -127,7 +118,7 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             };
-            let port: Arc<dyn ProviderPortTrait> = Arc::new(TestPort);
+            let port: Arc<dyn ProviderPortTrait> = test_port();
             Ok(crate::ports::ProviderBindingData {
                 provider: port,
                 model,

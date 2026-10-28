@@ -942,7 +942,8 @@
         "ports.rs",
         "ports_tests.rs",
         "published_language.rs",
-        "published_language_tests.rs"
+        "published_language_tests.rs",
+        "test_support.rs"
       ],
       "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"

@@ -43,6 +43,11 @@ mod domain;
 mod ports;
 pub mod published_language;
 
+/// 测试实现面（#2146：LlmInvokePort 除 provider 外不得实现）。
+/// 跨 crate 测试经 `feature = "dev"` 可见；生产构建不编译。
+#[cfg(any(test, feature = "dev"))]
+pub mod test_support;
+
 pub use published_language::{
     LlmInvokePort, LlmTextOutputData, ModelInfo, ProviderContentData, ProviderError,
     ProviderErrorKind, ProviderRequestData, ProviderResponse, ProviderResponseChunk,

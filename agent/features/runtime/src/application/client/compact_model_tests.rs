@@ -1,7 +1,6 @@
 //! `CompactModelResolver` 的模型选择、窗口与缓存语义。
 
 use super::*;
-use crate::ports::provider_port::fake::FakeProvider;
 use crate::ports::ProviderBuildSpecData;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;
@@ -75,7 +74,7 @@ impl ProviderFactory for RecordingFactory {
     ) -> Result<ProviderBindingData, provider::ProviderError> {
         self.builds.fetch_add(1, Ordering::SeqCst);
         Ok(ProviderBindingData {
-            provider: Arc::new(FakeProvider::new()),
+            provider: crate::ports::provider_port::fake::port(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -158,7 +157,7 @@ fn session_state(
     crate::application::client::SessionModelState::new(
         resolved,
         Arc::new(ProviderBindingData {
-            provider: Arc::new(FakeProvider::new()),
+            provider: crate::ports::provider_port::fake::port(),
             model: provider::ModelInfo {
                 provider: "local".into(),
                 model: model_id,

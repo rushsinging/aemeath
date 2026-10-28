@@ -209,58 +209,63 @@ impl TestProviderPort {
     }
 }
 
-#[async_trait]
-impl crate::ports::LlmInvokePort for TestProviderPort {
-    // `capabilities()` 已删除（#1880）：fake 与生产一致——binding 持全量
-    // ModelInfo，运行时零查询（unknown model 门禁在装配时）。
-
-    async fn invoke_stream(
-        &self,
-        _model: &crate::ports::provider_port::ModelInfo,
-        request: &crate::ports::provider_port::ProviderRequestData,
-    ) -> Result<
-        crate::ports::provider_port::ProviderResponseStream,
-        crate::ports::provider_port::ProviderError,
-    > {
+impl TestProviderPort {
+    /// 该测试脚手架的调用端口（#2146：LlmInvokePort 只允许 provider 实现，
+    /// 这里经 provider 的异步脚本化端口复用原调度逻辑）。
+    pub fn port(&self) -> Arc<dyn crate::ports::LlmInvokePort> {
         use crate::ports::provider_port::ProviderError;
-        let call_index = {
-            let mut guard = self.calls.lock().unwrap();
-            let idx = *guard;
-            *guard += 1;
-            idx
-        };
-        if let Some(ref seen) = self.seen {
-            seen.lock().unwrap().push(::logging::capture());
-        }
-        // Custom invocation hook overrides default dispatch.
-        if let Some(ref f) = self.invocation_fn {
-            return f(call_index, request).await;
-        }
-        if let Some(ref e) = self.error {
-            return Err(e.clone());
-        }
-        if self.blocking {
-            request.cancellation.cancelled().await;
-            return Err(ProviderError::cancelled());
-        }
-        if request.cancellation.is_cancelled() {
-            return Err(ProviderError::cancelled());
-        }
-        let text = self
-            .responses
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| "fallback final response".to_string());
-        Ok(text_completion_stream(text, 1, 1))
+        let calls = Arc::clone(&self.calls);
+        let seen = self.seen.clone();
+        let invocation_fn = self.invocation_fn.clone();
+        let error = self.error.clone();
+        let blocking = self.blocking;
+        let responses = Arc::clone(&self.responses);
+        provider::test_support::scripted_llm_async(move |request| {
+            let calls = Arc::clone(&calls);
+            let seen = seen.clone();
+            let invocation_fn = invocation_fn.clone();
+            let error = error.clone();
+            let responses = Arc::clone(&responses);
+            Box::pin(async move {
+                let call_index = {
+                    let mut guard = calls.lock().unwrap();
+                    let idx = *guard;
+                    *guard += 1;
+                    idx
+                };
+                if let Some(ref seen) = seen {
+                    seen.lock().unwrap().push(::logging::capture());
+                }
+                // Custom invocation hook overrides default dispatch.
+                if let Some(ref f) = invocation_fn {
+                    return f(call_index, request).await;
+                }
+                if let Some(ref e) = error {
+                    return Err(e.clone());
+                }
+                if blocking {
+                    request.cancellation.cancelled().await;
+                    return Err(ProviderError::cancelled());
+                }
+                if request.cancellation.is_cancelled() {
+                    return Err(ProviderError::cancelled());
+                }
+                let text = responses
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or_else(|| "fallback final response".to_string());
+                Ok(text_completion_stream(text, 1, 1))
+            })
+        })
     }
 }
 
 pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBindingData> {
     let model = test_model_info();
-    let port = Arc::new(TestProviderPort::new(responses, model.clone()));
+    let port = TestProviderPort::new(responses, model.clone());
     Arc::new(crate::ports::ProviderBindingData {
-        provider: port,
+        provider: port.port(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
@@ -272,7 +277,7 @@ pub(crate) fn test_binding_from_port(
 ) -> Arc<crate::ports::ProviderBindingData> {
     let model = port.model.clone();
     Arc::new(crate::ports::ProviderBindingData {
-        provider: Arc::new(port),
+        provider: port.port(),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
@@ -326,38 +331,18 @@ pub(crate) fn constant_factory(
     Arc::new(ConstantTestFactory::new(binding))
 }
 
-// ─── ScriptedLlmProvider → ProviderPort adapter (#907 loop test migration) ────
+// ─── ScriptedLlmProvider → LlmInvokePort（#2146 实现归 provider） ────
 
-/// Adapter that implements [`crate::ports::LlmInvokePort`] by delegating to an
-/// existing runtime-local [`ScriptedLlmProvider`] scripted fake.
-///
-/// Used only by `runtime` lib tests as a minimal bridge so the scripted
-/// fakes (e.g. `SequenceProvider`, `RecordingProvider`, `CountingProvider`,
-/// `ErrorProvider`) can be wrapped in a `ProviderBindingData` without rewriting
-/// every test to the new `ProviderPort` trait.
-struct ScriptedProviderPortAdapter {
+/// 把 runtime 本地的 [`ScriptedLlmProvider`] 脚本 fake 包装为
+/// `Arc<dyn LlmInvokePort>`（经 provider test_support 的异步脚本端口；
+/// runtime **NEVER** 自行实现该 trait）。
+pub(crate) fn scripted_provider_port(
     provider: std::sync::Arc<dyn ScriptedLlmProvider>,
-}
-
-impl ScriptedProviderPortAdapter {
-    fn new(provider: std::sync::Arc<dyn ScriptedLlmProvider>) -> Self {
-        Self { provider }
-    }
-}
-
-#[async_trait]
-impl crate::ports::LlmInvokePort for ScriptedProviderPortAdapter {
-    async fn invoke_stream(
-        &self,
-        _model: &crate::ports::provider_port::ModelInfo,
-        request: &crate::ports::provider_port::ProviderRequestData,
-    ) -> Result<
-        crate::ports::provider_port::ProviderResponseStream,
-        crate::ports::provider_port::ProviderError,
-    > {
-        // 取消语义经 request.cancellation 表达（端口无独立取消参数）。
-        self.provider.scripted_invocation_stream(request).await
-    }
+) -> Arc<dyn crate::ports::LlmInvokePort> {
+    provider::test_support::scripted_llm_async(move |request| {
+        let provider = Arc::clone(&provider);
+        Box::pin(async move { provider.scripted_invocation_stream(request).await })
+    })
 }
 
 /// Wrap an existing runtime-local [`ScriptedLlmProvider`] scripted fake into a
@@ -381,7 +366,7 @@ pub(crate) fn binding_from_llm_provider(
         output_limit: Some(8_192),
     };
     std::sync::Arc::new(crate::ports::ProviderBindingData {
-        provider: std::sync::Arc::new(ScriptedProviderPortAdapter::new(provider)),
+        provider: scripted_provider_port(provider),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,

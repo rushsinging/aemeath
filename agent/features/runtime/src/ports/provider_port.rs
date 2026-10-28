@@ -86,19 +86,16 @@ pub(crate) mod fake {
         }
     }
 
-    #[async_trait::async_trait]
-    impl LlmInvokePort for FakeProvider {
-        async fn invoke_stream(
-            &self,
-            _model: &ModelInfo,
-            request: &ProviderRequestData,
-        ) -> Result<ProviderResponseStream, ProviderError> {
-            // 取消真相源单通道（#2146）：request.cancellation。
+    /// FakeProvider 的调用端口（#2146：实现归 provider test_support，
+    /// 契约 harness 只提供脚本与流构造）。
+    pub(crate) fn port() -> Arc<dyn LlmInvokePort> {
+        provider::test_support::scripted_llm(|request| {
+            // 契约 harness 的取消语义由脚本显式表达（回放器不拦截）。
             if request.cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());
             }
-            Ok(Self::happy_path_stream("hello"))
-        }
+            Ok(FakeProvider::happy_path_stream("hello"))
+        })
     }
 
     pub struct FakeProviderFactory;
@@ -109,7 +106,7 @@ pub(crate) mod fake {
             spec: crate::ports::ProviderBuildSpecData,
         ) -> Result<crate::ports::ProviderBindingData, ProviderError> {
             Ok(crate::ports::ProviderBindingData {
-                provider: Arc::new(FakeProvider::new()),
+                provider: port(),
                 model: crate::ports::ModelInfo {
                     provider: spec.source_key.clone(),
                     model: spec.model.clone(),
@@ -194,7 +191,7 @@ pub(crate) mod fake {
 
     #[tokio::test]
     async fn invoke_stream_returns_cancelled_error_when_request_signal_fired() {
-        let provider = FakeProvider::new();
+        let provider = port();
         let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
@@ -212,7 +209,7 @@ pub(crate) mod fake {
 
     #[tokio::test]
     async fn invoke_stream_returns_stream_with_correct_terminal_semantics() {
-        let provider = FakeProvider::new();
+        let provider = port();
         let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
@@ -240,7 +237,7 @@ pub(crate) mod fake {
     #[tokio::test]
     async fn invoke_text_default_method_collects_stream_into_text_output() {
         // #2146：文本是端口默认方法（收口）——任何 invoke_stream 实现免费获得。
-        let provider = FakeProvider::new();
+        let provider = port();
         let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
