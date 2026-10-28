@@ -9,7 +9,7 @@ use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{RunId, RunSpec};
 use crate::ports::ProviderFactory;
 
-use super::doubles::{FakeProviderFactory, FakeSkillCatalog};
+use super::doubles::FakeProviderFactory;
 
 pub(crate) struct ParentRunFixture {
     context_factory: Arc<RuntimeContextFactory>,
@@ -22,7 +22,7 @@ impl ParentRunFixture {
         Self {
             context_factory,
             provider_factory: Arc::new(FakeProviderFactory),
-            skill_catalog: Arc::new(FakeSkillCatalog),
+            skill_catalog: Arc::new(tools::test_support::FixedSkillCatalog(Vec::new())),
         }
     }
 

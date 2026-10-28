@@ -8,20 +8,12 @@ use tools::published::skill::{
     SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind,
 };
 
-/// 可变 catalog fake：模拟磁盘上 skill 集合在轮次间变化。
-struct MutableCatalog {
-    descriptors: Mutex<Vec<SkillDescriptor>>,
+/// 可变 catalog 替身（#2146：实现权归 tools crate；跨 crate 经脚本端口）。
+fn mutable_catalog(descriptors: Arc<Mutex<Vec<SkillDescriptor>>>) -> Arc<dyn SkillCatalogPort> {
+    let as_trait: Arc<dyn SkillCatalogPort> =
+        Arc::new(tools::test_support::MutableSkillCatalog(descriptors));
+    as_trait
 }
-
-impl SkillCatalogPort for MutableCatalog {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        self.descriptors
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-    }
-}
-
 /// 收集全部事件的 sink fake。
 #[derive(Clone, Default)]
 struct CollectingSink {
@@ -60,14 +52,19 @@ fn workspace_views() -> project::Workspace {
 
 fn refresh_with(
     descriptors: Vec<SkillDescriptor>,
-) -> (Arc<MutableCatalog>, SkillCatalogRefresh, CollectingSink) {
-    let catalog = Arc::new(MutableCatalog {
-        descriptors: Mutex::new(descriptors.clone()),
-    });
-    let initial = tools::published::skill::SkillCatalogSnapshot::from_descriptors(descriptors);
+) -> (
+    Arc<std::sync::Mutex<Vec<SkillDescriptor>>>,
+    SkillCatalogRefresh,
+    CollectingSink,
+) {
+    let descriptors = Arc::new(std::sync::Mutex::new(descriptors.clone()));
+    let catalog = mutable_catalog(Arc::clone(&descriptors));
+    let initial = tools::published::skill::SkillCatalogSnapshot::from_descriptors(
+        descriptors.lock().unwrap().clone(),
+    );
     let query = SkillQuery::new(std::env::temp_dir(), Vec::new(), Default::default());
-    let refresh = SkillCatalogRefresh::new(catalog.clone(), workspace_views(), query, &initial);
-    (catalog, refresh, CollectingSink::default())
+    let refresh = SkillCatalogRefresh::new(catalog, workspace_views(), query, &initial);
+    (descriptors, refresh, CollectingSink::default())
 }
 
 fn skills_updated_count(sink: &CollectingSink) -> usize {
@@ -94,7 +91,6 @@ async fn changed_revision_emits_once_until_next_change() {
     let (catalog, refresh, sink) = refresh_with(vec![descriptor("commit", "desc")]);
 
     catalog
-        .descriptors
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .push(descriptor("release", "new skill"));
@@ -123,7 +119,6 @@ async fn removed_skill_emits_updated() {
     ]);
 
     catalog
-        .descriptors
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .retain(|skill| skill.name() != "release");

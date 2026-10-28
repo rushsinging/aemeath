@@ -11,16 +11,7 @@ use crate::{SkillPromptSource, WorkspaceSkillQueryFactory};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
-use tools::published::skill::{
-    SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind,
-};
-
-struct FakeCatalog(Vec<SkillDescriptor>);
-impl SkillCatalogPort for FakeCatalog {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        self.0.clone()
-    }
-}
+use tools::published::skill::{SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
 
 struct FixedQueryFactory;
 impl SkillQueryFactory for FixedQueryFactory {
@@ -46,7 +37,7 @@ fn descriptor(name: &str, description: &str, hint: Option<&str>) -> SkillDescrip
 
 fn source(skills: Vec<SkillDescriptor>) -> SkillPromptSource {
     SkillPromptSource::new(
-        Arc::new(FakeCatalog(skills)),
+        Arc::new(tools::test_support::FixedSkillCatalog(skills)),
         Arc::new(FixedQueryFactory),
         Arc::new(crate::adapters::SystemPromptAssembly::new(None)),
     )

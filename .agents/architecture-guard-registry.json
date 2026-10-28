@@ -3010,11 +3010,8 @@
         {
           "trait_name": "SkillCatalogPort",
           "owner_crate": "tools",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "c",
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "SkillLoadPort",

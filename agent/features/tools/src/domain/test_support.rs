@@ -138,3 +138,36 @@ pub fn sequential_test_tool_catalog(
     };
     crate::ToolCatalogSnapshot::new("main", "standard", vec![descriptor])
 }
+
+/// 固定描述符集的 SkillCatalogPort 替身（#2146：实现权归 tools crate）。
+pub struct FixedSkillCatalog(pub Vec<crate::domain::skill_pl::SkillDescriptor>);
+
+impl crate::domain::skill_ports::SkillCatalogPort for FixedSkillCatalog {
+    fn list(
+        &self,
+        _query: crate::domain::skill_pl::SkillQuery,
+    ) -> Vec<crate::domain::skill_pl::SkillDescriptor> {
+        self.0.clone()
+    }
+}
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for FixedSkillCatalog {}
+
+/// 可变描述符集替身（共享 Mutex，模拟轮次间磁盘变化）。
+pub struct MutableSkillCatalog(
+    pub std::sync::Arc<std::sync::Mutex<Vec<crate::domain::skill_pl::SkillDescriptor>>>,
+);
+
+impl crate::domain::skill_ports::SkillCatalogPort for MutableSkillCatalog {
+    fn list(
+        &self,
+        _query: crate::domain::skill_pl::SkillQuery,
+    ) -> Vec<crate::domain::skill_pl::SkillDescriptor> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+}
+impl crate::sealed::Sealed for MutableSkillCatalog {}

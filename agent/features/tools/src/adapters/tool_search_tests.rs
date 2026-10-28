@@ -1,18 +1,10 @@
 use super::*;
 use crate::domain::types::tool_search::SearchItemKind;
 
-use crate::domain::{SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
+use crate::domain::{SkillCatalogPort, SkillDescriptor, SkillSource, SkillSourceKind};
 
-struct FakeSkills {
-    skills: Vec<SkillDescriptor>,
-}
-impl SkillCatalogPort for FakeSkills {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        self.skills.clone()
-    }
-}
 fn empty_skills() -> std::sync::Arc<dyn SkillCatalogPort> {
-    std::sync::Arc::new(FakeSkills { skills: Vec::new() })
+    std::sync::Arc::new(crate::domain::test_support::FixedSkillCatalog(Vec::new()))
 }
 fn skill_descriptor(name: &str, description: &str) -> SkillDescriptor {
     SkillDescriptor::new(
@@ -325,18 +317,16 @@ async fn lexical_recall_without_scoring_hits_tools_and_skills() {
             make_tool("WebFetch", "Fetch a URL and return content"),
         ],
     });
-    let skills = Arc::new(FakeSkills {
-        skills: vec![
-            skill_descriptor(
-                "cmux-browser",
-                "Automate cmux webview browser surfaces with snapshots",
-            ),
-            skill_descriptor(
-                "agent-browser",
-                "Browser automation CLI for websites and web apps；浏览器自动化",
-            ),
-        ],
-    });
+    let skills = Arc::new(crate::domain::test_support::FixedSkillCatalog(vec![
+        skill_descriptor(
+            "cmux-browser",
+            "Automate cmux webview browser surfaces with snapshots",
+        ),
+        skill_descriptor(
+            "agent-browser",
+            "Browser automation CLI for websites and web apps；浏览器自动化",
+        ),
+    ]));
     let ctx = search_context(catalog, None);
     let tool = ToolSearchTool::new(skills);
 

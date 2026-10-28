@@ -7,7 +7,6 @@ use crate::application::loop_engine::chat::{
 use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderError, ProviderFactory};
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
-use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
 use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 
 pub(crate) struct FakeContextPort;
@@ -176,15 +175,6 @@ impl HookDispatcher for FakeHookPort {
         _cancellation: &dyn hook::HookCancellationSignal,
     ) -> HookOutcomeData {
         HookOutcomeData::proceed()
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct FakeSkillCatalog;
-
-impl SkillCatalogPort for FakeSkillCatalog {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        Vec::new()
     }
 }
 
