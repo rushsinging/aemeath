@@ -738,11 +738,23 @@ pub async fn compact_messages_with_llm(
     let early_messages = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
 
     // 尝试 LLM 摘要，失败则回退到本地
+    let started = std::time::Instant::now();
     let early_tokens = crate::domain::token_budget::estimate_messages_tokens(early_messages);
     let previous_len = previous_summary.map(str::len).unwrap_or(0);
+    // 压缩耗时与模型强相关：把本次实际调用目标写进开始/完成日志，便于按模型对账。
+    let model_label = binding
+        .map(|binding| format!("{}/{}", binding.model.provider, binding.model.model))
+        .unwrap_or_else(|| "local".to_string());
+    let compact_window = binding
+        .and_then(|binding| binding.compact_context_window)
+        .map_or_else(|| "-".to_string(), |window| window.to_string());
+    let max_output_tokens = binding.map_or_else(
+        || "-".to_string(),
+        |binding| binding.max_output_tokens.to_string(),
+    );
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] 开始：messages={total} early={} early_tokens={early_tokens} previous_summary={previous_len} chars mode={}",
+        "[compact] 开始：messages={total} early={} early_tokens={early_tokens} previous_summary={previous_len} chars mode={} model={model_label} compact_window={compact_window} max_output={max_output_tokens}",
         early_messages.len(),
         if binding.is_some() { "llm" } else { "local" },
     );
@@ -815,9 +827,10 @@ pub async fn compact_messages_with_llm(
 
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] 完成：summary={} chars recent_messages={}",
+        "[compact] 完成：summary={} chars recent_messages={} quality={quality:?} model={model_label} elapsed_ms={}",
         summary.len(),
         recent.len(),
+        started.elapsed().as_millis(),
     );
 
     Some(CompactResult {
@@ -833,15 +846,28 @@ async fn llm_generate(
     request: Vec<Message>,
     cancel: &CancellationToken,
 ) -> Result<provider::composition::LlmTextOutputData, CompactLlmError> {
-    let output = binding
+    let started = std::time::Instant::now();
+    let request_messages = request.len();
+    let request_tokens = crate::domain::token_budget::estimate_messages_tokens(&request);
+    let result = binding
         .invoker
         .invoke_text(
             &binding.model,
             &compact_invoke_request(request, binding.max_output_tokens),
             cancel,
         )
-        .await
-        .map_err(CompactLlmError::Provider)?;
+        .await;
+    // 单次 LLM 调用耗时按模型记录（debug 级）：用于区分“块数多”与“模型本身慢”。
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "[compact] llm 调用：model={}/{} messages={request_messages} input_tokens={request_tokens} max_output={} elapsed_ms={} outcome={}",
+        binding.model.provider,
+        binding.model.model,
+        binding.max_output_tokens,
+        started.elapsed().as_millis(),
+        if result.is_ok() { "ok" } else { "error" },
+    );
+    let output = result.map_err(CompactLlmError::Provider)?;
     if output.text.trim().is_empty() {
         return Err(CompactLlmError::InvalidSummary(format!(
                 "LLM 返回了空的 compact 结构化响应：completion_reason={} text_deltas={} non_text_deltas={} completed={}",
@@ -958,10 +984,28 @@ where
             validation_error,
         );
         let repair_request = build_typed_output_repair_request(stage, &response, &validation_error);
+        let repair_started = std::time::Instant::now();
         response = llm_generate(binding, repair_request, cancel).await?.text;
+        let repair_elapsed_ms = repair_started.elapsed().as_millis();
         match validate(&response) {
-            Ok(decoded) => return Ok(decoded),
-            Err(error) => validation_error = error,
+            Ok(decoded) => {
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "[compact] {stage} typed 修复成功：attempts={repair_attempt} repair_ms={repair_elapsed_ms} model={}/{}",
+                    binding.model.provider,
+                    binding.model.model,
+                );
+                return Ok(decoded);
+            }
+            Err(error) => {
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "[compact] {stage} typed 修复未通过：attempts={repair_attempt} repair_ms={repair_elapsed_ms} model={}/{}",
+                    binding.model.provider,
+                    binding.model.model,
+                );
+                validation_error = error
+            }
         }
     }
 
@@ -1234,6 +1278,15 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
     chunks
 }
 
+/// 取升序样本的分位值（四舍五入到最近下标）；空样本返回 0。
+fn percentile_ms(sorted: &[u64], quantile: f64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let index = ((sorted.len() as f64 - 1.0) * quantile).round() as usize;
+    sorted[index.min(sorted.len() - 1)]
+}
+
 /// map-reduce 式压缩：分块独立摘要 → 合并为最终摘要。
 ///
 /// 当 early_messages 很大时，单次 LLM compact 会因输入过长而摘要质量下降。
@@ -1264,12 +1317,16 @@ async fn compact_messages_map_reduce(
         4..=6 => 4,
         _ => 5,
     };
+    let waves = total_chunks.div_ceil(concurrency);
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，单块目标 {chunk_target}，并发上限 {concurrency}",
+        "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，单块目标 {chunk_target}，并发上限 {concurrency}，波次 {waves} model={}/{}",
         early_messages.len(),
         estimate_messages_tokens(early_messages),
+        binding.model.provider,
+        binding.model.model,
     );
+    let map_started = std::time::Instant::now();
 
     let futures = chunks
         .iter()
@@ -1277,6 +1334,7 @@ async fn compact_messages_map_reduce(
         .map(|(chunk_index, chunk)| {
             let previous_for_chunk = (chunk_index == 0).then_some(previous_summary).flatten();
             async move {
+                let chunk_started = std::time::Instant::now();
                 match llm_extract_facts_or_local_fallback(
                     binding,
                     chunk_index,
@@ -1288,8 +1346,17 @@ async fn compact_messages_map_reduce(
                 )
                 .await
                 {
-                    Ok((facts, degradation)) => Ok((chunk_index, facts, degradation)),
-                    Err(error) => Err((chunk_index, error)),
+                    Ok((facts, degradation)) => Ok((
+                        chunk_index,
+                        facts,
+                        degradation,
+                        chunk_started.elapsed().as_millis() as u64,
+                    )),
+                    Err(error) => Err((
+                        chunk_index,
+                        error,
+                        chunk_started.elapsed().as_millis() as u64,
+                    )),
                 }
             }
         })
@@ -1297,17 +1364,22 @@ async fn compact_messages_map_reduce(
     let mut in_flight = futures_util::stream::iter(futures).buffer_unordered(concurrency);
     let mut indexed_fact_batches = Vec::with_capacity(total_chunks);
     let mut failed_chunks: Vec<(usize, CompactLlmError)> = Vec::new();
+    let mut chunk_durations_ms: Vec<u64> = Vec::with_capacity(total_chunks);
     let mut completed_chunks = 0usize;
     while let Some(fact_batch) = in_flight.next().await {
         match fact_batch {
-            Ok(entry) => indexed_fact_batches.push(entry),
+            Ok((chunk_index, facts, degradation, elapsed_ms)) => {
+                chunk_durations_ms.push(elapsed_ms);
+                indexed_fact_batches.push((chunk_index, facts, degradation));
+            }
             // 取消不可降级，必须整体上抛；其余 chunk 级错误本地降级，
             // 不牵连已完成的 LLM 提取成果。
-            Err((_, error)) if matches!(&error, CompactLlmError::Provider(prov) if prov.is_cancelled()) =>
+            Err((_, error, _)) if matches!(&error, CompactLlmError::Provider(prov) if prov.is_cancelled()) =>
             {
                 return Err(error);
             }
-            Err((chunk_index, error)) => {
+            Err((chunk_index, error, elapsed_ms)) => {
+                chunk_durations_ms.push(elapsed_ms);
                 failed_chunks.push((chunk_index, error));
             }
         }
@@ -1354,22 +1426,36 @@ async fn compact_messages_map_reduce(
     let degradation_failure = indexed_fact_batches
         .iter()
         .find_map(|(_, _, degradation)| degradation.clone());
+    let mut sorted_chunk_ms = chunk_durations_ms;
+    sorted_chunk_ms.sort_unstable();
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] map 完成：total_chunks={total_chunks} successful_chunks={} degraded_chunks={degraded_chunks}",
+        "[compact] map 完成：total_chunks={total_chunks} successful_chunks={} degraded_chunks={degraded_chunks} waves={waves} chunk_ms_p50={} chunk_ms_p95={} chunk_ms_max={} elapsed_ms={} model={}/{}",
         total_chunks.saturating_sub(degraded_chunks),
+        percentile_ms(&sorted_chunk_ms, 0.50),
+        percentile_ms(&sorted_chunk_ms, 0.95),
+        sorted_chunk_ms.last().copied().unwrap_or(0),
+        map_started.elapsed().as_millis(),
+        binding.model.provider,
+        binding.model.model,
     );
     let fact_batches = indexed_fact_batches
         .into_iter()
         .map(|(_, facts, _)| facts)
         .collect::<Vec<_>>();
 
+    let reduce_started = std::time::Instant::now();
     // 只有 1 块时无需远端 reduce，本地 reducer 直接生成 checkpoint。
     if fact_batches.len() <= 1 {
         let facts = fact_batches
             .into_iter()
             .next()
             .unwrap_or_else(|| crate::domain::compact::CompactFactBatch::new(Vec::new()));
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[compact] reduce 跳过（单块）：elapsed_ms={}",
+            reduce_started.elapsed().as_millis(),
+        );
         return reduce_facts_with_objective_fallback(facts, early_messages, task_snapshot)
             .and_then(|checkpoint| checkpoint.normalize_to_budget(budgets.summary_budget()))
             .map(|checkpoint| MapReduceCompactOutput {
@@ -1400,6 +1486,7 @@ async fn compact_messages_map_reduce(
             combined_facts.push(fact.with_sequence(next_sequence));
         }
     }
+    let combined_fact_count = combined_facts.len();
     let mut final_checkpoint = reduce_facts_with_objective_fallback(
         crate::domain::compact::CompactFactBatch::new(combined_facts),
         early_messages,
@@ -1411,9 +1498,12 @@ async fn compact_messages_map_reduce(
     let mut final_summary = final_checkpoint.render();
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] reduce 合并完成：{} chars（预算 {} tokens）",
+        "[compact] reduce 合并完成：{} chars（预算 {} tokens）facts={combined_fact_count} elapsed_ms={} model={}/{}",
         final_summary.len(),
         budgets.summary_budget(),
+        reduce_started.elapsed().as_millis(),
+        binding.model.provider,
+        binding.model.model,
     );
 
     // 收敛迭代：合并结果超预算时再压一次，直到有界或达到轮数上限（#1486/#1490）。
@@ -1433,6 +1523,7 @@ async fn compact_messages_map_reduce(
             MAX_REDUCE_REFRESH_ROUNDS,
         );
         let tokens_before = crate::domain::token_budget::estimate_tokens(&final_summary);
+        let round_started = std::time::Instant::now();
         let refreshed_checkpoint = match llm_refresh(binding, &final_checkpoint, budget, cancel)
             .await
         {
@@ -1459,7 +1550,10 @@ async fn compact_messages_map_reduce(
         let tokens_after = crate::domain::token_budget::estimate_tokens(&refreshed_summary);
         log::info!(
             target: crate::LOG_TARGET,
-            "[compact] 汇总超预算，再压 round {round}：{tokens_before} -> {tokens_after} tokens（预算 {budget}）",
+            "[compact] 汇总超预算，再压 round {round}：{tokens_before} -> {tokens_after} tokens（预算 {budget}）elapsed_ms={} model={}/{}",
+            round_started.elapsed().as_millis(),
+            binding.model.provider,
+            binding.model.model,
         );
         if tokens_after >= tokens_before {
             rounds_without_shrink += 1;
