@@ -21,6 +21,11 @@ aemeath eval compact score \
     --cases /tmp/compact-cases --summaries /tmp/compact-summaries \
     --output eval/compact/results/run_eval.json
 
+# 真实摘要质量（must_keep 召回 + 压缩率，用已落盘摘要，不重跑压缩）
+aemeath eval compact recall \
+    --root ~/.agents/session --limit 200 \
+    --output eval/compact/results/recall_baseline.json
+
 # 生产实际反馈指标（重问率/重复读取/错误率/中断/不满/成本）
 aemeath eval compact feedback \
     --root ~/.agents/session --limit 200 \
@@ -47,6 +52,7 @@ apps/cli/src/subcommand/eval/
   cases.rs        case 导出、must_keep 抽取与限流、输入侧汇总
   score.rs        确定性指标（召回/压缩率/结构健康）
   feedback.rs     生产实际反馈指标（tail vs early 对比）
+  recall.rs       真实摘要质量（must_keep 召回 + 压缩率）
   constants.rs    日志正则、阈值与噪声前缀
   *_tests.rs      单元测试（日志格式、dataset、抽取、分母规则）
 eval/compact/
@@ -64,6 +70,7 @@ eval/compact/
 | P3 | 续接问答 e2e（判官 `--judge` 指定） | ⏳ |
 | P4 | 回归门禁（确定性指标不劣于基线） | ⏳ |
 | 生产反馈 | 重问率/重复读取/错误率/中断/不满/成本 | ✅ 已实现（趋势口径，不进 CI 门禁） |
+| 摘要质量 | 真实摘要的 must_keep 召回 + 压缩率 | ✅ 已实现（不重跑压缩） |
 
 ### P1 执行面缺口
 
@@ -108,6 +115,19 @@ eval/compact/
 | message_count | 648 | 8365 | 8365 |
 | estimated_tokens | 479560 | 2296755 | 2296755 |
 | must_keep（上限 200） | 200 | 200 | 200 |
+
+### 摘要质量（199 个 session，13 个有压缩；已落盘摘要）
+
+| 指标 | 值 |
+|---|---|
+| must_keep 召回 | 均值 0.216 / p50 0.205 |
+| 压缩率（摘要 token / early token） | 均值 0.021 / p50 0.022 |
+| early_tokens p50 | 462718 |
+
+**解读口径（MUST 如实呈现）**：召回 0.22 不代表压缩质量差——摘要是抽象归纳，
+不可能保留早期历史里的全部 typed id / 文件路径。它是**保留率基线**：用于
+版本对比（同一会话不同压缩策略/模型）与解释「压缩后重复读取 310 次」的关系，
+不能单独作为质量结论；续接可用性需 P3 真模型问答。
 
 ### 生产反馈（199 个 session，13 个有压缩）
 

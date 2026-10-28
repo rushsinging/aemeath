@@ -211,6 +211,25 @@ pub enum CompactEvalCommands {
         output: Option<PathBuf>,
     },
 
+    /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）
+    Recall {
+        /// session 根目录（默认 ~/.agents/session）
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// 最多检查多少个 session
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+
+        /// 每个 session 的 must_keep 上限（按出现频次取前 N）
+        #[arg(long, default_value_t = 200)]
+        max_must_keep: usize,
+
+        /// 输出 JSON 路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
     /// 按 case 计算确定性指标（需要压缩输出）
     Score {
         /// export 产生的 case 目录

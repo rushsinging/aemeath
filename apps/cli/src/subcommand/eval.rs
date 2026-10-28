@@ -6,6 +6,7 @@ mod cases;
 mod constants;
 mod dataset;
 mod feedback;
+mod recall;
 mod score;
 mod telemetry;
 
@@ -59,6 +60,17 @@ fn run_compact(command: CompactEvalCommands) {
             limit,
             output,
         } => feedback::run(root.unwrap_or_else(default_session_root), limit, output),
+        CompactEvalCommands::Recall {
+            root,
+            limit,
+            max_must_keep,
+            output,
+        } => recall::run(
+            root.unwrap_or_else(default_session_root),
+            limit,
+            max_must_keep,
+            output,
+        ),
     };
     if let Err(error) = result {
         crate::fatal_error::report_fatal(error);
