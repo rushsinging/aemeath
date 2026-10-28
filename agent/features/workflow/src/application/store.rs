@@ -11,11 +11,52 @@ use crate::domain::WorkflowStatus;
 #[derive(Default)]
 pub struct InMemoryWorkflowStore {
     workflows: Mutex<HashMap<String, Arc<Mutex<WorkflowAggregate>>>>,
+    persistence: Option<(String, Arc<dyn crate::ports::WorkflowPersistence>)>,
 }
 
 impl InMemoryWorkflowStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 注入持久层并加载 Session 索引内全部聚合（resume；#2083）。
+    pub fn with_persistence(
+        persistence: Arc<dyn crate::ports::WorkflowPersistence>,
+        session_id: impl Into<String>,
+    ) -> Self {
+        let session_id = session_id.into();
+        let store = Self {
+            workflows: Mutex::new(HashMap::new()),
+            persistence: Some((session_id.clone(), persistence.clone())),
+        };
+        if let Ok(snapshots) = persistence.load_all(&session_id) {
+            if let Ok(mut workflows) = store.workflows.lock() {
+                for snapshot in snapshots {
+                    if let Ok(aggregate) = WorkflowAggregate::from_snapshot(snapshot) {
+                        let id = aggregate.workflow_id.clone();
+                        workflows.insert(id, Arc::new(Mutex::new(aggregate)));
+                    }
+                }
+            }
+        }
+        store
+    }
+
+    /// write-through 单个聚合快照（backend 成功路径调用）。
+    ///
+    /// 接收已构造的快照而非 workflow_id：调用方通常已持有 aggregate
+    /// mutex，内部再次加锁会自死锁（std Mutex 非重入）。
+    pub fn persist_snapshot(&self, snapshot: &crate::domain::snapshot::WorkflowSnapshotData) {
+        let Some((session_id, persistence)) = &self.persistence else {
+            return;
+        };
+        if let Err(error) = persistence.save(session_id, snapshot) {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "workflow_persist_failed id={} error={error}",
+                snapshot.workflow_id
+            );
+        }
     }
 
     /// 当前 Active Workflow 的 id（至多一个）。

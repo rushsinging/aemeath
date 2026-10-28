@@ -5759,6 +5759,7 @@ dependencies = [
  "serde",
  "serde_json",
  "share",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]

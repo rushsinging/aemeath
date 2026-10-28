@@ -1,5 +1,6 @@
 //! Workflow Graph 领域类型与 Kernel 校验（设计文档 §2、§3、§5.8）。
 pub mod kernel;
+pub mod snapshot;
 pub mod tool_data;
 pub mod tool_error;
 
@@ -122,6 +123,7 @@ pub struct GraphError {
     pub subject: Option<String>,
 }
 
+pub use snapshot::{NodeSnapshotEntry, WorkflowSnapshotData};
 pub use tool_data::{
     AllowedAction, CreateWorkflowSpec, EvidenceKind, EvidenceRef, FactSummaryData, LifecycleAction,
     LifecycleResultData, ListWorkflowsData, ListWorkflowsQuery, NodeAction, NodeSummaryCounts,
