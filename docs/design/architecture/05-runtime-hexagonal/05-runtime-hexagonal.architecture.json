@@ -155,7 +155,7 @@
       "id": "modelContextPorts",
       "type": "messagebus",
       "label": "Model + Context Ports",
-      "sublabel": "ProviderPort · ContextPort · Memory",
+      "sublabel": "LlmInvokePort · ContextPort · Memory",
       "tag": "outbound ports",
       "pos": [1080, 210],
       "size": [240, 78],

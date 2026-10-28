@@ -182,7 +182,7 @@
     "→ tools：ToolDefinition（原 ToolSchemaData）",
     "→ sdk：SessionItemList · SessionItem",
     "→ task：CompactTaskSnapshot 家族 ×4",
-    "→ provider：LlmTextInvokePort · LlmTextOutputData",
+    "→ provider：LlmInvokePort（单端口，#2146）· LlmTextOutputData",
     "外置：ContextPort 单体 · Factory trait · ManualCompact · Generator · ContentFingerprint · CommittedStep · SystemBlock 根导出"
    ]
   },

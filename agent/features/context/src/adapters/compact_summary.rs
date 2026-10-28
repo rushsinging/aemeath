@@ -832,14 +832,15 @@ async fn llm_generate(
     binding: &crate::domain::CompactLlmBinding,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<provider::composition::LlmTextOutputData, CompactLlmError> {
+) -> Result<provider::LlmTextOutputData, CompactLlmError> {
     let output = binding
         .invoker
-        .invoke_text(
-            &binding.model,
-            &compact_invoke_request(request, binding.max_output_tokens),
-            cancel,
-        )
+        .invoke_text(&binding.model, &{
+            let mut request = compact_invoke_request(request, binding.max_output_tokens);
+            // 取消真相源单通道（#2146）：端口无独立取消参数。
+            request.cancellation = cancel.clone();
+            request
+        })
         .await
         .map_err(CompactLlmError::Provider)?;
     if output.text.trim().is_empty() {
@@ -867,7 +868,7 @@ async fn llm_generate_with_empty_retry(
     stage: &str,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<provider::composition::LlmTextOutputData, CompactLlmError> {
+) -> Result<provider::LlmTextOutputData, CompactLlmError> {
     match llm_generate(binding, request.clone(), cancel).await {
         Ok(output) => Ok(output),
         Err(CompactLlmError::InvalidSummary(_)) => {

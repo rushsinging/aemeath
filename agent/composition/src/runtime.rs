@@ -83,6 +83,7 @@ fn wire_runtime_tool_assembly(
     background_source: Arc<dyn tools::BackgroundProcessAccessSource>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
+    session_id: &str,
     context_size: usize,
 ) -> Result<RuntimeToolAssembly, sdk::SdkError> {
     // 合并内置与 config 定义的角色（config 同名整条覆盖），编译为
@@ -93,11 +94,17 @@ fn wire_runtime_tool_assembly(
         .into_iter()
         .filter_map(|(role, config)| config.policy.map(|policy| (role, policy)))
         .collect::<Vec<_>>();
-    // Workflow 总开关（#2085）：默认关闭，六工具不注册；开启后注入内存
-    // backend（node_update/replan 的完整实现随 #2086/#2087 就绪）。
+    // Workflow 总开关（#2085）：默认关闭，六工具不注册；开启后注入带
+    // 持久化的 backend（#2083：Session 索引 + 实体快照 write-through）。
     let workflow_backend = snapshot.to_config().workflow.enabled.then(|| {
+        let persistence = std::sync::Arc::new(workflow::FileWorkflowPersistence::new(
+            agents_dir.join("workflows"),
+        ));
         std::sync::Arc::new(workflow::InMemoryWorkflowBackend::new(
-            std::sync::Arc::new(workflow::InMemoryWorkflowStore::new()),
+            std::sync::Arc::new(workflow::InMemoryWorkflowStore::with_persistence(
+                persistence,
+                session_id.to_owned(),
+            )),
             Box::new(|| uuid::Uuid::now_v7().to_string()),
             Box::new(|| chrono::Utc::now().to_rfc3339()),
         )) as std::sync::Arc<dyn workflow::WorkflowToolBackend>
@@ -279,6 +286,9 @@ pub(crate) async fn from_args_with_gateways(
         .build(provider_spec)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let compact_model_slot = runtime::SessionModelSlotData::new();
+    // #2142：同一 slot 的共享句柄留给 compact resolver——未配置
+    // `context.compact_model` 时 compact 跟随会话模型（`/model` 切换可见）。
+    let compact_model_slot_for_resolver = compact_model_slot.clone();
     let initial_provider = runtime::InitialProviderAssemblyData::new(
         initial_binding,
         resolved_model,
@@ -365,6 +375,7 @@ pub(crate) async fn from_args_with_gateways(
         }),
         &config.reader().committed_snapshot(),
         agents_dir,
+        wiring.committed_session().id.as_str(),
         context_size,
     )?;
 
@@ -384,21 +395,30 @@ pub(crate) async fn from_args_with_gateways(
 
     // 构造一次基础 RuntimeContextFactory，并将同一 Arc 注入 Main bootstrap
     // 与 Derived Agent Runner；Derived 仅追加受限 binding，不重建基础服务。
-    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
-        tool_assembly.catalog.clone(),
-        tool_assembly.execution.clone(),
-        gateways.policy.clone(),
-        reflection_history.clone(),
-        task_wiring.access(),
-        hook_runner.clone(),
-        usage_sink,
-        scoring_ports.for_memory_recall.clone(),
-        scoring_ports.for_skill_match.clone(),
-        scoring_ports
-            .for_policy_triage
-            .clone()
-            .map(|scoring| std::sync::Arc::new(runtime::PolicyTriage::new(scoring))),
-    ));
+    let runtime_context_factory = Arc::new(
+        runtime::RuntimeContextFactory::new(
+            tool_assembly.catalog.clone(),
+            tool_assembly.execution.clone(),
+            gateways.policy.clone(),
+            reflection_history.clone(),
+            task_wiring.access(),
+            hook_runner.clone(),
+            usage_sink,
+            scoring_ports.for_memory_recall.clone(),
+            scoring_ports.for_skill_match.clone(),
+            scoring_ports
+                .for_policy_triage
+                .clone()
+                .map(|scoring| std::sync::Arc::new(runtime::PolicyTriage::new(scoring))),
+        )
+        // #2142：装配 compact 模型解析器——主 Run 的 manual/自动压缩经它按轮
+        // 解析 LLM 绑定（未配置跟随会话模型；解析失败回退本地压缩并 warn）。
+        .with_compact_resolver(std::sync::Arc::new(runtime::CompactModelResolver::new(
+            wiring.gate_aware_config_reader(),
+            gateways.provider.clone(),
+            compact_model_slot_for_resolver,
+        ))),
+    );
     context::guidance::init_guidance_dir();
     let cwd = args
         .cwd

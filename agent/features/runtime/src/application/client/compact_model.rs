@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use share::config::domain::snapshot::ConfigSnapshot;
 
 use crate::application::client::SessionModelState;
+use crate::application::constants::COMPACT_UNKNOWN_MODEL_WINDOW;
 use crate::ports::{ProviderBindingData, ProviderFactory};
 
 /// 会话当前模型的共享槽。
@@ -215,8 +216,45 @@ impl CompactModelResolver {
         .map_err(CompactModelResolveError::Selection)?;
         Ok(Arc::new(binding))
     }
+
+    /// 解析当前 compact 目标并投影为 context 请求可携带的
+    /// [`context::CompactLlmBinding`]（#2142：compact 模型绑定唯一投影点）。
+    ///
+    /// `None` = 本次走本地压缩（模型解析失败，保留 warn 日志）。
+    pub fn to_llm_binding(&self) -> Option<context::CompactLlmBinding> {
+        match self.resolve() {
+            Ok(target) => {
+                let binding = target.binding();
+                let window = target.context_window().or_else(|| {
+                    if matches!(target.origin(), CompactModelOrigin::Configured) {
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "[compact] compact 模型未声明输入窗口，改用保守窗口 {COMPACT_UNKNOWN_MODEL_WINDOW}"
+                        );
+                        Some(COMPACT_UNKNOWN_MODEL_WINDOW)
+                    } else {
+                        None
+                    }
+                });
+                Some(context::CompactLlmBinding {
+                    invoker: std::sync::Arc::clone(&binding.provider),
+                    model: binding.model.clone(),
+                    max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
+                        .min(binding.max_tokens.max(1)),
+                    compact_context_window: window,
+                })
+            }
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] 无法解析 compact 模型，本次走本地压缩：{error}"
+                );
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 #[path = "compact_model_tests.rs"]
-mod compact_model_tests;
+pub(crate) mod compact_model_tests;

@@ -1,20 +1,19 @@
 //! `CompactModelResolver` 的模型选择、窗口与缓存语义。
 
 use super::*;
-use crate::ports::provider_port::fake::FakeProvider;
 use crate::ports::ProviderBuildSpecData;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-struct FakeConfigReader {
+pub(crate) struct FakeConfigReader {
     snapshot: std::sync::Mutex<ConfigSnapshot>,
     changes: tokio::sync::watch::Sender<ConfigSnapshot>,
 }
 
 impl FakeConfigReader {
-    fn new(snapshot: ConfigSnapshot) -> Self {
+    pub(crate) fn new(snapshot: ConfigSnapshot) -> Self {
         let (changes, _receiver) = tokio::sync::watch::channel(snapshot.clone());
         Self {
             snapshot: std::sync::Mutex::new(snapshot),
@@ -64,7 +63,7 @@ impl config::ConfigReader for FakeConfigReader {
 }
 
 #[derive(Default)]
-struct RecordingFactory {
+pub(crate) struct RecordingFactory {
     builds: Arc<AtomicUsize>,
 }
 
@@ -75,7 +74,7 @@ impl ProviderFactory for RecordingFactory {
     ) -> Result<ProviderBindingData, provider::ProviderError> {
         self.builds.fetch_add(1, Ordering::SeqCst);
         Ok(ProviderBindingData {
-            provider: Arc::new(FakeProvider::new()),
+            provider: crate::ports::provider_port::fake::port(),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -93,7 +92,7 @@ impl ProviderFactory for RecordingFactory {
     }
 }
 
-fn snapshot_with(compact_model: Option<&str>) -> ConfigSnapshot {
+pub(crate) fn snapshot_with(compact_model: Option<&str>) -> ConfigSnapshot {
     let mut config = Config::default();
     config.models.default = "local/session-model".into();
     config.models.providers.insert(
@@ -126,7 +125,7 @@ fn snapshot_with(compact_model: Option<&str>) -> ConfigSnapshot {
     ConfigSnapshot::new(config)
 }
 
-fn resolver(
+pub(crate) fn resolver(
     snapshot: ConfigSnapshot,
     session_model: SessionModelSlotData,
 ) -> (
@@ -158,7 +157,7 @@ fn session_state(
     crate::application::client::SessionModelState::new(
         resolved,
         Arc::new(ProviderBindingData {
-            provider: Arc::new(FakeProvider::new()),
+            provider: crate::ports::provider_port::fake::port(),
             model: provider::ModelInfo {
                 provider: "local".into(),
                 model: model_id,
@@ -176,7 +175,7 @@ fn session_state(
     )
 }
 
-fn bound_slot(snapshot: &ConfigSnapshot) -> SessionModelSlotData {
+pub(crate) fn bound_slot(snapshot: &ConfigSnapshot) -> SessionModelSlotData {
     let slot = SessionModelSlotData::new();
     slot.bind(session_state(snapshot, "local/session-model", 200_000));
     slot
@@ -308,4 +307,90 @@ fn session_model_switch_is_observed_by_later_resolves() {
     let target = resolver.resolve().expect("after switch");
     assert_eq!(target.binding().model.model, "compact-model");
     assert_eq!(target.context_window(), Some(32_000));
+}
+
+// ─── #2142：to_llm_binding 投影（compact LLM 绑定唯一投影点） ───
+
+#[test]
+fn to_llm_binding_follows_session_model_when_unset() {
+    let snapshot = snapshot_with(None);
+    let slot = bound_slot(&snapshot);
+    let (resolver, _builds, _reader) = resolver(snapshot, slot);
+
+    let binding = resolver
+        .to_llm_binding()
+        .expect("未配置 compact_model 时必须跟随会话模型");
+
+    assert_eq!(binding.model.model, "session-model");
+    assert_eq!(binding.model.provider, "local");
+    // 预算 = min(COMPACT_MAX_OUTPUT_TOKENS, binding.max_tokens) = min(16384, 8192)。
+    assert_eq!(binding.max_output_tokens, 8_192);
+    assert_eq!(binding.compact_context_window, Some(200_000));
+}
+
+#[test]
+fn to_llm_binding_uses_configured_selection_with_its_window_and_budget() {
+    let snapshot = snapshot_with(Some("local/compact-model"));
+    let slot = bound_slot(&snapshot);
+    let (resolver, _builds, _reader) = resolver(snapshot, slot);
+
+    let binding = resolver
+        .to_llm_binding()
+        .expect("配置了 compact_model 时必须解析出 binding");
+
+    assert_eq!(binding.model.model, "compact-model");
+    // compact-model 自身预算 4096 < 默认摘要预算 16384。
+    assert_eq!(binding.max_output_tokens, 4_096);
+    assert_eq!(binding.compact_context_window, Some(32_000));
+}
+
+#[test]
+fn to_llm_binding_returns_none_when_selection_unresolvable() {
+    let snapshot = snapshot_with(Some("local/missing-model"));
+    let slot = bound_slot(&snapshot);
+    let (resolver, _builds, _reader) = resolver(snapshot, slot);
+
+    assert!(
+        resolver.to_llm_binding().is_none(),
+        "selection 无法解析时必须投影为 None（本地压缩回退）"
+    );
+}
+
+#[test]
+fn to_llm_binding_returns_none_when_session_model_unbound() {
+    let snapshot = snapshot_with(None);
+    let (resolver, _builds, _reader) = resolver(snapshot, SessionModelSlotData::new());
+
+    assert!(
+        resolver.to_llm_binding().is_none(),
+        "未绑定会话模型且未配置 compact_model 时必须投影为 None"
+    );
+}
+
+#[tokio::test]
+async fn to_llm_binding_carries_binding_invoke_port() {
+    // invoker 与 model 必须同源（#2146 单端口）：投影携带的 invoker 即
+    // resolve 出的 binding 自带的 provider，文本消费走默认方法
+    // invoke_text（此处 fake 返回 "hello"，证明收口链路通）。
+    let snapshot = snapshot_with(Some("local/compact-model"));
+    let slot = bound_slot(&snapshot);
+    let (resolver, _builds, _reader) = resolver(snapshot, slot);
+
+    let binding = resolver.to_llm_binding().expect("binding");
+
+    let result = binding
+        .invoker
+        .invoke_text(
+            &binding.model,
+            &provider::ProviderRequestData::new(
+                "compact-model".to_string(),
+                Vec::new(),
+                1,
+                share::reasoning::ReasoningLevel::Off,
+            ),
+        )
+        .await;
+    let output = result.expect("默认 invoke_text 收口必须成功");
+    assert_eq!(output.text, "hello");
+    assert_eq!(output.completion_reason.as_deref(), Some("end_turn"));
 }

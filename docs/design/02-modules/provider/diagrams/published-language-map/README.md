@@ -10,11 +10,10 @@
 | 节点 | 内容 |
 |---|---|
 | 输入 | `ProviderRequestData`（单载体：model/预算/reasoning/整段 system prompt/缓存前缀分界/messages/wire-ready tools/取消令牌） |
-| 输出 | 流式 `ProviderResponseChunk`（Content/Usage/Stop/Error 帧）→ `ProviderResponseStream`、非流式 `ProviderResponse`、载荷 `ProviderContentData`/`ResponseStopReason`/`TokenUsageData` |
+| 输出 | 流式 `ProviderResponseChunk`（Content/Usage/Stop/Error 帧）→ `ProviderResponseStream`、非流式 `ProviderResponse`、载荷 `ProviderContentData`/`ResponseStopReason`/`TokenUsageData`、文本收口 `LlmTextOutputData` |
 | 模型元数据 | `ModelInfo`（身份+能力单实体：config/catalog 投影 + `supported_reasoning` 阶梯与 `resolve_reasoning` clamp） |
 | 错误 | `ProviderError` + `ProviderErrorKind`（13 变体；`LlmError` 已内部化折叠） |
-| 工厂·客户端 | `wire_provider_client`（主链路，返回修正版 ModelInfo）、`wire_test_provider_client`（探测）、`LlmClient`/`ProviderClientSpecData`/`TransportPool`（构造面豁免） |
-| 文本端口 | `LlmTextInvokePort`/`LlmTextOutputData`（非流式纯文本调用） |
+| 调用端口·客户端 | `LlmInvokePort`（#2146 能力契约：流式 `invoke_stream` verb + 文本 `invoke_text` 默认方法；唯一实现 `LlmClient`）、`wire_provider_client`（主链路，返回修正版 ModelInfo）、`wire_test_provider_client`（探测）、`LlmClient`/`ProviderClientSpecData`/`TransportPool`（构造面豁免） |
 
 ## 数据来源
 

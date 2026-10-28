@@ -8,24 +8,15 @@ impl runtime::ProviderFactory for TestProviderFactory {
         &self,
         spec: runtime::ProviderBuildSpecData,
     ) -> Result<runtime::ProviderBindingData, provider::ProviderError> {
-        struct UnusedPort;
-        #[async_trait::async_trait]
-        impl runtime::ProviderPort for UnusedPort {
-            // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-            async fn invoke(
-                &self,
-                _request: provider::ProviderRequestData,
-                _cancellation: &dyn runtime::CancellationSignal,
-            ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-                Err(provider::ProviderError::fatal(
-                    provider::ProviderErrorKind::UpstreamUnavailable,
-                    "unused test provider",
-                ))
-            }
-        }
+        // #2146：LlmInvokePort 只允许 provider 实现；测试用脚本化端口。
+        let port = provider::test_support::scripted_llm(|_request| {
+            Err(provider::ProviderError::fatal(
+                provider::ProviderErrorKind::UpstreamUnavailable,
+                "unused test provider",
+            ))
+        });
         Ok(runtime::ProviderBindingData {
-            provider: Arc::new(UnusedPort),
+            provider: port,
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

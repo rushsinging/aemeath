@@ -480,3 +480,88 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
         "domain 进度必须原样映射到 SDK 视图（#1500）"
     );
 }
+
+// ─── #2142：compact 请求携带 LLM 绑定（resolver 装配时） ───
+
+use crate::application::client::compact_model::compact_model_tests as compact_support;
+
+fn resolver() -> std::sync::Arc<crate::application::client::CompactModelResolver> {
+    let snapshot = compact_support::snapshot_with(None);
+    let slot = compact_support::bound_slot(&snapshot);
+    let (resolver, _builds, _reader) = compact_support::resolver(snapshot, slot);
+    std::sync::Arc::new(resolver)
+}
+
+fn noop_progress() -> std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView> {
+    std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {})
+}
+
+#[tokio::test]
+async fn automatic_compact_carries_llm_binding_when_resolver_bound() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()))
+        .with_compact_resolver(Some(resolver()));
+
+    coordinator
+        .compact(
+            &request(),
+            SessionRevision::new(1),
+            noop_progress(),
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let compact_requests = port.compact_requests.lock().unwrap();
+    assert_eq!(compact_requests.len(), 1);
+    let llm = compact_requests[0]
+        .llm
+        .as_ref()
+        .expect("装配 resolver 后自动压缩请求必须携带 LLM 绑定");
+    // 未配置 compact_model → 跟随会话模型（fake 会话模型 = session-model）。
+    assert_eq!(llm.model.model, "session-model");
+}
+
+#[tokio::test]
+async fn manual_compact_carries_llm_binding_when_resolver_bound() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()))
+        .with_compact_resolver(Some(resolver()));
+
+    coordinator
+        .manual_compact(&request(), noop_progress(), None)
+        .await
+        .unwrap();
+
+    let compact_requests = port.compact_requests.lock().unwrap();
+    assert_eq!(compact_requests.len(), 1);
+    assert!(
+        compact_requests[0].llm.is_some(),
+        "手动压缩与自动压缩共用同一 resolver 单一入口"
+    );
+}
+
+#[tokio::test]
+async fn compact_stays_local_when_resolver_absent() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
+
+    coordinator
+        .compact(
+            &request(),
+            SessionRevision::new(1),
+            noop_progress(),
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let compact_requests = port.compact_requests.lock().unwrap();
+    assert_eq!(compact_requests.len(), 1);
+    assert!(
+        compact_requests[0].llm.is_none(),
+        "未装配 resolver（isolated/测试装配）时必须保持本地压缩"
+    );
+}

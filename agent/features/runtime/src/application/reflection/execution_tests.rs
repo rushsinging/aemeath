@@ -1,8 +1,5 @@
 use super::*;
-use crate::application::model::test_support::text_completion_stream;
-use crate::ports::provider_port::{
-    ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,
-};
+use crate::ports::provider_port::{ModelInfo, ProviderError};
 use async_trait::async_trait;
 use memory::api::reflection::{ReflectionRecord, ReflectionSafeSummary};
 use memory::api::{MemoryError, NoOpMemory, ReflectionHistoryQuery};
@@ -13,17 +10,15 @@ struct StaticProvider {
     response: String,
 }
 
-#[async_trait]
-impl ProviderPort for StaticProvider {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询
-    // ——unknown model 门禁语义已在装配时。
-
-    async fn invoke(
-        &self,
-        _request: ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<ProviderResponseStream, ProviderError> {
-        Ok(text_completion_stream(self.response.clone(), 11, 22))
+impl StaticProvider {
+    /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 的脚本化端口。
+    fn port(&self) -> std::sync::Arc<dyn LlmInvokePort> {
+        let response = self.response.clone();
+        provider::test_support::scripted_llm(move |_request| {
+            Ok(provider::test_support::text_stream_with_usage(
+                &response, 11, 22,
+            ))
+        })
     }
 }
 
@@ -92,7 +87,8 @@ fn identity() -> ReflectionExecutionIdentity {
 async fn runtime_invokes_provider_then_delegates_parse_apply_and_history_to_memory() {
     let provider = StaticProvider {
         response: r#"{"deviations":["drift"],"suggested_memories":[]}"#.to_string(),
-    };
+    }
+    .port();
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
     let model = model();
@@ -104,7 +100,7 @@ async fn runtime_invokes_provider_then_delegates_parse_apply_and_history_to_memo
         200,
         0,
         ReflectionInvocation {
-            provider: &provider,
+            provider: provider.as_ref(),
             model: &model,
             max_tokens: 4_096,
             requested_reasoning: share::reasoning::ReasoningLevel::Off,
@@ -129,7 +125,8 @@ async fn malformed_provider_text_returns_safe_runtime_error_and_memory_records_p
     let secret = "SECRET-provider-raw-response";
     let provider = StaticProvider {
         response: secret.to_string(),
-    };
+    }
+    .port();
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
     let model = model();
@@ -141,7 +138,7 @@ async fn malformed_provider_text_returns_safe_runtime_error_and_memory_records_p
         200,
         0,
         ReflectionInvocation {
-            provider: &provider,
+            provider: provider.as_ref(),
             model: &model,
             max_tokens: 4_096,
             requested_reasoning: share::reasoning::ReasoningLevel::Off,
@@ -187,55 +184,54 @@ struct RecordedRequest {
 /// 按调用顺序回放响应的反思测试 provider。脚本耗尽后再次被调用即 panic——
 /// 由此断言重试与修复的调用次数有界（超出上限的第 N+1 次调用必现失败）。
 struct ScriptedReflectionProvider {
-    steps: Mutex<VecDeque<ScriptedStep>>,
-    requests: Mutex<Vec<RecordedRequest>>,
+    steps: std::sync::Arc<Mutex<VecDeque<ScriptedStep>>>,
+    requests: std::sync::Arc<Mutex<Vec<RecordedRequest>>>,
 }
 
 impl ScriptedReflectionProvider {
     fn new(steps: Vec<ScriptedStep>) -> Self {
         Self {
-            steps: Mutex::new(steps.into()),
-            requests: Mutex::new(Vec::new()),
+            steps: std::sync::Arc::new(Mutex::new(steps.into())),
+            requests: std::sync::Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     fn requests(&self) -> Vec<RecordedRequest> {
         self.requests.lock().unwrap().clone()
     }
-}
 
-#[async_trait]
-impl ProviderPort for ScriptedReflectionProvider {
-    async fn invoke(
-        &self,
-        request: ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<ProviderResponseStream, ProviderError> {
-        let messages = request
-            .messages
-            .iter()
-            .map(|message| (role_label(&message.role), message.text_content()))
-            .collect();
-        self.requests.lock().unwrap().push(RecordedRequest {
-            system: request.system.clone(),
-            messages,
-            reasoning: request.reasoning,
-            max_output_tokens: request.max_output_tokens,
-        });
-        let step = self
-            .steps
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("反思 provider 调用超出脚本：重试与修复的调用次数 MUST 有界");
-        match step {
-            ScriptedStep::Text(text) => Ok(text_completion_stream(text, 11, 22)),
-            ScriptedStep::Empty => Ok(text_completion_stream("", 0, 0)),
-            ScriptedStep::InvokeError => Err(ProviderError::fatal(
-                provider::ProviderErrorKind::UpstreamUnavailable,
-                "scripted provider failure",
-            )),
-        }
+    /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 的脚本化端口。
+    fn port(&self) -> std::sync::Arc<dyn LlmInvokePort> {
+        let steps = std::sync::Arc::clone(&self.steps);
+        let requests = std::sync::Arc::clone(&self.requests);
+        provider::test_support::scripted_llm(move |request| {
+            let messages = request
+                .messages
+                .iter()
+                .map(|message| (role_label(&message.role), message.text_content()))
+                .collect();
+            requests.lock().unwrap().push(RecordedRequest {
+                system: request.system.clone(),
+                messages,
+                reasoning: request.reasoning,
+                max_output_tokens: request.max_output_tokens,
+            });
+            let step = steps
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("反思 provider 调用超出脚本：重试与修复的调用次数 MUST 有界");
+            match step {
+                ScriptedStep::Text(text) => Ok(provider::test_support::text_stream_with_usage(
+                    &text, 11, 22,
+                )),
+                ScriptedStep::Empty => Ok(provider::test_support::empty_text_stream()),
+                ScriptedStep::InvokeError => Err(ProviderError::fatal(
+                    provider::ProviderErrorKind::UpstreamUnavailable,
+                    "scripted provider failure",
+                )),
+            }
+        })
     }
 }
 
@@ -247,7 +243,7 @@ fn role_label(role: &share::message::Role) -> &'static str {
 }
 
 async fn run_scripted_reflection(
-    provider: &ScriptedReflectionProvider,
+    provider: &std::sync::Arc<dyn LlmInvokePort>,
     history: &RecordingHistory,
     lang: &str,
     cancel: &tokio_util::sync::CancellationToken,
@@ -261,7 +257,7 @@ async fn run_scripted_reflection(
         200,
         0,
         ReflectionInvocation {
-            provider,
+            provider: provider.as_ref(),
             model: &model,
             max_tokens: 4_096,
             requested_reasoning: share::reasoning::ReasoningLevel::Off,
@@ -293,7 +289,7 @@ async fn noise_parse_failure_repairs_once_then_continues_to_synthesis() {
     ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let result = run_scripted_reflection(&provider, &history, "zh", &cancel)
+    let result = run_scripted_reflection(&provider.port(), &history, "zh", &cancel)
         .await
         .unwrap();
     assert_eq!(result.output.deviations, ["drift"]);
@@ -333,7 +329,7 @@ async fn noise_failed_repair_remains_bounded_and_records_original_parse_failure(
     ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
     assert_eq!(error, ReflectionExecutionError::Unparseable);
@@ -353,7 +349,7 @@ async fn noise_repair_provider_error_keeps_original_parse_failure() {
         ]);
         let history = RecordingHistory::default();
         let cancel = tokio_util::sync::CancellationToken::new();
-        let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+        let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
             .await
             .unwrap_err();
         assert_eq!(error, ReflectionExecutionError::Unparseable);
@@ -375,7 +371,7 @@ async fn noise_empty_response_retries_before_the_single_parse_repair() {
     ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let result = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let result = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap();
     assert_eq!(result.output.deviations, ["drift"]);
@@ -398,7 +394,7 @@ async fn parse_diagnostic_records_phase_position_and_masked_preview() {
     ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
-    run_scripted_reflection(&provider, &history, "en", &cancel)
+    run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap();
     let records = crate::test_log::drain();
@@ -428,7 +424,7 @@ async fn noise_empty_response_retry_is_bounded() {
     let provider = ScriptedReflectionProvider::new(vec![ScriptedStep::Empty, ScriptedStep::Empty]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
     assert_eq!(error, ReflectionExecutionError::EmptyResponse);
@@ -445,7 +441,7 @@ async fn empty_first_response_is_retried_once_with_the_same_prompt() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let result = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let result = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap();
 
@@ -467,7 +463,7 @@ async fn empty_response_twice_fails_after_exactly_one_retry() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
 
@@ -488,7 +484,7 @@ async fn provider_error_is_never_retried() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
 
@@ -508,7 +504,7 @@ async fn cancelled_empty_response_is_not_retried() {
     let cancel = tokio_util::sync::CancellationToken::new();
     cancel.cancel();
 
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
 
@@ -527,7 +523,7 @@ async fn unparseable_output_triggers_one_repair_and_repaired_response_completes(
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let result = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let result = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap();
 
@@ -564,7 +560,7 @@ async fn repair_instruction_follows_zh_lang_wording() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    run_scripted_reflection(&provider, &history, "zh", &cancel)
+    run_scripted_reflection(&provider.port(), &history, "zh", &cancel)
         .await
         .unwrap();
 
@@ -594,7 +590,7 @@ async fn failed_repair_falls_back_to_the_original_response() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
 
@@ -622,7 +618,7 @@ async fn repair_call_provider_error_falls_back_to_original_parse_failure() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
 
@@ -644,7 +640,7 @@ async fn valid_output_calls_provider_once_without_repair() {
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    let result = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let result = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap();
 
@@ -660,6 +656,7 @@ async fn reflection_execution_preserves_request_parameters_during_retry_and_repa
         ScriptedStep::Text("not json at all".to_string()),
         ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
     ]);
+    let port = provider.port();
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
     let model = model();
@@ -671,7 +668,7 @@ async fn reflection_execution_preserves_request_parameters_during_retry_and_repa
         200,
         0,
         ReflectionInvocation {
-            provider: &provider,
+            provider: port.as_ref(),
             model: &model,
             max_tokens: 64_000,
             requested_reasoning: share::reasoning::ReasoningLevel::High,
@@ -708,7 +705,7 @@ async fn cancelled_parse_failure_skips_the_repair_call() {
     let cancel = tokio_util::sync::CancellationToken::new();
     cancel.cancel();
 
-    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+    let error = run_scripted_reflection(&provider.port(), &history, "en", &cancel)
         .await
         .unwrap_err();
 
@@ -756,11 +753,12 @@ async fn two_phase_reflection_removes_noise_then_completes() {
         ScriptedStep::Text(NOISE_STALE_JSON.to_string()),
         ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
     ]);
+    let port = provider.port();
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
     let model = model();
     let invocation = ReflectionInvocation {
-        provider: &provider,
+        provider: port.as_ref(),
         model: &model,
         max_tokens: 4_096,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,

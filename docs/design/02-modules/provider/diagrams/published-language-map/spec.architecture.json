@@ -64,24 +64,16 @@
   {
    "id": "w5",
    "type": "backend",
-   "label": "工厂·客户端",
-   "sublabel": "wire ×2 · Client · Pool",
+   "label": "调用端口·客户端",
+   "sublabel": "LlmInvokePort · Client · wire",
    "row": 2,
    "col": 4
-  },
-  {
-   "id": "w6",
-   "type": "external",
-   "label": "文本端口",
-   "sublabel": "LlmTextInvokePort",
-   "row": 2,
-   "col": 5
   },
   {
    "id": "runtime",
    "type": "frontend",
    "label": "runtime",
-   "sublabel": "ProviderPort 消费",
+   "sublabel": "LlmInvokePort 消费",
    "row": 0,
    "col": 2
   },
@@ -128,8 +120,7 @@
     "w2",
     "w3",
     "w4",
-    "w5",
-    "w6"
+    "w5"
    ],
    "pad": 40
   }
@@ -195,7 +186,8 @@
     "非流式 ProviderResponse 生产链路零外部消费（保留为 PL 完整性）",
     "构造面豁免：LlmClient / ProviderClientSpecData / TransportPool（组合根桥接）",
     "ResponseStopReason = StopReason 别名发布（避免命名冲突）",
-    "guard 88 rules（context 白名单同基线引擎）"
+    "guard 88 rules（context 白名单同基线引擎）",
+    "LlmInvokePort 唯一实现 = LlmClient（#2146 单端口：流式 verb + 文本默认方法）"
    ]
   }
  ]

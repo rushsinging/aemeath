@@ -511,8 +511,9 @@ pub enum CompactTrigger {
 /// compact 摘要的 LLM 绑定（调用方按轮注入；依赖 provider 通用端口）。
 #[derive(Clone)]
 pub struct CompactLlmBinding {
-    /// 通用 LLM 文本调用端口（runtime 注入 provider 实现）。
-    pub invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    /// 通用 LLM 调用端口（runtime 注入 provider 实现，#2146 单端口：
+    /// 文本消费走端口默认方法 `invoke_text`，取消走 `request.cancellation`）。
+    pub invoker: std::sync::Arc<dyn provider::LlmInvokePort>,
     /// 目标 compact 模型。
     pub model: provider::ModelInfo,
     /// 摘要输出上限。

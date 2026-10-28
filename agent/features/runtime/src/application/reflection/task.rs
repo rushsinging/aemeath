@@ -4,7 +4,7 @@ use super::execution::{
     execute_reflection, CompleteReflectionResult, ReflectionExecutionResultType,
     ReflectionInvocation,
 };
-use crate::ports::ProviderPort;
+use crate::ports::LlmInvokePort;
 use memory::api::reflection::{
     ReflectionErrorCategory, ReflectionExecutionIdentity, ReflectionTrigger, ReflectionWorkflow,
 };
@@ -310,7 +310,7 @@ impl ReflectionTaskAdapter {
         &self,
         request: ReflectionTaskRequest,
         config: share::config::MemoryConfig,
-        provider: std::sync::Arc<dyn ProviderPort>,
+        provider: std::sync::Arc<dyn LlmInvokePort>,
         model: provider::ModelInfo,
         max_tokens: u32,
         requested_reasoning: share::reasoning::ReasoningLevel,

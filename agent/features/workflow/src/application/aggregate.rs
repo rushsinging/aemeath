@@ -311,16 +311,24 @@ impl WorkflowAggregate {
     /// 隐式 AND-join：目标的全部静态直接前驱都 Completed 且出口决定均
     /// 选择了该目标。Failed / Stopped 前驱不满足条件（D9：不消耗 join）。
     fn and_join_satisfied(&self, target_node_id: &str) -> bool {
-        let predecessors: Vec<&str> = self
+        // 有效前驱：静态边中非 Failed / Stopped 的前驱（D9：冻结前驱被
+        // 忽略——不消耗 join，也不阻塞 Replan 后由有效前驱激活）。
+        let effective_predecessors: Vec<&str> = self
             .edges
             .iter()
             .filter(|edge| edge.to_node_id == target_node_id)
+            .filter(|edge| {
+                !matches!(
+                    self.node_status(&edge.from_node_id),
+                    Some(NodeStatus::Failed | NodeStatus::Stopped)
+                )
+            })
             .map(|edge| edge.from_node_id.as_str())
             .collect();
-        if predecessors.is_empty() {
+        if effective_predecessors.is_empty() {
             return false;
         }
-        predecessors.iter().all(|predecessor| {
+        effective_predecessors.iter().all(|predecessor| {
             self.node_states.get(*predecessor) == Some(&NodeStatus::Completed)
                 && self.node_exits.get(*predecessor).is_some_and(|exits| {
                     exits
@@ -333,6 +341,451 @@ impl WorkflowAggregate {
     /// 节点已提交的出口决定（查询视图消费）。
     pub fn node_exits(&self, node_id: &str) -> Option<Vec<SuccessorDecision>> {
         self.node_exits.get(node_id).cloned()
+    }
+
+    /// Replanning continuation 提交（#2087）：校验 + 合并图验证 + 入口激活。
+    ///
+    /// 校验固定顺序：非 Replanning 拒 → 结构（rejoin/entry 非空）→ rejoin
+    /// target 合法性（既有 Pending 非 CompleteNode，非本次新建）→ rewrites
+    /// 只作用 Pending → new_nodes 禁 CompleteNode → 合并图多入口校验 →
+    /// 提交（激活入口、退役 remove、回 Executing）。
+    pub fn replan(
+        &mut self,
+        command: crate::domain::tool_data::ReplanWorkflowCommand,
+    ) -> Result<crate::domain::tool_data::ReplanResultData, WorkflowToolError> {
+        use crate::domain::tool_data::ReplanResultData;
+
+        let cannot = |subject: &str| {
+            let _ = subject;
+            WorkflowToolError::WorkflowCannotContinue {
+                workflow_id: self.workflow_id.clone(),
+            }
+        };
+
+        if self.active_mode != Some(ActiveMode::Replanning) {
+            return Err(WorkflowToolError::WorkflowNotReplanning {
+                workflow_id: self.workflow_id.clone(),
+            });
+        }
+        if command.rejoin_edges.is_empty() || command.entry_node_ids.is_empty() {
+            return Err(cannot("rejoin_edges and entry_node_ids are both required"));
+        }
+
+        let new_ids: Vec<&str> = command
+            .new_nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect();
+
+        // new_nodes 禁含 CompleteNode（禁止创建/替换）。
+        if command
+            .new_nodes
+            .iter()
+            .any(|node| node.kind == crate::domain::NodeKind::Complete)
+        {
+            return Err(WorkflowToolError::GraphInvariantViolation {
+                reason: crate::domain::GraphInvariantReason::MultipleCompleteNodes,
+                subject: None,
+            });
+        }
+
+        // rejoin target：必须 Replan 前已存在 + 当前 Pending + 非 CompleteNode
+        // + 不在 new_nodes；from 必须属于 continuation 新节点。
+        for rejoin in &command.rejoin_edges {
+            if !new_ids.contains(&rejoin.from_node_id.as_str()) {
+                return Err(cannot("rejoin from_node must be a new continuation node"));
+            }
+            let target_ok = !new_ids.contains(&rejoin.target_node_id.as_str())
+                && self
+                    .nodes
+                    .iter()
+                    .any(|node| node.node_id == rejoin.target_node_id)
+                && self.node_status(&rejoin.target_node_id) == Some(NodeStatus::Pending)
+                && !self.nodes.iter().any(|node| {
+                    node.node_id == rejoin.target_node_id
+                        && node.kind == crate::domain::NodeKind::Complete
+                });
+            if !target_ok {
+                return Err(cannot(&format!(
+                    "illegal rejoin target {}",
+                    rejoin.target_node_id
+                )));
+            }
+        }
+
+        // rewrites：update / remove 只能作用于当前 Pending 节点。
+        if let Some(rewrites) = &command.pending_rewrites {
+            for update in &rewrites.update {
+                match self.node_status(&update.node_id) {
+                    Some(NodeStatus::Pending) => {}
+                    Some(_) => {
+                        return Err(WorkflowToolError::NodeHistoryFrozen {
+                            node_id: update.node_id.clone(),
+                        })
+                    }
+                    None => {
+                        return Err(WorkflowToolError::NodeHistoryFrozen {
+                            node_id: update.node_id.clone(),
+                        })
+                    }
+                }
+            }
+            for removed in &rewrites.remove {
+                let is_complete = self.nodes.iter().any(|node| {
+                    node.node_id == *removed && node.kind == crate::domain::NodeKind::Complete
+                });
+                let is_pending = self.node_status(removed) == Some(NodeStatus::Pending);
+                if is_complete || !is_pending {
+                    return Err(WorkflowToolError::NodeHistoryFrozen {
+                        node_id: removed.clone(),
+                    });
+                }
+            }
+        }
+
+        // ── 合并图（当前有效 DAG）──────────────────────────────────────
+        // 节点：new_nodes + 原 Pending（remove 除外，update 覆盖定义）+ 原 CompleteNode。
+        // 边：new_edges + rejoin_edges + 原 edges 中两端均在有效节点集内的边。
+        let removed_ids: Vec<&str> = command
+            .pending_rewrites
+            .as_ref()
+            .map(|rewrites| rewrites.remove.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+
+        let mut effective_nodes: Vec<crate::domain::NodeDefinition> = Vec::new();
+        for node in &self.nodes {
+            let status = self
+                .node_status(&node.node_id)
+                .unwrap_or(NodeStatus::Pending);
+            let is_effective = (status == NodeStatus::Pending
+                && !removed_ids.contains(&node.node_id.as_str()))
+                || node.kind == crate::domain::NodeKind::Complete;
+            if !is_effective {
+                continue;
+            }
+            let mut definition = node.clone();
+            if let Some(rewrites) = &command.pending_rewrites {
+                for update in &rewrites.update {
+                    if update.node_id == node.node_id {
+                        if let Some(description) = &update.description {
+                            definition.description = description.clone();
+                        }
+                        if let Some(role) = update.role {
+                            definition.role = Some(role);
+                        }
+                        if let Some(criteria) = &update.completion_criteria {
+                            definition.completion_criteria = Some(criteria.clone());
+                        }
+                    }
+                }
+            }
+            effective_nodes.push(definition);
+        }
+        let effective_ids: Vec<String> = effective_nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect();
+        effective_nodes.extend(command.new_nodes.iter().cloned());
+
+        let mut effective_edges: Vec<crate::domain::EdgeDefinition> = self
+            .edges
+            .iter()
+            .filter(|edge| {
+                effective_ids.contains(&edge.from_node_id)
+                    && effective_ids.contains(&edge.to_node_id)
+            })
+            .cloned()
+            .collect();
+        effective_edges.extend(command.new_edges.iter().cloned());
+        effective_edges.extend(command.rejoin_edges.iter().map(|rejoin| {
+            crate::domain::EdgeDefinition {
+                from_node_id: rejoin.from_node_id.clone(),
+                to_node_id: rejoin.target_node_id.clone(),
+            }
+        }));
+
+        // 多入口合并校验。
+        let all_effective: Vec<&str> = effective_nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect();
+        let complete_ids: Vec<&str> = effective_nodes
+            .iter()
+            .filter(|node| node.kind == crate::domain::NodeKind::Complete)
+            .map(|node| node.node_id.as_str())
+            .collect();
+        // 无自环。
+        if effective_edges
+            .iter()
+            .any(|edge| edge.from_node_id == edge.to_node_id)
+        {
+            return Err(cannot("self loop in merged graph"));
+        }
+        // 无环（三色 DFS）。
+        if Self::merged_graph_has_cycle(&effective_edges, &all_effective) {
+            return Err(cannot("cycle in merged graph"));
+        }
+        // 每个 entry 存在到 CompleteNode 的有向路径（BFS 每 entry）。
+        for entry in &command.entry_node_ids {
+            if !Self::merged_graph_reaches(
+                &effective_edges,
+                entry,
+                &complete_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
+            ) {
+                return Err(cannot(&format!(
+                    "entry {entry} has no path to complete node"
+                )));
+            }
+        }
+        // 非完节点至少一个后继（有效图内）。
+        let has_successor = |node_id: &str| {
+            effective_edges
+                .iter()
+                .any(|edge| edge.from_node_id == node_id)
+        };
+        for node in &effective_nodes {
+            if node.kind != crate::domain::NodeKind::Complete && !has_successor(&node.node_id) {
+                return Err(cannot(&format!(
+                    "node {} has no successor in merged graph",
+                    node.node_id
+                )));
+            }
+        }
+
+        // ── 提交 ─────────────────────────────────────────────────────
+        // 1) remove：退役 Pending（节点与其未发生边一并移出定义）。
+        if !removed_ids.is_empty() {
+            self.nodes
+                .retain(|node| !removed_ids.contains(&node.node_id.as_str()));
+            self.edges
+                .retain(|edge| !removed_ids.contains(&edge.from_node_id.as_str()));
+            for removed in &removed_ids {
+                self.node_states.remove(*removed);
+                self.node_conclusions.remove(*removed);
+                self.node_evidence.remove(*removed);
+                self.node_exits.remove(*removed);
+            }
+        }
+        // 2) update：覆盖定义。
+        if let Some(rewrites) = &command.pending_rewrites {
+            for update in &rewrites.update {
+                if let Some(definition) = self
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.node_id == update.node_id)
+                {
+                    if let Some(description) = &update.description {
+                        definition.description = description.clone();
+                    }
+                    if let Some(role) = update.role {
+                        definition.role = Some(role);
+                    }
+                    if let Some(criteria) = &update.completion_criteria {
+                        definition.completion_criteria = Some(criteria.clone());
+                    }
+                }
+            }
+        }
+        // 3) 新节点与边并入；rejoin 边并入静态 Edge。
+        for node in &command.new_nodes {
+            self.node_states
+                .insert(node.node_id.clone(), NodeStatus::Pending);
+        }
+        self.nodes.extend(command.new_nodes.iter().cloned());
+        self.edges.extend(command.new_edges.iter().cloned());
+        for rejoin in &command.rejoin_edges {
+            self.edges.push(crate::domain::EdgeDefinition {
+                from_node_id: rejoin.from_node_id.clone(),
+                to_node_id: rejoin.target_node_id.clone(),
+            });
+        }
+        // 4) 激活入口（入口即合并图无前缀依赖的新节点）。
+        let mut activated = Vec::new();
+        for entry in &command.entry_node_ids {
+            if self.node_status(entry) == Some(NodeStatus::Pending) {
+                self.node_states.insert(entry.clone(), NodeStatus::Active);
+                activated.push(entry.clone());
+            }
+        }
+        // 5) 回 Executing。
+        self.active_mode = Some(ActiveMode::Executing);
+
+        let mut applied: Vec<NodeId> = command
+            .new_nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect();
+        if let Some(rewrites) = &command.pending_rewrites {
+            applied.extend(rewrites.update.iter().map(|update| update.node_id.clone()));
+        }
+        Ok(ReplanResultData {
+            workflow_id: self.workflow_id.clone(),
+            status: self.status(),
+            active_mode: self.active_mode,
+            activated_node_ids: activated,
+            applied_node_ids: applied,
+            retired_pending_node_ids: removed_ids.iter().map(|id| id.to_string()).collect(),
+        })
+    }
+
+    /// 合并图环检测（三色 DFS）。
+    fn merged_graph_has_cycle(edges: &[crate::domain::EdgeDefinition], node_ids: &[&str]) -> bool {
+        use std::collections::HashMap;
+        let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+        for edge in edges {
+            adjacency
+                .entry(edge.from_node_id.as_str())
+                .or_default()
+                .push(edge.to_node_id.as_str());
+        }
+        #[derive(Clone, Copy, PartialEq)]
+        enum Mark {
+            White,
+            Grey,
+            Black,
+        }
+        let mut marks: HashMap<&str, Mark> = node_ids.iter().map(|id| (*id, Mark::White)).collect();
+        fn visit<'a>(
+            node_id: &'a str,
+            adjacency: &HashMap<&'a str, Vec<&'a str>>,
+            marks: &mut HashMap<&'a str, Mark>,
+        ) -> bool {
+            match marks.get(node_id) {
+                Some(Mark::Grey) => return false,
+                Some(Mark::Black) => return true,
+                _ => {}
+            }
+            marks.insert(node_id, Mark::Grey);
+            if let Some(successors) = adjacency.get(node_id) {
+                for successor in successors {
+                    if !visit(successor, adjacency, marks) {
+                        return false;
+                    }
+                }
+            }
+            marks.insert(node_id, Mark::Black);
+            true
+        }
+        for node_id in node_ids {
+            if !visit(node_id, &adjacency, &mut marks) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 合并图 BFS：从 start 是否可达任一目标节点。
+    fn merged_graph_reaches(
+        edges: &[crate::domain::EdgeDefinition],
+        start: &str,
+        targets: &[String],
+    ) -> bool {
+        use std::collections::{HashMap, HashSet, VecDeque};
+        let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+        for edge in edges {
+            adjacency
+                .entry(edge.from_node_id.as_str())
+                .or_default()
+                .push(edge.to_node_id.as_str());
+        }
+        let mut visited: HashSet<&str> = HashSet::new();
+        let mut queue: VecDeque<&str> = VecDeque::new();
+        queue.push_back(start);
+        visited.insert(start);
+        while let Some(current) = queue.pop_front() {
+            if targets.iter().any(|target| target == current) {
+                return true;
+            }
+            if let Some(successors) = adjacency.get(current) {
+                for successor in successors {
+                    if visited.insert(successor) {
+                        queue.push_back(successor);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 全量快照（#2083 持久化）。
+    pub fn to_snapshot(&self) -> crate::domain::snapshot::WorkflowSnapshotData {
+        use crate::domain::snapshot::{NodeSnapshotEntry, WorkflowSnapshotData};
+        let node_entries = self
+            .nodes
+            .iter()
+            .map(|node| NodeSnapshotEntry {
+                node_id: node.node_id.clone(),
+                status: self
+                    .node_status(&node.node_id)
+                    .unwrap_or(NodeStatus::Pending),
+                conclusion: self.node_conclusion(&node.node_id).map(str::to_owned),
+                evidence_refs: self.node_evidence(&node.node_id).unwrap_or_default(),
+                exits: self.node_exits(&node.node_id).unwrap_or_default(),
+            })
+            .collect();
+        WorkflowSnapshotData {
+            workflow_id: self.workflow_id.clone(),
+            name: self.name.clone(),
+            objective: self.objective.clone(),
+            root_node_id: self.root_node_id.clone(),
+            nodes: self.nodes.clone(),
+            edges: self.edges.clone(),
+            node_entries,
+            status: self.status,
+            active_mode: self.active_mode,
+            pending_mode: self.pending_mode,
+            updated_at: self.updated_at.clone(),
+        }
+    }
+
+    /// 从快照恢复（resume）；结构非法（如引用悬空）时 Corrupt 语义拒绝。
+    pub fn from_snapshot(
+        snapshot: crate::domain::snapshot::WorkflowSnapshotData,
+    ) -> Result<Self, crate::ports::PersistenceError> {
+        let corrupt = |subject: &str| crate::ports::PersistenceError::Corrupt(subject.to_owned());
+        let mut node_states = std::collections::HashMap::new();
+        let mut node_conclusions = std::collections::HashMap::new();
+        let mut node_evidence = std::collections::HashMap::new();
+        let mut node_exits = std::collections::HashMap::new();
+        for entry in &snapshot.node_entries {
+            let known = snapshot
+                .nodes
+                .iter()
+                .any(|node| node.node_id == entry.node_id);
+            if !known {
+                return Err(corrupt(&format!("unknown node {}", entry.node_id)));
+            }
+            node_states.insert(entry.node_id.clone(), entry.status);
+            if let Some(conclusion) = &entry.conclusion {
+                node_conclusions.insert(entry.node_id.clone(), conclusion.clone());
+            }
+            node_evidence.insert(entry.node_id.clone(), entry.evidence_refs.clone());
+            node_exits.insert(entry.node_id.clone(), entry.exits.clone());
+        }
+        for node in &snapshot.nodes {
+            node_states
+                .entry(node.node_id.clone())
+                .or_insert(NodeStatus::Pending);
+        }
+        Ok(Self {
+            workflow_id: snapshot.workflow_id,
+            name: snapshot.name,
+            objective: snapshot.objective,
+            root_node_id: snapshot.root_node_id,
+            nodes: snapshot.nodes,
+            edges: snapshot.edges,
+            node_states,
+            node_conclusions,
+            node_evidence,
+            node_exits,
+            status: snapshot.status,
+            active_mode: snapshot.active_mode,
+            pending_mode: snapshot.pending_mode,
+            updated_at: snapshot.updated_at,
+        })
     }
 
     fn ensure_not_terminal(&self) -> Result<(), WorkflowToolError> {

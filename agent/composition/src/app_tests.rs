@@ -154,20 +154,11 @@ struct CountingProviderFactory {
     build_calls: AtomicUsize,
 }
 
-struct ReportedUsageProvider {
-    invocation_count: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl runtime::ProviderPort for ReportedUsageProvider {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-    async fn invoke(
-        &self,
-        _request: provider::ProviderRequestData,
-        _cancellation: &dyn runtime::CancellationSignal,
-    ) -> Result<provider::ProviderResponseStream, ProviderError> {
-        let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
+/// 按调用序号回放脚本流（#2146：LlmInvokePort 只允许 provider 实现，
+/// 测试经 provider 脚本化端口）。
+fn reported_usage_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::LlmInvokePort> {
+    provider::test_support::scripted_llm(move |_request| {
+        let invocation_index = invocation_count.fetch_add(1, Ordering::SeqCst);
         // v3 拆帧：原 Completed{output, usage, stop} → Content… + Usage + Stop。
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
@@ -218,8 +209,8 @@ impl runtime::ProviderPort for ReportedUsageProvider {
             chunks.push(provider::ProviderResponseChunk::Usage(usage));
         }
         chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
-        Ok(Box::pin(futures_util::stream::iter(chunks)))
-    }
+        Ok(provider::test_support::stream_from_chunks(chunks))
+    })
 }
 
 struct ReportedUsageProviderFactory {
@@ -237,9 +228,7 @@ impl ReportedUsageProviderFactory {
 impl ProviderFactory for ReportedUsageProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
-            provider: Arc::new(ReportedUsageProvider {
-                invocation_count: self.invocation_count.clone(),
-            }),
+            provider: reported_usage_port(self.invocation_count.clone()),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -694,18 +683,10 @@ async fn bootstrap_assembly_has_no_scoring_notice_when_scenarios_disabled() {
 
 /// 脚本：invocation 0 返回 Bash tool call（长命令触发转后台直绑），
 /// 之后 EndTurn 收口（占位即 tool result）。
-struct DirectLogScriptProvider {
-    invocation_count: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl runtime::ProviderPort for DirectLogScriptProvider {
-    async fn invoke(
-        &self,
-        _request: provider::ProviderRequestData,
-        _cancellation: &dyn runtime::CancellationSignal,
-    ) -> Result<provider::ProviderResponseStream, ProviderError> {
-        let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
+/// 直绑后台脚本流（#2146：实现归 provider test_support）。
+fn direct_log_script_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::LlmInvokePort> {
+    provider::test_support::scripted_llm(move |_request| {
+        let invocation_index = invocation_count.fetch_add(1, Ordering::SeqCst);
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
                 vec![provider::ProviderContentData::ToolCall {
@@ -748,8 +729,8 @@ impl runtime::ProviderPort for DirectLogScriptProvider {
             chunks.push(provider::ProviderResponseChunk::Usage(usage));
         }
         chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
-        Ok(Box::pin(futures_util::stream::iter(chunks)))
-    }
+        Ok(provider::test_support::stream_from_chunks(chunks))
+    })
 }
 
 struct DirectLogProviderFactory {
@@ -759,9 +740,7 @@ struct DirectLogProviderFactory {
 impl ProviderFactory for DirectLogProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
-            provider: Arc::new(DirectLogScriptProvider {
-                invocation_count: self.invocation_count.clone(),
-            }),
+            provider: direct_log_script_port(self.invocation_count.clone()),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),

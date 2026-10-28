@@ -36,34 +36,21 @@ pub(crate) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistor
 
 /// 测试用 provider：`invoke` 恒返回有效 reflection JSON（空 output），供反思
 /// 端到端路径（生产 `execute_reflection`）驱动到 Succeeded 终态。
-pub(crate) struct StaticReflectionProvider;
-
-#[async_trait::async_trait]
-impl crate::ports::ProviderPort for StaticReflectionProvider {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-    async fn invoke(
-        &self,
-        _request: crate::ports::provider_port::ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<
-        crate::ports::provider_port::ProviderResponseStream,
-        crate::ports::provider_port::ProviderError,
-    > {
-        Ok(
-            crate::application::model::test_support::text_completion_stream(
-                r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
-                1,
-                1,
-            ),
-        )
-    }
+pub(crate) fn static_reflection_port() -> Arc<dyn crate::ports::LlmInvokePort> {
+    // #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本化端口。
+    provider::test_support::scripted_llm(|_request| {
+        Ok(provider::test_support::text_stream_with_usage(
+            r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
+            1,
+            1,
+        ))
+    })
 }
 
 /// 与 `StaticReflectionProvider` 配套的 binding（身份/能力与 fake invoke 一致）。
 pub(crate) fn static_reflection_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
-        provider: Arc::new(StaticReflectionProvider),
+        provider: static_reflection_port(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "reflection-test-model".to_string(),

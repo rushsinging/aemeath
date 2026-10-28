@@ -114,7 +114,9 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
         }
         let aggregate = WorkflowAggregate::new(spec, (self.id_generator)(), (self.clock)())?;
         let summary = Self::summary_data(&aggregate);
+        let snapshot = aggregate.to_snapshot();
         self.store.insert(aggregate)?;
+        self.store.persist_snapshot(&snapshot);
         Ok(summary)
     }
 
@@ -170,12 +172,16 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
                 aggregate.fail(&reason)?
             }
         }
-        Ok(LifecycleResultData {
+        let result = LifecycleResultData {
             workflow_id: aggregate.workflow_id.clone(),
             status: aggregate.status(),
             active_mode: aggregate.active_mode(),
             pending_mode: aggregate.pending_mode(),
-        })
+        };
+        let snapshot = aggregate.to_snapshot();
+        drop(aggregate);
+        self.store.persist_snapshot(&snapshot);
+        Ok(result)
     }
 
     async fn node_update(
@@ -207,7 +213,7 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
         } else {
             None
         };
-        Ok(NodeUpdateResultData {
+        let result = NodeUpdateResultData {
             workflow_id: aggregate.workflow_id.clone(),
             node_id,
             node_status: outcome.node_status,
@@ -216,7 +222,11 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
             activated_node_ids: outcome.activated_node_ids,
             stopped_node_ids: outcome.stopped_node_ids,
             replan_boundary,
-        })
+        };
+        let snapshot = aggregate.to_snapshot();
+        drop(aggregate);
+        self.store.persist_snapshot(&snapshot);
+        Ok(result)
     }
 
     async fn replan(
@@ -224,16 +234,13 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
         command: ReplanWorkflowCommand,
     ) -> Result<ReplanResultData, WorkflowToolError> {
         let aggregate = self.store.get(&command.workflow_id)?;
-        let aggregate = aggregate.lock().expect("aggregate lock");
-        // 非 Replanning 拒绝是真实语义；Replanning 中的 continuation 校验由
-        // #2087 实现（过渡占位，生产开关开启前不暴露）。
-        if aggregate.active_mode() != Some(crate::domain::ActiveMode::Replanning) {
-            return Err(WorkflowToolError::WorkflowNotReplanning {
-                workflow_id: command.workflow_id.clone(),
-            });
+        let mut aggregate = aggregate.lock().expect("aggregate lock");
+        let result = aggregate.replan(command);
+        let snapshot = result.as_ref().ok().map(|_| aggregate.to_snapshot());
+        drop(aggregate);
+        if let Some(snapshot) = snapshot {
+            self.store.persist_snapshot(&snapshot);
         }
-        Err(WorkflowToolError::WorkflowCannotContinue {
-            workflow_id: command.workflow_id,
-        })
+        result
     }
 }
