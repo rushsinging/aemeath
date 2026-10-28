@@ -51,6 +51,41 @@ fn env_adapter_maps_scoring_master_gate_env_into_patch() {
 }
 
 #[test]
+fn env_adapter_maps_workflow_enabled_env_into_patch() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_WORKFLOW_ENABLED".into(),
+        "1".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let workflow = patch.workflow.expect("workflow env 应产出 patch");
+    assert_eq!(workflow.enabled, Some(true), "1 应解析为开启");
+
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_WORKFLOW_ENABLED".into(),
+        "0".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let workflow = patch.workflow.expect("workflow env 应产出 patch");
+    assert_eq!(workflow.enabled, Some(false), "0 应解析为关闭");
+}
+
+#[test]
+fn workflow_config_defaults_to_disabled() {
+    let config = share::config::domain::config::Config::default();
+    assert!(!config.workflow.enabled, "Workflow 默认必须关闭");
+    let merged = share::config::domain::merge::apply_patch(
+        config.clone(),
+        share::config::domain::merge::ConfigPatch {
+            workflow: Some(share::config::domain::merge::WorkflowConfigPatch {
+                enabled: Some(true),
+            }),
+            ..Default::default()
+        },
+    );
+    assert!(merged.workflow.enabled, "patch 应能开启 Workflow");
+}
+
+#[test]
 fn env_adapter_maps_scoring_envs_into_patch() {
     let source = FakeEnv(HashMap::from([
         ("AEMEATH_SCORING_MEMORY_RERANK".into(), "true".into()),

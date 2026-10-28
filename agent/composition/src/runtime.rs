@@ -93,6 +93,15 @@ fn wire_runtime_tool_assembly(
         .into_iter()
         .filter_map(|(role, config)| config.policy.map(|policy| (role, policy)))
         .collect::<Vec<_>>();
+    // Workflow 总开关（#2085）：默认关闭，六工具不注册；开启后注入内存
+    // backend（node_update/replan 的完整实现随 #2086/#2087 就绪）。
+    let workflow_backend = snapshot.to_config().workflow.enabled.then(|| {
+        std::sync::Arc::new(workflow::InMemoryWorkflowBackend::new(
+            std::sync::Arc::new(workflow::InMemoryWorkflowStore::new()),
+            Box::new(|| uuid::Uuid::now_v7().to_string()),
+            Box::new(|| chrono::Utc::now().to_rfc3339()),
+        )) as std::sync::Arc<dyn workflow::WorkflowToolBackend>
+    });
     let tools = tools::composition::wire_builtin_catalog_execution(
         task_access,
         memory_source,
@@ -100,6 +109,7 @@ fn wire_runtime_tool_assembly(
         skill_loader,
         skill_catalog.clone(),
         background_source,
+        workflow_backend,
         role_policies,
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;

@@ -63,6 +63,7 @@ pub struct ConfigPatch {
     pub storage: Option<StorageConfigPatch>,
     #[serde(default)]
     pub scoring: Option<ScoringConfigPatch>,
+    pub workflow: Option<WorkflowConfigPatch>,
     #[serde(default)]
     pub hooks: Option<HooksConfig>,
     #[serde(default)]
@@ -101,6 +102,7 @@ impl ConfigPatch {
             && self.audit.is_none()
             && self.storage.is_none()
             && self.scoring.is_none()
+            && self.workflow.is_none()
             && self.memory.is_none()
             && self.harness.is_none()
             && self.logging.is_none()
@@ -485,6 +487,11 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     if let Some(scoring) = patch.scoring {
         base.scoring = apply_scoring_patch(base.scoring, scoring);
     }
+    if let Some(workflow) = patch.workflow {
+        if let Some(enabled) = workflow.enabled {
+            base.workflow.enabled = enabled;
+        }
+    }
     if let Some(hooks) = patch.hooks {
         base.hooks = merge_hooks(base.hooks, hooks);
     }
@@ -629,6 +636,12 @@ pub(crate) fn apply_context_patch(
         base.compact_model = crate::config::context::normalize_compact_model_selection(value);
     }
     base
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct WorkflowConfigPatch {
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

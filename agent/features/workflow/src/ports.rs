@@ -1,4 +1,4 @@
-//! Workflow BC 的出站端口：Tool 执行后端。
+//! Workflow BC 的入站端口（主端口）：六 Tool 的驱动接口。
 //!
 //! `tools` crate 的六个 adapter 只做协议解析与转发，业务校验（生命周期
 //! 状态机、Kernel 不变量、Replan 校验）由实现本端口的 Application 层承担。

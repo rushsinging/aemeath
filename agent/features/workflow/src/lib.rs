@@ -5,6 +5,7 @@
 //! 后续持久化协议（#2083）就绪，本层不做任何 IO。
 //!
 //! 设计真相源：`docs/design/02-modules/workflow/01-workflow-design.md`。
+pub mod application;
 pub mod domain;
 pub mod ports;
 
@@ -12,6 +13,7 @@ mod constants;
 
 pub(crate) use constants::LOG_TARGET;
 
+pub use application::{InMemoryWorkflowBackend, InMemoryWorkflowStore, WorkflowAggregate};
 pub use domain::{
     ActiveMode, AllowedAction, CreateWorkflowSpec, EdgeDefinition, EvidenceKind, EvidenceRef,
     FactSummaryData, GraphError, GraphInvariantReason, Kernel, LifecycleAction,

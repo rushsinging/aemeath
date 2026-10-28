@@ -92,6 +92,7 @@ pub fn wire_builtin_catalog_execution(
     background_source: Arc<
         dyn crate::domain::background_process_port::BackgroundProcessAccessSource,
     >,
+    workflow_backend: Option<Arc<dyn workflow::WorkflowToolBackend>>,
     role_policies: Vec<(String, share::config::RolePolicyConfig)>,
 ) -> Result<CatalogExecutionWiring, BuiltinWiringError> {
     let registry = Arc::new(ToolRegistry::new());
@@ -108,8 +109,8 @@ pub fn wire_builtin_catalog_execution(
                 skill_loader: skill_loader.clone(),
                 skill_catalog: skill_catalog.clone(),
                 background_source: background_source.clone(),
-                // Workflow backend 由 #2085 起注入；未注入时不注册六工具。
-                workflow_backend: None,
+                // 开关关闭（默认）或 backend 未装配时不注册六工具。
+                workflow_backend: workflow_backend.clone(),
             },
             scope_kind,
         );
