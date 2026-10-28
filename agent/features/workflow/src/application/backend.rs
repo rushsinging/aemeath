@@ -75,7 +75,7 @@ impl InMemoryWorkflowBackend {
                 completion_criteria: node.completion_criteria.clone(),
                 conclusion: aggregate.node_conclusion(&node.node_id).map(str::to_owned),
                 evidence_refs: aggregate.node_evidence(&node.node_id).unwrap_or_default(),
-                successors: Vec::new(),
+                successors: aggregate.node_exits(&node.node_id).unwrap_or_default(),
             })
             .collect();
         WorkflowDetailData {
@@ -190,32 +190,33 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
                 workflow_id: command.workflow_id.clone(),
             });
         }
-        match command.action {
-            crate::domain::tool_data::NodeAction::Fail => {
-                let node_id = command.node_id.clone();
-                let stopped = aggregate.fail_node(&node_id.clone(), command.conclusion)?;
-                let frozen_fact_refs = command.evidence_refs.clone();
-                Ok(NodeUpdateResultData {
-                    workflow_id: aggregate.workflow_id.clone(),
-                    node_id: node_id.clone(),
-                    node_status: NodeStatus::Failed,
-                    status: aggregate.status(),
-                    active_mode: aggregate.active_mode(),
-                    activated_node_ids: Vec::new(),
-                    stopped_node_ids: stopped.clone(),
-                    replan_boundary: Some(crate::domain::tool_data::ReplanBoundary {
-                        trigger_node_id: node_id.clone(),
-                        stopped_node_ids: stopped,
-                        frozen_fact_refs,
-                    }),
-                })
-            }
-            crate::domain::tool_data::NodeAction::Complete => {
-                Err(WorkflowToolError::NodeNotActive {
-                    node_id: command.node_id,
-                })
-            }
-        }
+        let node_id = command.node_id.clone();
+        let outcome = aggregate.advance_node(
+            &node_id,
+            command.action,
+            command.conclusion,
+            command.evidence_refs.clone(),
+            command.successors.clone(),
+        )?;
+        let replan_boundary = if outcome.node_status == NodeStatus::Failed {
+            Some(crate::domain::tool_data::ReplanBoundary {
+                trigger_node_id: node_id.clone(),
+                stopped_node_ids: outcome.stopped_node_ids.clone(),
+                frozen_fact_refs: command.evidence_refs,
+            })
+        } else {
+            None
+        };
+        Ok(NodeUpdateResultData {
+            workflow_id: aggregate.workflow_id.clone(),
+            node_id,
+            node_status: outcome.node_status,
+            status: aggregate.status(),
+            active_mode: aggregate.active_mode(),
+            activated_node_ids: outcome.activated_node_ids,
+            stopped_node_ids: outcome.stopped_node_ids,
+            replan_boundary,
+        })
     }
 
     async fn replan(

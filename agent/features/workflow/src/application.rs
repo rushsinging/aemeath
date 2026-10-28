@@ -7,6 +7,12 @@ mod store;
 #[cfg(test)]
 mod aggregate_tests;
 
+#[cfg(test)]
+mod advance_tests;
+
+#[cfg(test)]
+mod backend_tests;
+
 pub use aggregate::WorkflowAggregate;
 pub use backend::InMemoryWorkflowBackend;
 pub use store::InMemoryWorkflowStore;

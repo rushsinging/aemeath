@@ -5,11 +5,21 @@
 
 use std::collections::HashMap;
 
-use crate::domain::tool_data::{AllowedAction, CreateWorkflowSpec, EvidenceRef};
+use crate::domain::tool_data::{AllowedAction, CreateWorkflowSpec, EvidenceRef, SuccessorDecision};
 use crate::domain::tool_error::WorkflowToolError;
 use crate::domain::{
     ActiveMode, EdgeDefinition, Kernel, NodeDefinition, NodeId, NodeStatus, WorkflowStatus,
 };
+
+/// 一次节点推进的结果（#2086）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvanceOutcome {
+    pub node_status: NodeStatus,
+    /// 本次提交激活的后继（AND-join 全齐才出现）。
+    pub activated_node_ids: Vec<NodeId>,
+    /// 仅 fail 时非空：同一提交中转 Stopped 的并行节点。
+    pub stopped_node_ids: Vec<NodeId>,
+}
 
 /// Workflow 聚合根（内存态；持久化由 #2083 承接）。
 #[derive(Debug, Clone)]
@@ -23,6 +33,7 @@ pub struct WorkflowAggregate {
     node_states: HashMap<NodeId, NodeStatus>,
     node_conclusions: HashMap<NodeId, String>,
     node_evidence: HashMap<NodeId, Vec<EvidenceRef>>,
+    node_exits: HashMap<NodeId, Vec<SuccessorDecision>>,
     status: WorkflowStatus,
     active_mode: Option<ActiveMode>,
     pending_mode: Option<ActiveMode>,
@@ -70,6 +81,7 @@ impl WorkflowAggregate {
             node_states,
             node_conclusions: HashMap::new(),
             node_evidence: HashMap::new(),
+            node_exits: HashMap::new(),
             status: WorkflowStatus::Active,
             active_mode: Some(ActiveMode::Executing),
             pending_mode: None,
@@ -112,7 +124,7 @@ impl WorkflowAggregate {
 
     /// 受控入口：进入 Replanning。真实触发路径（node_update fail）由 #2086
     /// 接入；本方法供其复用与测试构造。
-    pub(crate) fn enter_replanning(&mut self) {
+    pub fn enter_replanning(&mut self) {
         self.active_mode = Some(ActiveMode::Replanning);
     }
 
@@ -150,7 +162,7 @@ impl WorkflowAggregate {
     /// 节点失败：目标 Active Node → Failed，其余并行 Active Node 原子转
     /// Stopped，Workflow 立即进入 Active(Replanning)（设计 §3.1）。
     /// 后继不激活、结论记录、完整推进语义由 #2086 扩展。
-    pub(crate) fn fail_node(
+    pub fn fail_node(
         &mut self,
         node_id: &str,
         conclusion: String,
@@ -180,6 +192,147 @@ impl WorkflowAggregate {
         self.node_conclusions.insert(node_id.to_owned(), conclusion);
         self.enter_replanning();
         Ok(stopped)
+    }
+
+    /// 节点推进：complete / fail + 出口决定 + 隐式 AND-join 激活（#2086）。
+    ///
+    /// 校验顺序固定（测试依赖）：Replanning 拒 → 节点状态 → successors
+    /// 形状（fail 禁带 / complete 必填 / 直接后继 / 无重复 / CompleteNode 禁）
+    /// → 状态迁移 → 激活判定。
+    pub fn advance_node(
+        &mut self,
+        node_id: &str,
+        action: crate::domain::tool_data::NodeAction,
+        conclusion: String,
+        evidence: Vec<EvidenceRef>,
+        successors: Vec<SuccessorDecision>,
+    ) -> Result<AdvanceOutcome, WorkflowToolError> {
+        if self.active_mode == Some(ActiveMode::Replanning) {
+            return Err(WorkflowToolError::WorkflowReplanning {
+                workflow_id: self.workflow_id.clone(),
+            });
+        }
+        match self.node_states.get(node_id) {
+            Some(NodeStatus::Active) => {}
+            // Stopped / Pending：无推进资格（非冻结历史语义）。
+            Some(NodeStatus::Pending | NodeStatus::Stopped) | None => {
+                return Err(WorkflowToolError::NodeNotActive {
+                    node_id: node_id.to_owned(),
+                })
+            }
+            // Completed / Failed：不可逆冻结历史。
+            Some(_) => {
+                return Err(WorkflowToolError::NodeHistoryFrozen {
+                    node_id: node_id.to_owned(),
+                })
+            }
+        }
+        let is_complete_node = self
+            .nodes
+            .iter()
+            .any(|node| node.node_id == node_id && node.kind == crate::domain::NodeKind::Complete);
+        let direct_successors: Vec<&str> = self
+            .edges
+            .iter()
+            .filter(|edge| edge.from_node_id == node_id)
+            .map(|edge| edge.to_node_id.as_str())
+            .collect();
+
+        // successors 形状校验。
+        let mut seen: Vec<&str> = Vec::new();
+        for decision in &successors {
+            if !direct_successors.contains(&decision.node_id.as_str()) {
+                return Err(WorkflowToolError::InvalidSuccessor {
+                    subject: decision.node_id.clone(),
+                });
+            }
+            if seen.contains(&decision.node_id.as_str()) {
+                return Err(WorkflowToolError::InvalidSuccessor {
+                    subject: decision.node_id.clone(),
+                });
+            }
+            seen.push(decision.node_id.as_str());
+        }
+        match action {
+            crate::domain::tool_data::NodeAction::Fail => {
+                if !successors.is_empty() {
+                    return Err(WorkflowToolError::InvalidSuccessor {
+                        subject: successors[0].node_id.clone(),
+                    });
+                }
+                let stopped = self.fail_node(node_id, conclusion)?;
+                self.node_evidence.insert(node_id.to_owned(), evidence);
+                Ok(AdvanceOutcome {
+                    node_status: NodeStatus::Failed,
+                    activated_node_ids: Vec::new(),
+                    stopped_node_ids: stopped,
+                })
+            }
+            crate::domain::tool_data::NodeAction::Complete => {
+                if is_complete_node {
+                    if !successors.is_empty() {
+                        return Err(WorkflowToolError::InvalidSuccessor {
+                            subject: successors[0].node_id.clone(),
+                        });
+                    }
+                } else if successors.is_empty() {
+                    return Err(WorkflowToolError::InvalidSuccessor {
+                        subject: node_id.to_owned(),
+                    });
+                }
+                // 状态迁移 + 记录。
+                self.node_states
+                    .insert(node_id.to_owned(), NodeStatus::Completed);
+                self.node_conclusions.insert(node_id.to_owned(), conclusion);
+                self.node_evidence.insert(node_id.to_owned(), evidence);
+                self.node_exits
+                    .insert(node_id.to_owned(), successors.clone());
+
+                // 激活判定：对每个被选中的直接后继做 AND-join 检查。
+                let mut activated = Vec::new();
+                if !is_complete_node {
+                    for decision in &successors {
+                        if self.and_join_satisfied(&decision.node_id) {
+                            self.node_states
+                                .insert(decision.node_id.clone(), NodeStatus::Active);
+                            activated.push(decision.node_id.clone());
+                        }
+                    }
+                }
+                Ok(AdvanceOutcome {
+                    node_status: NodeStatus::Completed,
+                    activated_node_ids: activated,
+                    stopped_node_ids: Vec::new(),
+                })
+            }
+        }
+    }
+
+    /// 隐式 AND-join：目标的全部静态直接前驱都 Completed 且出口决定均
+    /// 选择了该目标。Failed / Stopped 前驱不满足条件（D9：不消耗 join）。
+    fn and_join_satisfied(&self, target_node_id: &str) -> bool {
+        let predecessors: Vec<&str> = self
+            .edges
+            .iter()
+            .filter(|edge| edge.to_node_id == target_node_id)
+            .map(|edge| edge.from_node_id.as_str())
+            .collect();
+        if predecessors.is_empty() {
+            return false;
+        }
+        predecessors.iter().all(|predecessor| {
+            self.node_states.get(*predecessor) == Some(&NodeStatus::Completed)
+                && self.node_exits.get(*predecessor).is_some_and(|exits| {
+                    exits
+                        .iter()
+                        .any(|decision| decision.node_id == target_node_id)
+                })
+        })
+    }
+
+    /// 节点已提交的出口决定（查询视图消费）。
+    pub fn node_exits(&self, node_id: &str) -> Option<Vec<SuccessorDecision>> {
+        self.node_exits.get(node_id).cloned()
     }
 
     fn ensure_not_terminal(&self) -> Result<(), WorkflowToolError> {
