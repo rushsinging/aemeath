@@ -58,3 +58,33 @@ pub(crate) static PATH_PATTERN: Lazy<Regex> = Lazy::new(|| {
 
 /// 评测脚本自身的高频路径，不代表上下文事实。
 pub(crate) const NOISE_PREFIXES: [&str; 3] = ["eval/compact/", "results/", "datasets/"];
+
+/// 压缩后重问判定：只观察最近 N 个 user turn（趋势口径，见 issue #2133）。
+pub(crate) const REQUERY_WINDOW_TURNS: usize = 5;
+
+/// 压缩后重问判定：只比较实质请求，短指令（继续/好）不参与。
+pub(crate) const REQUERY_MIN_CHARS: usize = 8;
+
+/// 压缩后重问判定：字符 bigram Jaccard 阈值。
+pub(crate) const REQUERY_SIMILARITY_THRESHOLD: f64 = 0.8;
+
+/// 显式不满信号关键词（弱信号，只做趋势）。
+pub(crate) const DISSATISFACTION_MARKERS: [&str; 6] = [
+    "前面说过",
+    "不是说了",
+    "刚才说",
+    "已经说过",
+    "重复一遍",
+    "我不是说",
+];
+
+/// 系统注入的提醒块前缀：不是用户输入，不参与重问与不满判定。
+pub(crate) const INJECTION_PREFIXES: [&str; 4] = [
+    "<system-reminder",
+    "<hook-feedback",
+    "<reminder",
+    "<task-progress",
+];
+
+/// 读取类工具：路径集合差分用于衡量「压缩后重复读取」。
+pub(crate) const TOOL_READ_NAMES: [&str; 3] = ["Read", "Grep", "Glob"];

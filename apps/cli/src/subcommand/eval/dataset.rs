@@ -17,6 +17,22 @@ pub(crate) struct SessionSnapshot {
     pub(crate) previous_summary: Option<String>,
     pub(crate) committed_step_count: usize,
     pub(crate) messages: Vec<Value>,
+    /// 压缩后第一个可见 Step（`(run_id, step_id)`）；`None` 表示未压缩。
+    pub(crate) compact_start: Option<(String, String)>,
+    /// 已压缩历史被摘要覆盖的消息数。
+    pub(crate) compacted_message_count: usize,
+    /// 已压缩历史被摘要覆盖的消息数（由 steps 顺序推算，见 `compacted_message_count`）。
+    pub(crate) steps: Vec<SessionStepMeta>,
+}
+
+/// 单个 committed step 的元数据（不复制消息，只保留定位与终态）。
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SessionStepMeta {
+    pub(crate) run_id: String,
+    pub(crate) step_id: String,
+    pub(crate) finalize_cause: Option<String>,
+    pub(crate) message_count: usize,
+    pub(crate) api_input_tokens: u64,
 }
 
 fn read_json(path: &Path) -> Result<Value, String> {
@@ -78,6 +94,7 @@ pub(crate) fn load_session(dataset: &Path) -> Result<SessionSnapshot, String> {
         .unwrap_or_default();
 
     let mut messages = Vec::new();
+    let mut steps = Vec::new();
     for reference in &committed {
         let (Some(run_id), Some(step_id)) = (
             reference.get("run_id").and_then(Value::as_str),
@@ -92,9 +109,36 @@ pub(crate) fn load_session(dataset: &Path) -> Result<SessionSnapshot, String> {
         let Some(outcome) = blob.get("step").and_then(|step| step.get("outcome")) else {
             continue;
         };
-        if let Some(items) = outcome.get("messages").and_then(Value::as_array) {
-            messages.extend(items.iter().cloned());
-        }
+        // 用户输入存放在 accepted_input（outcome.messages 只有模型输出与工具结果），
+        // 还原压缩前历史时必须把它排在该 step 的最前面。
+        let mut step_messages = blob
+            .get("step")
+            .and_then(|step| step.get("accepted_input"))
+            .and_then(|input| input.get("messages"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        step_messages.extend(
+            outcome
+                .get("messages")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        messages.extend(step_messages.iter().cloned());
+        steps.push(SessionStepMeta {
+            run_id: run_id.to_string(),
+            step_id: step_id.to_string(),
+            finalize_cause: outcome
+                .get("finalize_cause")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            message_count: step_messages.len(),
+            api_input_tokens: outcome
+                .get("api_input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+        });
     }
 
     let session_id = metadata
@@ -118,14 +162,38 @@ pub(crate) fn load_session(dataset: &Path) -> Result<SessionSnapshot, String> {
         .and_then(|value| value.get("summary"))
         .and_then(Value::as_str)
         .map(str::to_string);
+    let compact_start = state
+        .get("compact")
+        .and_then(|value| value.get("start_at"))
+        .and_then(|cursor| {
+            Some((
+                cursor.get("run_id")?.as_str()?.to_string(),
+                cursor.get("step_id")?.as_str()?.to_string(),
+            ))
+        });
 
     Ok(SessionSnapshot {
         session_id,
         model,
         previous_summary,
+        compacted_message_count: compact_start
+            .as_ref()
+            .map(|start| compacted_message_count(&steps, start))
+            .unwrap_or_default(),
         committed_step_count: committed.len(),
         messages,
+        compact_start,
+        steps,
     })
+}
+
+/// 压缩点之前的消息数：`start_at` 之前的 committed steps 即被摘要覆盖的历史。
+fn compacted_message_count(steps: &[SessionStepMeta], start: &(String, String)) -> usize {
+    steps
+        .iter()
+        .take_while(|step| &(step.run_id.clone(), step.step_id.clone()) != start)
+        .map(|step| step.message_count)
+        .sum()
 }
 
 /// 列出 `<root>/*/*.dataset` 中带 manifest 的目录。

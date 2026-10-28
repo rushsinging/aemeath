@@ -196,6 +196,21 @@ pub enum CompactEvalCommands {
         max_tokens: u64,
     },
 
+    /// 生产实际反馈指标（重问率/重复读取/错误率/中断/不满信号/成本）
+    Feedback {
+        /// session 根目录（默认 ~/.agents/session）
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// 最多检查多少个 session
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+
+        /// 输出 JSON 路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
     /// 按 case 计算确定性指标（需要压缩输出）
     Score {
         /// export 产生的 case 目录

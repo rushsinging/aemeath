@@ -20,6 +20,11 @@ aemeath eval compact export \
 aemeath eval compact score \
     --cases /tmp/compact-cases --summaries /tmp/compact-summaries \
     --output eval/compact/results/run_eval.json
+
+# 生产实际反馈指标（重问率/重复读取/错误率/中断/不满/成本）
+aemeath eval compact feedback \
+    --root ~/.agents/session --limit 200 \
+    --output eval/compact/results/feedback_baseline.json
 ```
 
 `telemetry` / `export` / `score` 都是只读 + 计算；省略 `--output` 时打印到 stdout。
@@ -41,6 +46,8 @@ apps/cli/src/subcommand/eval/
   dataset.rs      session dataset 读取（manifest → members），估算口径对齐 runtime
   cases.rs        case 导出、must_keep 抽取与限流、输入侧汇总
   score.rs        确定性指标（召回/压缩率/结构健康）
+  feedback.rs     生产实际反馈指标（tail vs early 对比）
+  constants.rs    日志正则、阈值与噪声前缀
   *_tests.rs      单元测试（日志格式、dataset、抽取、分母规则）
 eval/compact/
   results/        P0/P1 基线（真实数据）
@@ -56,12 +63,17 @@ eval/compact/
 | P2 | 多模型矩阵 + REPORT | ⏳ |
 | P3 | 续接问答 e2e（判官 `--judge` 指定） | ⏳ |
 | P4 | 回归门禁（确定性指标不劣于基线） | ⏳ |
+| 生产反馈 | 重问率/重复读取/错误率/中断/不满/成本 | ✅ 已实现（趋势口径，不进 CI 门禁） |
 
 ### P1 执行面缺口
 
 `score` 目前从 `--summaries` 目录读取压缩输出（`<case_id>.summary.txt`），**不会自己跑压缩**。生产路径应接 `aemeath eval compact run`：加载 case → 真实 runtime 装配 → 压缩 → 输出 summary 与 `CompactMetricsData`。该子命令未落地前 P2/P3 不出正式结论。
 
-## 生产实际反馈指标（规划，见 issue #2133）
+## 生产实际反馈指标（已实现：`eval compact feedback`）
+
+数据来源：真实 session dataset。压缩点取 `session-state.compact.start_at`，
+`early` = 被摘要覆盖的 committed steps，`tail` = 压缩后保留的 steps；
+用户输入取自 `step.accepted_input.messages`（`outcome.messages` 只有模型输出与工具结果）。
 
 | 指标 | 含义 | 数据来源 |
 |---|---|---|
@@ -74,6 +86,8 @@ eval/compact/
 | 触发时机比 | `early_tokens` / 阈值、剩余窗口占用 | context.log + 预算公式 |
 
 约束：全部标注「趋势/代理」，不做单点因果断言；不做 CI 硬门禁，只做周报/版本对比。
+实现细节：重问只比较 ≥8 字符的实质请求（短指令不参与），观察压缩后最近 5 个 user turn，
+字符 bigram Jaccard ≥0.8 记命中；`<system-reminder>` / `<hook-feedback>` 等注入块不计入用户输入。
 
 ## 基线（真实数据）
 
@@ -91,9 +105,19 @@ eval/compact/
 
 | 指标 | p50 | p95 | max |
 |---|---|---|---|
-| message_count | 597 | 8196 | 8196 |
-| estimated_tokens | 479342 | 2286859 | 2286859 |
+| message_count | 648 | 8365 | 8365 |
+| estimated_tokens | 479560 | 2296755 | 2296755 |
 | must_keep（上限 200） | 200 | 200 | 200 |
+
+### 生产反馈（199 个 session，13 个有压缩）
+
+| 指标 | 值 |
+|---|---|
+| 重问率（压缩后 5 turn 内、≥8 字符） | 0.0（无命中） |
+| 压缩后重复读取路径 | 310 |
+| 工具错误率 early → tail | 7.13% → 5.94% |
+| 压缩后中断 steps | 3 |
+| 显式不满信号 | 1 |
 
 ## 判官口径（P3）
 
