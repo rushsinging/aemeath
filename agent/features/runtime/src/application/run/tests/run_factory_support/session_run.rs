@@ -11,7 +11,7 @@ use crate::domain::agent_run::RunSpec;
 use crate::ports::{ContextPorts, ProviderBindingData};
 
 use super::doubles::{
-    fake_provider_binding, FakeContextPort, FakeHookPort, FakePolicyPort, FakeReflectionHistory,
+    fake_policy, fake_provider_binding, FakeContextPort, FakeHookPort, FakeReflectionHistory,
     FakeToolCatalog, FakeToolExecution, RecordingEventSink,
 };
 
@@ -158,7 +158,7 @@ impl SessionRunFixtureBuilder {
             hooks: Arc::new(FakeHookPort),
             tool_catalog: Arc::new(FakeToolCatalog),
             tool_execution: Arc::new(FakeToolExecution),
-            policy: Arc::new(FakePolicyPort),
+            policy: fake_policy(),
             scoring_for_recall: None,
             scoring_for_skill_match: None,
             context_factory: None,

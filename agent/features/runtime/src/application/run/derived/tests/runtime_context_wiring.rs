@@ -4,7 +4,7 @@ use crate::application::run::context::{RunInputBufferHandle, RunUsageTracker, Ru
 use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{Policy, PolicyDecisionData, PolicyRequestData};
+use crate::ports::Policy;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -28,20 +28,15 @@ impl tools::ToolCatalogPort for SpyToolCatalog {
     }
 }
 
-/// A policy spy.
-struct SpyPolicy {
-    called: Arc<AtomicBool>,
-}
-
-impl Policy for SpyPolicy {
-    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
-        self.called.store(true, Ordering::SeqCst);
-        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
-    }
+/// A policy spy（#2146：实现权归 policy crate，脚本记录调用）。
+fn spy_policy(called: Arc<AtomicBool>) -> Arc<dyn crate::ports::Policy> {
+    policy::test_support::scripted_policy(
+        move |_request| {
+            called.store(true, Ordering::SeqCst);
+            policy::PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
+        },
+        policy::PolicyModeData::Standard,
+    )
 }
 
 /// Shared production-factory context construction for wiring tests.
@@ -94,9 +89,7 @@ fn make_spy_parent_context(
         called: cat_called,
     });
 
-    let policy: Arc<dyn Policy> = Arc::new(SpyPolicy {
-        called: policy_called,
-    });
+    let policy: Arc<dyn Policy> = spy_policy(policy_called);
 
     let (ctx, _factory) = assemble_test_context(catalog, ports.execution(), policy, run_config);
     ctx
@@ -212,9 +205,7 @@ async fn derived_context_integration_verifies_policy_catalog() {
     let (parent_ctx, shared_factory) = assemble_test_context(
         catalog,
         tool_ports.execution(),
-        Arc::new(SpyPolicy {
-            called: policy_called.clone(),
-        }),
+        spy_policy(policy_called.clone()),
         RunConfigSnapshot::capture(test_config_snapshot()),
     );
 
@@ -344,9 +335,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     let (parent_ctx, shared_factory) = assemble_test_context(
         catalog,
         tool_ports.execution(),
-        Arc::new(SpyPolicy {
-            called: policy_called.clone(),
-        }),
+        spy_policy(policy_called.clone()),
         RunConfigSnapshot::capture(test_config_snapshot()),
     );
 
@@ -561,9 +550,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     let (parent_ctx, shared_factory) = assemble_test_context(
         catalog,
         tool_ports.execution(),
-        Arc::new(SpyPolicy {
-            called: Arc::new(AtomicBool::new(false)),
-        }),
+        spy_policy(Arc::new(AtomicBool::new(false))),
         RunConfigSnapshot::capture(test_config_snapshot()),
     );
     // Hold the parent cancel scope so we can cancel from the test.

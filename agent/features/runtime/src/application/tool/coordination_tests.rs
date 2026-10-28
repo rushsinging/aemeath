@@ -2,10 +2,9 @@ use super::*;
 use crate::application::hook::outcome_mapper::{RuntimeHookDirective, RuntimeHookReason};
 use crate::application::loop_engine::ToolGuardDecision;
 use crate::application::tool::agent::ToolCall;
-use policy::{
-    ApprovalSubjectData, Policy, PolicyDecisionData, PolicyReasonData, PolicyRequestData,
-};
+use policy::{ApprovalSubjectData, Policy, PolicyDecisionData, PolicyReasonData};
 use sdk::ids::ToolCallId;
+use std::sync::Arc;
 use std::sync::Mutex;
 use tools::composition::TestCatalogExecutionFactory;
 use tools::published::execution::ToolExecutionContext;
@@ -41,45 +40,49 @@ fn p6_4_production_uses_explicit_tool_round_boundaries() {
 }
 
 struct RecordingPolicy {
-    names: Mutex<Vec<String>>,
+    names: std::sync::Arc<Mutex<Vec<String>>>,
     decision: Option<PolicyDecisionData>,
 }
 
 impl RecordingPolicy {
+    /// #2146：实现权归 policy crate；替身经其 test_support。
+    fn port(&self) -> std::sync::Arc<dyn crate::ports::Policy> {
+        let names = Arc::clone(&self.names);
+        let decision = self.decision.clone();
+        policy::test_support::scripted_policy(
+            move |request| {
+                names
+                    .lock()
+                    .unwrap()
+                    .push(request.tool_name().as_str().to_string());
+                decision.clone().unwrap_or_else(|| {
+                    if request.tool_name().as_str() == "Denied" {
+                        policy::PolicyDecisionData::Deny {
+                            reason: policy::PolicyReasonData::RestrictedTool,
+                        }
+                    } else {
+                        policy::PolicyDecisionData::Allow(
+                            share::tools_vocab::AuthorizationContext::STANDARD,
+                        )
+                    }
+                })
+            },
+            policy::PolicyModeData::Standard,
+        )
+    }
+
     fn allow_except_denied() -> Self {
         Self {
-            names: Mutex::new(Vec::new()),
+            names: std::sync::Arc::new(Mutex::new(Vec::new())),
             decision: None,
         }
     }
 
     fn returning(decision: PolicyDecisionData) -> Self {
         Self {
-            names: Mutex::new(Vec::new()),
+            names: std::sync::Arc::new(Mutex::new(Vec::new())),
             decision: Some(decision),
         }
-    }
-}
-
-impl Policy for RecordingPolicy {
-    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
-        self.names
-            .lock()
-            .unwrap()
-            .push(request.tool_name().as_str().to_string());
-        self.decision.clone().unwrap_or_else(|| {
-            if request.tool_name().as_str() == "Denied" {
-                PolicyDecisionData::Deny {
-                    reason: PolicyReasonData::RestrictedTool,
-                }
-            } else {
-                PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
-            }
-        })
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
     }
 }
 
@@ -145,7 +148,7 @@ async fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
     let prepared = prepare_tool_round(
         &calls,
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
@@ -166,20 +169,25 @@ async fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
 }
 
 struct AllowAllRecordingPolicy {
-    names: Mutex<Vec<String>>,
+    names: std::sync::Arc<Mutex<Vec<String>>>,
 }
 
-impl Policy for AllowAllRecordingPolicy {
-    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
-        self.names
-            .lock()
-            .unwrap()
-            .push(request.tool_name().as_str().to_string());
-        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
+impl AllowAllRecordingPolicy {
+    /// #2146：实现权归 policy crate；替身经其 test_support。
+    fn port(&self) -> std::sync::Arc<dyn crate::ports::Policy> {
+        let names = std::sync::Arc::clone(&self.names);
+        policy::test_support::scripted_policy(
+            move |request| {
+                names
+                    .lock()
+                    .unwrap()
+                    .push(request.tool_name().as_str().to_string());
+                policy::PolicyDecisionData::Allow(
+                    share::tools_vocab::AuthorizationContext::ALLOW_ALL,
+                )
+            },
+            policy::PolicyModeData::Standard,
+        )
     }
 }
 
@@ -193,7 +201,7 @@ async fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
     );
     let catalog = factory.build(ctx).catalog();
     let policy = AllowAllRecordingPolicy {
-        names: Mutex::new(Vec::new()),
+        names: std::sync::Arc::new(Mutex::new(Vec::new())),
     };
     let call = call("Allowed", 0);
     let prepared = prepare_tool_round(
@@ -204,7 +212,7 @@ async fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
             },
         )],
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
@@ -235,7 +243,7 @@ async fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_rea
     let prepared = prepare_tool_round(
         &[(call("Bash", 0), ToolGuardDecision::Allow)],
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
@@ -265,7 +273,7 @@ async fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
     let prepared = prepare_tool_round(
         &[(call("Unknown", 0), ToolGuardDecision::Allow)],
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
@@ -299,7 +307,7 @@ async fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() 
     let prepared = prepare_tool_round(
         &[(call("Read", 0), ToolGuardDecision::Allow)],
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
@@ -416,7 +424,7 @@ fn restore_tool_call_order_uses_original_call_order() {
 /// Policy that records every evaluation and returns configurable decisions
 /// based on the tool name.
 struct HookTestPolicy {
-    eval_count: Mutex<usize>,
+    eval_count: std::sync::Arc<Mutex<usize>>,
     authorization: share::tools_vocab::AuthorizationContext,
 }
 
@@ -427,33 +435,35 @@ impl HookTestPolicy {
 
     fn with_authorization(authorization: share::tools_vocab::AuthorizationContext) -> Self {
         Self {
-            eval_count: Mutex::new(0),
+            eval_count: Arc::new(Mutex::new(0)),
             authorization,
         }
     }
 
+    /// #2146：实现权归 policy crate；替身经其 test_support。
+    fn port(&self) -> Arc<dyn crate::ports::Policy> {
+        let eval_count = Arc::clone(&self.eval_count);
+        let authorization = self.authorization;
+        policy::test_support::scripted_policy(
+            move |request| {
+                *eval_count.lock().unwrap() += 1;
+                match request.tool_name().as_str() {
+                    "Denied" => policy::PolicyDecisionData::Deny {
+                        reason: policy::PolicyReasonData::RestrictedTool,
+                    },
+                    "ApprovalRequired" => policy::PolicyDecisionData::RequireApproval {
+                        reason: policy::PolicyReasonData::RestrictedTool,
+                        subject: policy::ApprovalSubjectData::UserInteraction,
+                    },
+                    _ => policy::PolicyDecisionData::Allow(authorization),
+                }
+            },
+            policy::PolicyModeData::Standard,
+        )
+    }
+
     fn eval_count(&self) -> usize {
         *self.eval_count.lock().unwrap()
-    }
-}
-
-impl Policy for HookTestPolicy {
-    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
-        *self.eval_count.lock().unwrap() += 1;
-        match request.tool_name().as_str() {
-            "Denied" => PolicyDecisionData::Deny {
-                reason: PolicyReasonData::RestrictedTool,
-            },
-            "ApprovalRequired" => PolicyDecisionData::RequireApproval {
-                reason: PolicyReasonData::RestrictedTool,
-                subject: ApprovalSubjectData::UserInteraction,
-            },
-            _ => PolicyDecisionData::Allow(self.authorization),
-        }
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
     }
 }
 
@@ -516,7 +526,7 @@ fn hook_directive_continue_returns_continue_without_context() {
         &original,
         RuntimeHookDirective::Continue,
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -546,7 +556,7 @@ fn hook_directive_context_preserves_context_in_continue() {
             context: "extra guidance".to_string(),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -577,7 +587,7 @@ fn hook_directive_block_preserves_structured_reason() {
             reason: reason.clone(),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -608,7 +618,7 @@ fn hook_directive_updated_input_valid_passes_schema_and_policy() {
             input: serde_json::json!({"path": "/tmp/file"}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -647,7 +657,7 @@ fn hook_directive_updated_input_preserves_policy_authorization() {
             input: serde_json::json!({"path": "/tmp/file"}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -677,7 +687,7 @@ fn hook_directive_updated_input_invalid_returns_invalid_input_with_original_call
             input: serde_json::json!({"wrong_field": "x"}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -708,7 +718,7 @@ fn hook_directive_updated_input_policy_denied_returns_denied() {
             input: serde_json::json!({"index": 99}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -736,7 +746,7 @@ fn hook_directive_updated_input_policy_approval_required_returns_approval_requir
             input: serde_json::json!({"index": 42}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -766,7 +776,7 @@ fn hook_directive_context_and_input_preserves_context_in_ready() {
             input: serde_json::json!({"path": "/updated"}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -802,7 +812,7 @@ fn hook_directive_updated_input_tool_not_in_catalog_returns_denied() {
             input: serde_json::json!({"any": "thing"}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -832,7 +842,7 @@ fn hook_directive_context_and_input_invalid_schema_returns_invalid_input() {
             input: serde_json::json!({"missing": "required"}),
         },
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
@@ -967,7 +977,7 @@ async fn prepare_with_triage(
 async fn triage_escalation_moves_allow_to_require_approval() {
     let policy = RecordingPolicy::allow_except_denied();
     let triage = triage_policy_with(0.95);
-    let prepared = prepare_with_triage(&policy, Some(&triage)).await;
+    let prepared = prepare_with_triage(policy.port().as_ref(), Some(&triage)).await;
     assert!(prepared.executable.is_empty(), "高风险工具调用不得直接放行");
     assert_eq!(prepared.require_approval.len(), 1);
     assert!(
@@ -981,7 +991,7 @@ async fn triage_escalation_moves_allow_to_require_approval() {
 #[tokio::test]
 async fn triage_absent_keeps_original_behavior() {
     let policy = RecordingPolicy::allow_except_denied();
-    let prepared = prepare_with_triage(&policy, None).await;
+    let prepared = prepare_with_triage(policy.port().as_ref(), None).await;
     assert_eq!(prepared.executable.len(), 1);
     assert!(prepared.require_approval.is_empty());
 }
@@ -1002,7 +1012,7 @@ async fn triage_never_relaxes_deny() {
     let prepared = prepare_tool_round(
         &calls,
         &catalog,
-        &policy,
+        policy.port().as_ref(),
         Some(&triage),
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),

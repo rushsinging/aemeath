@@ -107,7 +107,7 @@ pub enum PolicyDecisionData {
 }
 
 /// 唯一策略角色：决策 + 当前模式（两个读行为，同源——mode 是 evaluate 的决策输入）。
-pub trait Policy: Send + Sync {
+pub trait Policy: crate::sealed::Sealed + Send + Sync {
     fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData;
     fn current_mode(&self) -> PolicyModeData;
 }

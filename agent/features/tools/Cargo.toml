@@ -8,7 +8,7 @@ test-harness = []
 
 [dependencies]
 share = { path = "../../shared" }
-project = { path = "../project" }
+project = { path = "../project", features = ["test-harness"] }
 memory = { path = "../memory" }
 systemone = { path = "../systemone" }
 task = { path = "../task" }

@@ -4,7 +4,6 @@ use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{Policy, PolicyDecisionData, PolicyRequestData};
 use std::sync::Arc;
 use std::time::Duration;
 use tools::{ToolCatalogPort, ToolProfileName};
@@ -37,15 +36,9 @@ impl tools::published::execution::ToolExecutionPort for FakeToolExec {
     }
 }
 
-pub(super) struct FakePolicyPort;
-impl Policy for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
-        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
-    }
+/// #2146：实现权归 policy crate。
+pub(super) fn fake_policy_port() -> std::sync::Arc<dyn crate::ports::Policy> {
+    policy::test_support::allow_all_standard()
 }
 
 pub(super) struct FakeReflHist;
@@ -313,7 +306,7 @@ fn make_test_factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         Arc::new(FakeToolCat),
         Arc::new(FakeToolExec),
-        Arc::new(FakePolicyPort),
+        fake_policy_port(),
         Arc::new(FakeReflHist),
         crate::application::run::test_task_access(),
         Arc::new(FakeHookPort),

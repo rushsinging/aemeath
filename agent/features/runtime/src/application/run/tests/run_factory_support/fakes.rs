@@ -4,10 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
-use crate::ports::{
-    Policy, PolicyDecisionData, PolicyRequestData, ProviderBindingData, ProviderBuildSpecData,
-    ProviderError, ProviderFactory,
-};
+use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderError, ProviderFactory};
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
 use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
@@ -135,16 +132,9 @@ impl ToolExecutionPort for FakeToolExecution {
     }
 }
 
-pub(crate) struct FakePolicyPort;
-
-impl Policy for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
-        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
-    }
+/// #2146：Policy 实现权归 policy crate；替身经其 test_support。
+pub(crate) fn fake_policy() -> std::sync::Arc<dyn crate::ports::Policy> {
+    policy::test_support::allow_all_standard()
 }
 
 pub(crate) struct FakeReflectionHistory;

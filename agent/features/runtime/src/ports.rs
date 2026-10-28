@@ -39,8 +39,6 @@ pub use context_port::{
     ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
 };
 pub use policy_port::Policy;
-#[cfg(test)]
-pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
     LlmInvokePort, ModelInfo, ProviderRequestData, StopReason, TokenUsageData,

@@ -19,7 +19,7 @@ pub(crate) mod sealed {
 }
 
 /// 测试实现面（跨 crate 测试经 dev feature）。
-#[cfg(any(test, feature = "dev"))]
+#[cfg(any(test, feature = "dev", feature = "test-harness"))]
 pub mod test_support;
 
 mod adapters;
