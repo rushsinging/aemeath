@@ -582,6 +582,7 @@ dependencies = [
  "provider",
  "runtime",
  "sdk",
+ "serde",
  "serde_json",
  "share",
  "storage",

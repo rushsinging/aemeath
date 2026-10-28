@@ -21,6 +21,10 @@ aemeath eval compact score \
     --cases /tmp/compact-cases --summaries /tmp/compact-summaries \
     --output eval/compact/results/run_eval.json
 
+# P1 执行面：对导出的 case 跑一次真实压缩（走生产装配与管线）
+aemeath eval compact run \
+    --cases /tmp/compact-cases --output-dir /tmp/compact-run --limit 3
+
 # 真实摘要质量（must_keep 召回 + 压缩率，用已落盘摘要，不重跑压缩）
 aemeath eval compact recall \
     --root ~/.agents/session --limit 200 \
@@ -65,7 +69,7 @@ eval/compact/
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P0 | 遥测基线 | ✅ Rust 实现，10 月真实数据已入库 |
-| P1 | case 导出 + 确定性指标 + 单测 | ✅ Rust 实现；**压缩输出执行面待接** |
+| P1 | case 导出 + 确定性指标 + 单测 + 真实压缩执行面 | ✅ Rust 实现（metrics 待 #2136） |
 | P2 | 多模型矩阵 + REPORT | ⏳ |
 | P3 | 续接问答 e2e（判官 `--judge` 指定） | ⏳ |
 | P4 | 回归门禁（确定性指标不劣于基线） | ⏳ |
