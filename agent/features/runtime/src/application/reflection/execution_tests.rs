@@ -488,7 +488,14 @@ async fn provider_error_is_never_retried() {
         .await
         .unwrap_err();
 
-    assert_eq!(error, ReflectionExecutionError::LlmCall);
+    assert!(
+        matches!(error, ReflectionExecutionError::LlmCall(_)),
+        "expected LlmCall with detail, got {error:?}"
+    );
+    assert!(
+        error.detail().is_some_and(|detail| !detail.is_empty()),
+        "LlmCall MUST carry the upstream detail"
+    );
     assert_eq!(provider.requests().len(), 2);
 }
 

@@ -18,10 +18,11 @@ pub struct CompleteReflectionResult {
     pub output_tokens: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ReflectionExecutionError {
-    #[error("reflection LLM call failed")]
-    LlmCall,
+    /// LLM 调用失败：携带截断后的原始错误文案（诊断与 history `error_detail` 同源）。
+    #[error("reflection LLM call failed: {0}")]
+    LlmCall(String),
     #[error("reflection LLM returned an empty response")]
     EmptyResponse,
     #[error("reflection response could not be parsed")]
@@ -39,9 +40,9 @@ pub enum ReflectionExecutionError {
 pub type ReflectionExecutionResultType<T> = Result<T, ReflectionExecutionError>;
 
 impl ReflectionExecutionError {
-    pub(crate) fn category(self) -> ReflectionErrorCategory {
+    pub(crate) fn category(&self) -> ReflectionErrorCategory {
         match self {
-            Self::LlmCall => ReflectionErrorCategory::LlmCall,
+            Self::LlmCall(_) => ReflectionErrorCategory::LlmCall,
             Self::EmptyResponse => ReflectionErrorCategory::EmptyResponse,
             Self::Unparseable => ReflectionErrorCategory::Parse,
             Self::InvalidSuggestion => ReflectionErrorCategory::InvalidSuggestion,
@@ -49,6 +50,34 @@ impl ReflectionExecutionError {
             Self::WriteLock => ReflectionErrorCategory::Apply,
             Self::Apply => ReflectionErrorCategory::Apply,
         }
+    }
+
+    /// 失败明细（诊断用）：随 history 记录落盘；无详情的类别返回 `None`。
+    pub(crate) fn detail(&self) -> Option<String> {
+        match self {
+            Self::LlmCall(detail) => Some(detail.clone()),
+            _ => None,
+        }
+    }
+
+    /// LLM 调用失败收口（单一实现点）：截断原文、落 warn 日志、返回带明细的错误。
+    ///
+    /// 只记 `error_category=llm` 无法回答「哪一步、上游说了什么」——文案直接进
+    /// 日志与 history `error_detail`，与 compact 降级日志同一口径。
+    fn llm_call(message: impl std::fmt::Display) -> Self {
+        const DETAIL_MAX_CHARS: usize = 400;
+        let text = message.to_string();
+        let detail = if text.chars().count() <= DETAIL_MAX_CHARS {
+            text
+        } else {
+            let truncated: String = text.chars().take(DETAIL_MAX_CHARS).collect();
+            format!("{truncated}…")
+        };
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "[reflection_llm_call_failed] detail={detail:?}"
+        );
+        Self::LlmCall(detail)
     }
 }
 
@@ -147,6 +176,7 @@ pub(crate) async fn execute_reflection(
                 identity,
                 error.category(),
                 started.elapsed().as_millis() as u64,
+                error.detail(),
             )
             .await?;
             return Err(error);
@@ -179,6 +209,7 @@ pub(crate) async fn execute_reflection(
                 identity,
                 error.category(),
                 started.elapsed().as_millis() as u64,
+                error.detail(),
             )
             .await?;
             return Err(error);
@@ -330,7 +361,7 @@ pub(super) async fn call_provider(
         .provider
         .invoke_stream(invocation.model, &request)
         .await
-        .map_err(|_| ReflectionExecutionError::LlmCall)?;
+        .map_err(ReflectionExecutionError::llm_call)?;
     // 流式端口 → 本地聚合到终止帧（非流式语义经 Stop 帧获得）。
     let mut text = String::new();
     let mut usage = provider::TokenUsageData::default();
@@ -354,12 +385,14 @@ pub(super) async fn call_provider(
                     usage.output_tokens.unwrap_or(0),
                 ));
             }
-            provider::ProviderResponseChunk::Error(_) => {
-                return Err(ReflectionExecutionError::LlmCall);
+            provider::ProviderResponseChunk::Error(error) => {
+                return Err(ReflectionExecutionError::llm_call(error));
             }
         }
     }
-    Err(ReflectionExecutionError::LlmCall)
+    Err(ReflectionExecutionError::llm_call(
+        "provider stream ended before the terminal frame",
+    ))
 }
 
 /// 去噪与归纳共用有界请求/修复策略；只应用去噪结果中的过时条目。
@@ -431,8 +464,8 @@ mod error_boundary_tests {
     #[test]
     fn provider_failures_have_stable_display() {
         assert_eq!(
-            ReflectionError::LlmCall.to_string(),
-            "reflection LLM call failed"
+            ReflectionError::LlmCall("upstream 429".to_string()).to_string(),
+            "reflection LLM call failed: upstream 429"
         );
     }
 }
