@@ -299,6 +299,9 @@ impl WorkspaceWriter for WorkspaceService {
     }
 }
 
+// #2146 密封解锁（生产实现）。
+impl crate::sealed::Sealed for WorkspaceService {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,6 +678,3 @@ mod tests {
         assert_eq!(service.current_path_base(), before);
     }
 }
-
-// #2146 密封解锁（生产实现）。
-impl crate::sealed::Sealed for WorkspaceService {}

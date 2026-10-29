@@ -14,7 +14,7 @@ pub use crate::domain::*;
 #[async_trait]
 /// Window 构建端口：组装本轮上下文（注入内容 + 预算分配）。
 #[async_trait]
-pub trait ContextWindowPort: Send + Sync {
+pub trait ContextWindowPort: crate::sealed::Sealed + Send + Sync {
     async fn build_window(
         &self,
         request: &ContextRequestData,
@@ -23,7 +23,7 @@ pub trait ContextWindowPort: Send + Sync {
 
 /// 压缩端口：L1–L5 压缩决策与执行。
 #[async_trait]
-pub trait ContextCompactPort: Send + Sync {
+pub trait ContextCompactPort: crate::sealed::Sealed + Send + Sync {
     async fn needs_compaction(
         &self,
         request: &ContextRequestData,
@@ -37,7 +37,7 @@ pub trait ContextCompactPort: Send + Sync {
 
 /// 回写端口：历史 append、回执推进与查询。
 #[async_trait]
-pub trait ContextAppendPort: Send + Sync {
+pub trait ContextAppendPort: crate::sealed::Sealed + Send + Sync {
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 
     /// 会话当前提交修订号：Step 收口提交的 CAS 基准。
@@ -102,7 +102,7 @@ pub trait ContextAppendPort: Send + Sync {
 /// Reminder 管线控制面（07-reminder-pipeline.md）：Run 生命周期句柄与
 /// typed 事件推送。注入决策在 build_window 内部按 policy 自动完成，
 /// Runtime 不感知 placement / dedup / 预算。
-pub trait ReminderControlPort: Send + Sync {
+pub trait ReminderControlPort: crate::sealed::Sealed + Send + Sync {
     /// Run 启动：为该 Run 创建 reminder 管线（同 RunId 重复创建替换旧管线）。
     fn create_reminder_pipeline(&self, _run_id: RunId, _sources: Vec<Arc<dyn ReminderSource>>) {}
 

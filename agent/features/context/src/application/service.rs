@@ -609,3 +609,6 @@ pub(crate) fn render_user_input_timestamp_prefix(
     *first_text = format!("{prefix}{first_text}");
     Some(rendered)
 }
+
+// #2146 密封解锁（生产聚合服务）。
+impl crate::sealed::Sealed for ContextApplicationService {}

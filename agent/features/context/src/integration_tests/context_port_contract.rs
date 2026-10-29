@@ -236,3 +236,6 @@ fn published_contract_uses_context_message_not_provider_wire_content() {
     fn accepts_context_messages(_: Vec<ContextMessage>) {}
     accepts_context_messages(vec![Message::user("provider-neutral")]);
 }
+
+// #2146 密封解锁（契约 harness）。
+impl crate::sealed::Sealed for FakeContextPort {}

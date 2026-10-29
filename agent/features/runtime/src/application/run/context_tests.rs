@@ -10,7 +10,7 @@ use crate::application::run::context::{
 };
 use crate::application::run::creation::RunInstance;
 use crate::application::run::run_factory_support::{
-    doubles::{FakeContextPort, RecordingEventSink},
+    doubles::{fake_context_service, RecordingEventSink},
     SessionRunFixture,
 };
 use crate::ports::ContextPorts;
@@ -33,7 +33,7 @@ fn runtime_context_production_model_has_no_flat_run_context_bindings() {
 
 #[test]
 fn main_runtime_context_preserves_injected_port_identity() {
-    let context_port: ContextPorts = ContextPorts::from_service(Arc::new(FakeContextPort));
+    let context_port: ContextPorts = ContextPorts::from_service(fake_context_service());
     let fixture = SessionRunFixture::builder()
         .with_context_port(context_port)
         .build();

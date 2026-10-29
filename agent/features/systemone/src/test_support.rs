@@ -21,12 +21,13 @@ pub fn scripted_scoring(
     })
 }
 
+/// 评分脚本：按 (state, questions) 产出答案或不可用。
+pub type ScoringAnswerFn = dyn Fn(&ScoringState, &[ScoringQuestion]) -> Result<Vec<ScoringAnswer>, ScoringUnavailable>
+    + Send
+    + Sync;
+
 struct ScriptedScoring {
-    answer: Box<
-        dyn Fn(&ScoringState, &[ScoringQuestion]) -> Result<Vec<ScoringAnswer>, ScoringUnavailable>
-            + Send
-            + Sync,
-    >,
+    answer: Box<ScoringAnswerFn>,
 }
 
 #[async_trait::async_trait]

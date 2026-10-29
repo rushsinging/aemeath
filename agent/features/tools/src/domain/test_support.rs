@@ -189,15 +189,16 @@ pub fn scripted_tool_execution(
     })
 }
 
+/// 工具执行脚本（同步形态）。
+type SyncToolScript = dyn Fn(
+        &crate::published::execution::ToolInvocation,
+        &crate::domain::context::ToolExecutionContext,
+    ) -> crate::published::execution::ToolExecutionOutcome
+    + Send
+    + Sync;
+
 struct ScriptedToolExecution {
-    script: std::sync::Arc<
-        dyn Fn(
-                &crate::published::execution::ToolInvocation,
-                &crate::domain::context::ToolExecutionContext,
-            ) -> crate::published::execution::ToolExecutionOutcome
-            + Send
-            + Sync,
-    >,
+    script: std::sync::Arc<SyncToolScript>,
 }
 
 #[async_trait::async_trait]

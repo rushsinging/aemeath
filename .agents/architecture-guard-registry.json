@@ -2823,26 +2823,20 @@
         {
           "trait_name": "ContextAppendPort",
           "owner_crate": "context",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "ContextCompactPort",
           "owner_crate": "context",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "ContextWindowPort",
           "owner_crate": "context",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "EvidenceStreamPort",
@@ -2895,10 +2889,10 @@
         {
           "trait_name": "MemoryOpener",
           "owner_crate": "memory",
-          "type": "fake-pending",
+          "type": "injected-host",
           "allowed_impl_crates": [
-            "c",
-            "r"
+            "context",
+            "runtime"
           ]
         },
         {
@@ -2964,10 +2958,8 @@
         {
           "trait_name": "ReminderControlPort",
           "owner_crate": "context",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "r"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "ReminderSource",
@@ -3030,9 +3022,9 @@
         {
           "trait_name": "TaskPersist",
           "owner_crate": "task",
-          "type": "fake-pending",
+          "type": "injected-host",
           "allowed_impl_crates": [
-            "c"
+            "context"
           ]
         },
         {

@@ -107,7 +107,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
         &self,
         _key: &StorageKeyData,
     ) -> Result<PromoteOutcomeData, StorageError> {
-        Ok(self.promote_outcome.lock().unwrap().clone())
+        Ok(*self.promote_outcome.lock().unwrap())
     }
     async fn quarantine(
         &self,

@@ -11,7 +11,7 @@ use crate::domain::agent_run::RunSpec;
 use crate::ports::{ContextPorts, ProviderBindingData};
 
 use super::doubles::{
-    fake_policy, fake_provider_binding, fake_tool_execution, FakeContextPort, FakeHookPort,
+    fake_context_service, fake_policy, fake_provider_binding, fake_tool_execution, FakeHookPort,
     FakeReflectionHistory, FakeToolCatalog, RecordingEventSink,
 };
 
@@ -145,7 +145,7 @@ pub(crate) struct SessionRunFixtureBuilder {
 impl SessionRunFixtureBuilder {
     pub(crate) fn new() -> Self {
         Self {
-            context_port: ContextPorts::from_service(Arc::new(FakeContextPort)),
+            context_port: ContextPorts::from_service(fake_context_service()),
             provider: fake_provider_binding(),
             interaction: Arc::new(InteractionBridge::new()),
             reasoning: Arc::new(std::sync::Mutex::new(

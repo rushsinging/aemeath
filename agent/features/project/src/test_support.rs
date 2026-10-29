@@ -13,11 +13,14 @@ use share::session_types::WorkspaceId;
 
 /// 纯内存工作区替身：路径解析 + 越界校验 + 可变 current 目录 +
 /// `change_directory`（`enter`/`exit` 恒拒——NonGit 语义）。
+/// enter 调用参数记录（path/branch/base）。
+pub type EnterCall = (Option<PathBuf>, Option<String>, Option<String>);
+
 #[derive(Clone)]
 pub struct FakeWorkspace {
     pub(crate) initial_root: PathBuf,
     pub(crate) current: Arc<Mutex<PathBuf>>,
-    pub(crate) enter_calls: Arc<Mutex<Vec<(Option<PathBuf>, Option<String>, Option<String>)>>>,
+    pub(crate) enter_calls: Arc<Mutex<Vec<EnterCall>>>,
 }
 
 impl FakeWorkspace {
@@ -31,7 +34,7 @@ impl FakeWorkspace {
     }
 
     /// 记录到的 enter 调用参数（每次一行）。
-    pub fn enter_calls(&self) -> Vec<(Option<PathBuf>, Option<String>, Option<String>)> {
+    pub fn enter_calls(&self) -> Vec<EnterCall> {
         self.enter_calls
             .lock()
             .expect("fake workspace lock")

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
 use crate::application::loop_engine::chat::{
@@ -7,51 +6,6 @@ use crate::application::loop_engine::chat::{
 use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderError, ProviderFactory};
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
-
-pub(crate) struct FakeContextPort;
-
-#[async_trait::async_trait]
-#[async_trait]
-impl crate::ports::ContextWindowPort for FakeContextPort {
-    async fn build_window(
-        &self,
-        _request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-}
-#[async_trait]
-impl crate::ports::ContextCompactPort for FakeContextPort {
-    async fn needs_compaction(
-        &self,
-        _request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-
-    async fn compact(
-        &self,
-        _request: &crate::ports::CompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-}
-#[async_trait]
-impl crate::ports::ContextAppendPort for FakeContextPort {
-    async fn clear_session(
-        &self,
-        _session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
-        Ok(())
-    }
-
-    async fn append_and_persist(
-        &self,
-        _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage("fake".into()))
-    }
-}
 
 /// 恒取消的测试调用端口（#2146：实现归 provider test_support）。
 pub(crate) fn fake_provider_port() -> Arc<dyn crate::ports::LlmInvokePort> {
@@ -219,11 +173,16 @@ impl ChatEventSink for RecordingEventSink {
     }
 }
 
-impl crate::ports::ReminderControlPort for FakeContextPort {}
-
 /// #2146：ToolExecutionPort 实现权归 tools crate；替身经其脚本端口。
 pub(crate) fn fake_tool_execution() -> Arc<dyn tools::published::execution::ToolExecutionPort> {
     tools::test_support::scripted_tool_execution(|_invocation, _context| {
         tools::published::execution::ToolExecutionOutcome::success_text("fake")
     })
+}
+
+/// #2146：Context 四端口实现权归 context crate；恒错替身经其 test_support。
+pub(crate) fn fake_context_service() -> std::sync::Arc<context::test_support::StubContextService> {
+    std::sync::Arc::new(context::test_support::StubContextService::unavailable(
+        "fake",
+    ))
 }

@@ -26,7 +26,7 @@ impl Policy for ScriptedPolicy {
         (self.evaluate)(request)
     }
     fn current_mode(&self) -> PolicyModeData {
-        self.mode.clone()
+        self.mode
     }
 }
 

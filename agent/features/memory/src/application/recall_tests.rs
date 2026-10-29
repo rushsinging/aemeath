@@ -4,8 +4,6 @@ use super::*;
 use crate::adapters::MemoryPolicy;
 use crate::domain::{MemoryCategory, MemoryId, MemoryLayer, MemorySource};
 
-/// 概率按 content 是否含关键词分配的评分桩。
-
 async fn memory_with(entries: Vec<&str>) -> crate::adapters::InMemoryMemory {
     let memory = crate::adapters::InMemoryMemory::new(MemoryPolicy {
         max_entries: 50,

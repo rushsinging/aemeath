@@ -154,9 +154,8 @@ fn stub_scoring(
             systemone::ScoringQuestion::Choice { criteria, .. } => criteria.len(),
             _ => panic!("重排应使用 Choice 题型"),
         };
-        let preferred = outcome
-            .clone()
-            .map_err(|kind| systemone::ScoringUnavailable::new(kind, "stub 故障"))?;
+        let preferred =
+            outcome.map_err(|kind| systemone::ScoringUnavailable::new(kind, "stub 故障"))?;
         let probabilities: Vec<(String, f64)> = (0..criterion_count)
             .map(|index| {
                 let probability = if index == preferred {
@@ -1065,8 +1064,6 @@ async fn open_with_clock_logs_enter_and_failure_exit_without_memory_content() {
 }
 
 // --- System One 重排（RERANK）------------------------------------------------
-
-/// 固定应答的评分桩：`preferred` 序号的候选给 0.9，其余平分 0.1。
 
 fn rerank_service(
     entries: Vec<MemoryEntry>,

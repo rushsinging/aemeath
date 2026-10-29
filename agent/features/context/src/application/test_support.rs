@@ -4,9 +4,8 @@
 //! `MainSessionWiring` 协调器已迁 runtime（`SessionSwitchCoordinator`），
 //! 本模块只保留与 wiring 无关的 port mock。
 
-use std::sync::Arc;
-
 pub use crate::adapters::AtomicBlobSessionManagement;
+use std::sync::Arc;
 
 use crate::domain::session::CanonicalSession;
 use crate::ports::SessionManagementPort;
@@ -185,3 +184,8 @@ impl SessionManagementPort for ScriptedSessionManagement {
 // #2146 密封解锁。
 impl crate::sealed::Sealed for UnavailableSessionManagement {}
 impl crate::sealed::Sealed for ScriptedSessionManagement {}
+
+pub use super::context_test_support::RecordedContextCall;
+pub use super::context_test_support::{
+    recording_context_over, recording_context_shared, StubContextService,
+};
