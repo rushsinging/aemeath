@@ -142,22 +142,26 @@ fn questions_prompt(early_text: &str, question_count: usize) -> String {
         "你在为一次上下文压缩验收出题。下面是按时间顺序排列的早期历史（已被压缩为摘要）。\n\
          把它按顺序均分为三段：early（最老）、mid、recent（临近压缩点），每段出 {per_epoch} 道题。\n\
          \n\
-         【出题标准】只考「语义决策类」事实——压缩后应当仍然知道的东西：\n\
-         - decision：用户/团队拍板的方案与理由\n\
-         - tradeoff：被否决的替代方案及否决原因\n\
-         - constraint：硬约束（必须做/禁止做什么）\n\
-         - objective：目标与验收标准\n\
-         - root_cause：根因结论（为什么坏）\n\
+         【事实类型 kind 与每段配额】\n\
+         - constraint（硬约束，≥3 道）：继续工作时必须遵守/禁止做的事\n\
+         - objective（目标与验收标准，≥2 道）\n\
+         - tradeoff（被否决的方案及原因，≥2 道）：防止后续重走弯路\n\
+         - root_cause（根因结论，≥1 道）\n\
+         - state（当前状态，≥2 道）：做到哪一步、还有哪些未完成、下一步是什么\n\
+         - decision（拍板方案，≤{decision_cap} 道）\n\
          \n\
-         【禁止出题】以下「环境读取类」事实易失真，一律不得作为题目：\n\
-         文件路径/行号、目录名、worktree/分支名、commit sha、PR/issue 编号、\n\
-         命令输出片段、日志原文、临时 id、函数签名细节、代码块内容。\n\
-         答案必须是对话中用户或决策明确陈述过的语义结论，不能来自工具输出。\n\
+         【禁止出题】\n\
+         - 环境读取类：文件路径/行号、目录名、worktree/分支名、commit sha、\n\
+           PR/issue 编号、命令输出、日志原文、临时 id、函数签名、代码块内容；\n\
+         - 流程性治理细节：issue 如何处置、处置模板、分组/分轨计划、合入节奏、\n\
+           登记表比例统计、review 轮次安排——这类是过程记录，不是继续工作所需事实。\n\
+         答案必须来自对话中用户或决策明确陈述过的语义结论，不能来自工具输出。\n\
          \n\
-         每题标注来源段与事实类型，并附简短标准答案。\n\
+         每题标注来源段与 kind，并附简短标准答案。\n\
          只输出一个 JSON 数组，元素形如\n\
-         {{\"epoch\":\"early|mid|recent\",\"kind\":\"decision|tradeoff|constraint|objective|root_cause\",\"question\":\"...\",\"gold\":\"...\"}}。\n\
-         不要 Markdown 围栏、不要解释。\n\n<early_history>\n{early_text}\n</early_history>"
+         {{\"epoch\":\"early|mid|recent\",\"kind\":\"constraint|objective|tradeoff|root_cause|state|decision\",\"question\":\"...\",\"gold\":\"...\"}}。\n\
+         不要 Markdown 围栏、不要解释。\n\n<early_history>\n{early_text}\n</early_history>",
+        decision_cap = per_epoch / 2,
     )
 }
 
@@ -308,13 +312,12 @@ pub(crate) async fn generate(
         let Some(questions) = parse_json_items(&raw) else {
             return Err(format!("{case_id}: 出题输出解析失败"));
         };
-        let items: Vec<QuizItem> = questions
+        let mut items: Vec<QuizItem> = questions
             .into_iter()
             .filter(|item| {
                 !item.question.trim().is_empty()
                     && item.gold.as_deref().is_some_and(|g| !g.trim().is_empty())
             })
-            .take(question_count)
             .map(|mut item| {
                 if item.epoch.is_none() {
                     item.epoch = Some("unknown".to_string());
@@ -322,6 +325,17 @@ pub(crate) async fn generate(
                 item
             })
             .collect();
+        // 近重复去重：同义题占分母会稀释正确率（字符 bigram Jaccard >= 0.8）。
+        let mut deduped: Vec<QuizItem> = Vec::new();
+        for item in items.drain(..) {
+            let duplicated = deduped
+                .iter()
+                .any(|kept| super::feedback::jaccard(&kept.question, &item.question) >= 0.8);
+            if !duplicated {
+                deduped.push(item);
+            }
+        }
+        let items: Vec<QuizItem> = deduped.into_iter().take(question_count).collect();
         if items.is_empty() {
             return Err(format!("{case_id}: 出题结果为空"));
         }
