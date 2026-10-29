@@ -23,6 +23,10 @@ pub(crate) struct CaseRun {
     recent_messages: Option<usize>,
     quality: Option<String>,
     elapsed_ms: Option<u64>,
+    /// 输入规模估算（与压缩触发口径一致），用于速度归一化。
+    estimated_input_tokens: Option<u64>,
+    /// 速度指标：毫秒 / 1K 输入 token（消除输入规模差异，跨 session 可比）。
+    ms_per_1k_input_tokens: Option<f64>,
     error: Option<String>,
 }
 
@@ -34,7 +38,40 @@ pub(crate) struct RunReport {
     skipped: usize,
     binding_model: Option<String>,
     context_size: Option<usize>,
+    /// 单次真实压缩耗时分布（ms）。
+    elapsed_ms_p50: Option<u64>,
+    elapsed_ms_p95: Option<u64>,
+    elapsed_ms_max: Option<u64>,
+    /// 速度归一化均值：ms / 1K 输入 token。
+    ms_per_1k_input_tokens_mean: Option<f64>,
     cases: Vec<CaseRun>,
+}
+
+/// 速度派生：毫秒 / 1K 输入 token；输入为 0 时返回 None（不可比）。
+pub(crate) fn ms_per_1k_input_tokens(elapsed_ms: u64, estimated_input_tokens: u64) -> Option<f64> {
+    if estimated_input_tokens == 0 {
+        None
+    } else {
+        Some(elapsed_ms as f64 * 1000.0 / estimated_input_tokens as f64)
+    }
+}
+
+fn percentile_u64(values: &[u64], quantile: f64) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let index = ((sorted.len() as f64 * quantile) as usize).min(sorted.len() - 1);
+    Some(sorted[index])
+}
+
+fn mean(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<f64>() / values.len() as f64)
+    }
 }
 
 pub(crate) fn load_case_json_lines(
@@ -98,15 +135,22 @@ pub(crate) async fn run(
             .unwrap_or_default()
             .to_string();
         report.cases_total += 1;
-        let message_count = load_case_json_lines(
+        let messages = load_case_json_lines(
             &cases_dir.join(
                 case.get("messages_path")
                     .and_then(|value| value.as_str())
                     .unwrap_or_default(),
             ),
         )
-        .map(|messages| messages.len())
         .unwrap_or_default();
+        let message_count = messages.len();
+        let estimated_input_tokens = crate::subcommand::eval::dataset::estimate_tokens(
+            &messages
+                .iter()
+                .map(crate::subcommand::eval::dataset::message_text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
         let started = Instant::now();
         match run_case(case, &cases_dir, model.as_deref(), reasoning.as_deref()).await {
             Ok(outcome) => {
@@ -117,6 +161,7 @@ pub(crate) async fn run(
                 std::fs::write(&summary_path, &outcome.summary)
                     .map_err(|error| format!("写 {}: {error}", summary_path.display()))?;
                 report.succeeded += 1;
+                let speed = ms_per_1k_input_tokens(elapsed_ms, estimated_input_tokens);
                 report.cases.push(CaseRun {
                     case_id: case_id.clone(),
                     status: "succeeded".to_string(),
@@ -125,6 +170,8 @@ pub(crate) async fn run(
                     recent_messages: Some(outcome.recent_message_count),
                     quality: Some(outcome.quality.clone()),
                     elapsed_ms: Some(elapsed_ms),
+                    estimated_input_tokens: Some(estimated_input_tokens),
+                    ms_per_1k_input_tokens: speed,
                     error: None,
                 });
                 println!(
@@ -144,11 +191,29 @@ pub(crate) async fn run(
                     recent_messages: None,
                     quality: None,
                     elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                    estimated_input_tokens: Some(estimated_input_tokens),
+                    ms_per_1k_input_tokens: None,
                     error: Some(error),
                 });
             }
         }
     }
+
+    let durations: Vec<u64> = report
+        .cases
+        .iter()
+        .filter_map(|case| case.elapsed_ms)
+        .collect();
+    report.elapsed_ms_p50 = percentile_u64(&durations, 0.50);
+    report.elapsed_ms_p95 = percentile_u64(&durations, 0.95);
+    report.elapsed_ms_max = durations.iter().copied().max();
+    report.ms_per_1k_input_tokens_mean = mean(
+        &report
+            .cases
+            .iter()
+            .filter_map(|case| case.ms_per_1k_input_tokens)
+            .collect::<Vec<_>>(),
+    );
 
     let json = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
     write_or_print(Some(&output_dir.join("run_summary.json")), &json)

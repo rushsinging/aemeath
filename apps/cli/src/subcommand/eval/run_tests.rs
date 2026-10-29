@@ -48,6 +48,8 @@ fn report_counts_succeeded_and_failed() {
         recent_messages: Some(5),
         quality: Some("Llm".to_string()),
         elapsed_ms: Some(1000),
+        estimated_input_tokens: Some(10_000),
+        ms_per_1k_input_tokens: Some(100.0),
         error: None,
     });
     assert_eq!(report.cases_total, 2);
@@ -59,4 +61,21 @@ fn tempfile_dir(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
+}
+
+#[test]
+fn speed_metric_normalizes_by_input_tokens() {
+    // 44.5 万 token、550s → 约 1236 ms / 1K token。
+    let speed = ms_per_1k_input_tokens(550_120, 445_078).expect("speed");
+    assert!((speed - 1236.0).abs() < 1.0, "speed={speed}");
+    assert!(ms_per_1k_input_tokens(1000, 0).is_none());
+}
+
+#[test]
+fn percentile_and_mean_ignore_empty() {
+    assert_eq!(percentile_u64(&[], 0.5), None);
+    assert_eq!(percentile_u64(&[10, 20, 30], 0.5), Some(20));
+    assert_eq!(percentile_u64(&[10], 1.0), Some(10));
+    assert!(mean(&[]).is_none());
+    assert_eq!(mean(&[1.0, 3.0]), Some(2.0));
 }
