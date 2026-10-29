@@ -17,6 +17,9 @@ mod backend_tests;
 mod replan_tests;
 
 #[cfg(test)]
+mod acceptance_tests;
+
+#[cfg(test)]
 mod persistence_tests;
 
 pub use aggregate::WorkflowAggregate;
