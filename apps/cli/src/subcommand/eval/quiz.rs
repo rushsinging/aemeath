@@ -35,6 +35,9 @@ pub(crate) struct QuizItem {
     /// 事实来源段：early（最老，经历最多轮摘要）/ mid / recent（临近压缩点）。
     #[serde(default)]
     pub(crate) epoch: Option<String>,
+    /// 事实类型：decision / constraint / objective / tradeoff / root_cause。
+    #[serde(default)]
+    pub(crate) kind: Option<String>,
 }
 
 /// 一次 quiz 各阶段的 token 用量（#2133：开思考的成本经统计呈现）。
@@ -137,10 +140,23 @@ fn questions_prompt(early_text: &str, question_count: usize) -> String {
     let per_epoch = question_count.div_ceil(3).max(1);
     format!(
         "你在为一次上下文压缩验收出题。下面是按时间顺序排列的早期历史（已被压缩为摘要）。\n\
-         把它按顺序均分为三段：early（最老）、mid、recent（临近压缩点），每段出 {per_epoch} 道\n\
-         只有读了该段才能答出的事实题（目标、决策、改动文件、关键约束、未完成事项），\n\
-         每题标注来源段并附简短标准答案。\n\
-         只输出一个 JSON 数组，元素形如 {{\"epoch\":\"early|mid|recent\",\"question\":\"...\",\"gold\":\"...\"}}。\n\
+         把它按顺序均分为三段：early（最老）、mid、recent（临近压缩点），每段出 {per_epoch} 道题。\n\
+         \n\
+         【出题标准】只考「语义决策类」事实——压缩后应当仍然知道的东西：\n\
+         - decision：用户/团队拍板的方案与理由\n\
+         - tradeoff：被否决的替代方案及否决原因\n\
+         - constraint：硬约束（必须做/禁止做什么）\n\
+         - objective：目标与验收标准\n\
+         - root_cause：根因结论（为什么坏）\n\
+         \n\
+         【禁止出题】以下「环境读取类」事实易失真，一律不得作为题目：\n\
+         文件路径/行号、目录名、worktree/分支名、commit sha、PR/issue 编号、\n\
+         命令输出片段、日志原文、临时 id、函数签名细节、代码块内容。\n\
+         答案必须是对话中用户或决策明确陈述过的语义结论，不能来自工具输出。\n\
+         \n\
+         每题标注来源段与事实类型，并附简短标准答案。\n\
+         只输出一个 JSON 数组，元素形如\n\
+         {{\"epoch\":\"early|mid|recent\",\"kind\":\"decision|tradeoff|constraint|objective|root_cause\",\"question\":\"...\",\"gold\":\"...\"}}。\n\
          不要 Markdown 围栏、不要解释。\n\n<early_history>\n{early_text}\n</early_history>"
     )
 }

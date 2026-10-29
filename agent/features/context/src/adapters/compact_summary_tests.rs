@@ -59,6 +59,7 @@ fn summary_test_binding(
         max_output_tokens: 1024,
         compact_context_window: window,
         reasoning: share::reasoning::ReasoningLevel::Off,
+        max_concurrency: 5,
     }
 }
 

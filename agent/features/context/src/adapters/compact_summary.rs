@@ -4,9 +4,10 @@
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
 use super::constants::{
-    COMPACT_PROMPT, COMPACT_REFRESH_PROMPT, FALLBACK_PREVIOUS_SUMMARY_CAP,
-    FALLBACK_TEXT_BLOCK_MAX_BYTES, FALLBACK_TOOL_RESULT_MAX_BYTES, MAIN_USER_OBJECTIVE_MAX_CHARS,
-    MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS, REFRESH_BUDGET_RATIO,
+    COMPACT_PROMPT, COMPACT_PROVIDER_RETRY_LIMIT, COMPACT_REFRESH_PROMPT,
+    FALLBACK_PREVIOUS_SUMMARY_CAP, FALLBACK_TEXT_BLOCK_MAX_BYTES, FALLBACK_TOOL_RESULT_MAX_BYTES,
+    MAIN_USER_OBJECTIVE_MAX_CHARS, MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS,
+    REFRESH_BUDGET_RATIO,
 };
 use crate::domain::compact::llm_error::CompactLlmError;
 use crate::domain::compact::{
@@ -833,21 +834,40 @@ async fn llm_generate(
     request: Vec<Message>,
     cancel: &CancellationToken,
 ) -> Result<provider::LlmTextOutputData, CompactLlmError> {
-    let output = binding
-        .invoker
-        .invoke_text(&binding.model, &{
-            let mut request = compact_invoke_request(
-                &binding.model.model,
-                request,
-                binding.max_output_tokens,
-                binding.reasoning,
-            );
-            // 取消真相源单通道（#2146）：端口无独立取消参数。
-            request.cancellation = cancel.clone();
-            request
-        })
-        .await
-        .map_err(CompactLlmError::Provider)?;
+    // retryable 错误（限流/上游抖动）指数退避重试；非 retryable 直接上抛，
+    // 由块级降级负责兜底（#2133）。
+    let mut attempt = 0u32;
+    let output = loop {
+        attempt += 1;
+        let mut wire_request = compact_invoke_request(
+            &binding.model.model,
+            request.clone(),
+            binding.max_output_tokens,
+            binding.reasoning,
+        );
+        // 取消真相源单通道（#2146）：端口无独立取消参数。
+        wire_request.cancellation = cancel.clone();
+        match binding
+            .invoker
+            .invoke_text(&binding.model, &wire_request)
+            .await
+        {
+            Ok(output) => break output,
+            Err(error) if error.retryable && attempt <= COMPACT_PROVIDER_RETRY_LIMIT => {
+                let delay = error
+                    .retry_after
+                    .unwrap_or_else(|| std::time::Duration::from_millis(500 * u64::from(attempt)));
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] llm 调用可重试失败 attempt={attempt}/{} delay_ms={} error={error}",
+                    COMPACT_PROVIDER_RETRY_LIMIT,
+                    delay.as_millis(),
+                );
+                tokio::time::sleep(delay).await;
+            }
+            Err(error) => return Err(CompactLlmError::Provider(error)),
+        }
+    };
     // token 用量（#2133）：成本可见——开思考的代价经 usage 统计，而不是关思考。
     if let Some(usage) = output.token_usage.as_ref() {
         log::info!(
@@ -1295,12 +1315,11 @@ async fn compact_messages_map_reduce(
     let total_chunks = chunks.len();
     // map: 每个 chunk 独立摘要，按块数决定并发上限（3-5）。
     // 块数越多并发越高，但不超过 5；避免同时打爆 provider。
-    let concurrency = match total_chunks {
-        0 => 1,
-        1..=3 => 3,
-        4..=6 => 4,
-        _ => 5,
-    };
+    // 并发 = min(配置上限, 块数)；块数少时不必超过块数。
+    let concurrency = binding
+        .max_concurrency
+        .clamp(1, 10)
+        .min(total_chunks.max(1));
     log::info!(
         target: crate::LOG_TARGET,
         "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，单块目标 {chunk_target}，并发上限 {concurrency}",

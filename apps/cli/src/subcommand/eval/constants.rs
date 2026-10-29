@@ -98,14 +98,14 @@ pub(crate) const QUIZ_SOURCE_TOKEN_BUDGET: usize = 800_000;
 pub(crate) const ANSWER_SOURCE_TOKEN_BUDGET: usize = 200_000;
 
 /// 续接问答（P3）：题数按 early 规模浮动——每个该 token 数出 1 题
-/// （814K early → 20 题）。
-pub(crate) const QUIZ_TOKENS_PER_QUESTION: usize = 40_000;
+/// （814K early → 达到上限 60 题）。
+pub(crate) const QUIZ_TOKENS_PER_QUESTION: usize = 5_000;
 
 /// 续接问答（P3）：题数下限。
 pub(crate) const QUIZ_MIN_QUESTIONS: usize = 10;
 
-/// 续接问答（P3）：题数上限。
-pub(crate) const QUIZ_MAX_QUESTIONS: usize = 30;
+/// 续接问答（P3）：题数上限（三段各 20 题）。
+pub(crate) const QUIZ_MAX_QUESTIONS: usize = 60;
 
 /// 读取类工具：路径集合差分用于衡量「压缩后重复读取」。
 pub(crate) const TOOL_READ_NAMES: [&str; 3] = ["Read", "Grep", "Glob"];

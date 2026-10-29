@@ -308,18 +308,38 @@ impl ConfigSnapshot {
     ///
     /// 再次归一化空白，避免绕过 `ContextConfig` 反序列化的程序化构造
     /// 让空白 selection 被误当成"已配置"。
-    /// Compact 调用的推理档位；未配置或非法值回退 `Max`。
+    /// Compact 调用的推理档位；未配置或非法值回退 `Low`。
     ///
-    /// 实测（01a182e6，19 题固定题库）：low 68% → high 79% → max 89%，
-    /// early 段 0.57→0.71→0.86；档位提升质量显著，代价是 2.7× 耗时。
-    /// 默认取 max；成本敏感场景显式 `--reasoning low` 覆盖。
+    /// 实测（01a182e6，60 题语义决策类题库）：low 55/60、high 56/60、
+    /// max 54/60 —— 三档都在 90%+，档位差异不显著，而成本差 2.7×。
+    /// （早前 19 题含环境读取类题目时曾出现 68%→89% 的假差异：
+    /// 路径/函数签名/分支名本就该被摘要抽象掉，不应作为质量判据。）
+    /// 默认 low；需要更深细节时可 `--reasoning max` 覆盖。
     pub fn context_compact_reasoning(&self) -> crate::reasoning::ReasoningLevel {
         self.inner
             .context
             .compact_reasoning
             .as_deref()
             .and_then(crate::reasoning::ReasoningLevel::parse)
-            .unwrap_or(crate::reasoning::ReasoningLevel::Max)
+            .unwrap_or(crate::reasoning::ReasoningLevel::Low)
+    }
+
+    /// Compact 输出预算（token）；未配置默认 65536（max 档思考需要足够预算）。
+    pub fn context_compact_max_output_tokens(&self) -> u32 {
+        self.inner
+            .context
+            .compact_max_output_tokens
+            .filter(|value| *value > 0)
+            .unwrap_or(64 * 1024)
+    }
+
+    /// Compact map 并发上限（1..=10，默认 5）。
+    pub fn context_compact_concurrency(&self) -> usize {
+        self.inner
+            .context
+            .compact_concurrency
+            .unwrap_or(5)
+            .clamp(1, 10)
     }
 
     pub fn context_compact_model(&self) -> Option<&str> {

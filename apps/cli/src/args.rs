@@ -176,8 +176,8 @@ pub enum QuizCommands {
         #[arg(long)]
         model: String,
 
-        /// 出题推理档位（缺省 max，跟随全局默认）
-        #[arg(long, default_value = "max")]
+        /// 出题推理档位（缺省 low，跟随全局默认）
+        #[arg(long, default_value = "low")]
         reasoning: String,
 
         /// 最多为多少个 case 出题
@@ -211,8 +211,8 @@ pub enum QuizCommands {
         #[arg(long)]
         judge: String,
 
-        /// 答题推理档位（缺省 max，跟随全局默认）
-        #[arg(long, default_value = "max")]
+        /// 答题推理档位（缺省 low，跟随全局默认）
+        #[arg(long, default_value = "low")]
         reasoning: String,
 
         /// 判卷推理档位（缺省跟随 --reasoning；判卷质量优先时可单独抬高）
@@ -325,7 +325,7 @@ pub enum CompactEvalCommands {
         model: Option<String>,
 
         /// 压缩调用的推理档位（off/minimal/low/medium/high/xhigh/max）；
-        /// 缺省跟随 context.compact_reasoning（未配置=max）
+        /// 缺省跟随 context.compact_reasoning（未配置=low）
         #[arg(long)]
         reasoning: Option<String>,
     },
