@@ -67,9 +67,9 @@ pub struct ContextConfig {
     pub compact_model: Option<String>,
     /// Compact 调用的推理档位（off/minimal/low/medium/high/xhigh/max）。
     ///
-    /// 默认 `off`：压缩是结构化 JSON 批量任务，高思考档会把输出预算耗在
-    /// thinking 上（与 reflection 采样口径同因）；经 server_effort_map 归并后
-    /// 即各厂可执行的最低档。需要实验/调优时按模型覆盖。
+    /// 未配置默认 `Max`：压缩是语义任务，默认开满思考（用户拍板）；成本经
+    /// usage 统计呈现，而非关思考省成本；经 server_effort_map 归并后为各厂
+    /// 可执行的对应档。需要实验/调优时按模型覆盖。
     #[serde(default, alias = "compactReasoning")]
     pub compact_reasoning: Option<String>,
 }

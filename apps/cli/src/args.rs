@@ -239,7 +239,7 @@ pub enum CompactEvalCommands {
         model: Option<String>,
 
         /// 压缩调用的推理档位（off/minimal/low/medium/high/xhigh/max）；
-        /// 缺省跟随 context.compact_reasoning（未配置=high）
+        /// 缺省跟随 context.compact_reasoning（未配置=max）
         #[arg(long)]
         reasoning: Option<String>,
     },
@@ -263,8 +263,8 @@ pub enum CompactEvalCommands {
         #[arg(long)]
         judge: String,
 
-        /// 出题/答题/判卷的推理档位；缺省 high（语义任务开思考，成本经 usage 统计）
-        #[arg(long, default_value = "high")]
+        /// 出题/答题/判卷的推理档位；缺省 max（语义任务开满思考，成本经 usage 统计）
+        #[arg(long, default_value = "max")]
         reasoning: String,
 
         /// 最多评多少个 case
