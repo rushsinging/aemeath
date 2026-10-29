@@ -139,9 +139,7 @@ impl ContextCoordinator {
         task_snapshot: Option<task::CompactTaskSnapshotData>,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
-            Some(std::sync::Arc::new(
-                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
-            ));
+            Some(crate::application::loop_engine::compaction::compact_progress_adapter(progress));
         self.ports
             .compact
             .compact(&CompactRequestData {
@@ -166,9 +164,7 @@ impl ContextCoordinator {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
-            Some(std::sync::Arc::new(
-                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
-            ));
+            Some(crate::application::loop_engine::compaction::compact_progress_adapter(progress));
         self.ports
             .compact
             .compact(&CompactRequestData {

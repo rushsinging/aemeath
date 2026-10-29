@@ -63,9 +63,11 @@ pub enum CompactWorkData {
 }
 
 /// Compact 进度回调（domain 单一真相）。
-pub trait CompactProgressFn: Send + Sync {
+pub trait CompactProgressFn: crate::sealed::Sealed + Send + Sync {
     fn emit(&self, stage: CompactStageData, work: CompactWorkData);
 }
+
+impl<F> crate::sealed::Sealed for F where F: Fn(CompactStageData, CompactWorkData) + Send + Sync {}
 
 impl<F> CompactProgressFn for F
 where
