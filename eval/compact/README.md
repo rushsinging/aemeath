@@ -29,12 +29,17 @@ aemeath eval compact run \
 aemeath eval compact export --only-compacted --min-compacted-tokens 100000 \
     --limit 3 --output-dir /tmp/cases-big
 
-# 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，判卷=独立 --judge
-aemeath eval compact quiz \
-    --cases /tmp/compact-cases --summaries /tmp/compact-run \
-    --model "Zhipu Coding Plan/glm-5.3" \
-    --judge "Bailian Token Plan/qwen3.8-max" \
-    --limit 1 --output eval/compact/results/quiz.json
+# 续接问答（P3，两步式）：先出题落盘（题库固定），再多档/多摘要复用同一题库
+aemeath eval compact quiz generate \
+    --cases /tmp/compact-cases --model "Volcengine/deepseek-v4.1-flash" \
+    --reasoning max --limit 1 --output /tmp/quiz-questions.json
+
+aemeath eval compact quiz answer \
+    --cases /tmp/compact-cases --questions /tmp/quiz-questions.json \
+    --summaries /tmp/run-low \
+    --model "Volcengine/deepseek-v4.1-flash" \
+    --judge "OmniRoute/gpt-6.1-sol" --reasoning max \
+    --limit 1 --output /tmp/answer-low.json
 
 # 真实摘要质量（must_keep 召回 + 压缩率，用已落盘摘要，不重跑压缩）
 aemeath eval compact recall \
@@ -143,7 +148,19 @@ eval/compact/
 1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
 PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**。
 
-### 续接问答（high 档思考，真实大 session）
+### 二维矩阵：compact 档位（低/高/满）× 固定题库（答题档固定 max、gpt 判卷）
+
+| compact 档 | quality | 压缩耗时 | ms/1K | summary | 续接 correct | per_epoch(early/mid/recent) |
+|---|---|---|---|---|---|---|
+| low | Llm | 150s | 184.8 | 130587 | 5/6 | 0.5 / 1.0 / 1.0 |
+| high | Llm | 217s | 266.5 | 135876 | 4/6 | 0.0 / 1.0 / 1.0 |
+| max | Llm | 405s | 496.7 | 150748 | 4/6 | 0.5 / 0.5 / 1.0 |
+
+结论：档位提升买到的是「更长摘要 + 更高成本（耗时 2.7×、ms/1K 2.7×）」，6 题样本下
+续接正确率没有提升；**early 段（最老决断）三档都是短板**（Issue #2142 根因题三档全错），
+与 L1 recall 0.125 一致。样本量需扩大后再下强度结论。
+
+### 续接问答（high 档思考，真实大 session，一步式历史记录）
 
 run（--reasoning high）：`quality=Llm`、550s、summary 60865 chars。
 quiz：6 题判对 3（rate 0.5）；**per_epoch：early 0.0 / mid 1.0 / recent 0.5**——

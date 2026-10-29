@@ -77,15 +77,30 @@ async fn run_compact(command: CompactEvalCommands) {
             model,
             reasoning,
         } => run::run(cases, output_dir, limit, model, reasoning).await,
-        CompactEvalCommands::Quiz {
-            cases,
-            summaries,
-            model,
-            judge,
-            reasoning,
-            limit,
-            output,
-        } => quiz::run(cases, summaries, model, judge, reasoning, limit, output).await,
+        CompactEvalCommands::Quiz { command } => match command {
+            crate::args::QuizCommands::Generate {
+                cases,
+                model,
+                reasoning,
+                limit,
+                output,
+            } => quiz::generate(cases, model, reasoning, limit, output).await,
+            crate::args::QuizCommands::Answer {
+                cases,
+                questions,
+                summaries,
+                model,
+                judge,
+                reasoning,
+                limit,
+                output,
+            } => {
+                quiz::answer(
+                    cases, questions, summaries, model, judge, reasoning, limit, output,
+                )
+                .await
+            }
+        },
         CompactEvalCommands::Recall {
             root,
             limit,

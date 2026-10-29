@@ -163,6 +163,68 @@ pub enum EvalCommands {
     },
 }
 
+/// `aemeath eval compact quiz` 子命令集（两步式）。
+#[derive(Subcommand)]
+pub enum QuizCommands {
+    /// 出题：答题模型读 early 历史，产出题库文件（后续多档复用）
+    Generate {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// 出题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 出题推理档位（缺省 max）
+        #[arg(long, default_value = "max")]
+        reasoning: String,
+
+        /// 最多为多少个 case 出题
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 题库输出路径（JSON）
+        #[arg(long)]
+        output: PathBuf,
+    },
+
+    /// 答题+判卷：用固定题库，多档位可复用保证可比
+    Answer {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// generate 产出的题库文件
+        #[arg(long)]
+        questions: PathBuf,
+
+        /// 压缩输出目录（<case_id>.summary.txt；可含 run_summary.json 取 tail 条数）
+        #[arg(long)]
+        summaries: PathBuf,
+
+        /// 答题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 独立判卷模型 selection（评测时显式指定，不设默认）
+        #[arg(long)]
+        judge: String,
+
+        /// 答题/判卷推理档位（缺省 max）
+        #[arg(long, default_value = "max")]
+        reasoning: String,
+
+        /// 最多评多少个 case
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 报告输出路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
 /// `aemeath eval compact` 子命令集。
 #[derive(Subcommand)]
 pub enum CompactEvalCommands {
@@ -264,36 +326,10 @@ pub enum CompactEvalCommands {
         reasoning: Option<String>,
     },
 
-    /// 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，
-    /// 判卷=独立 --judge 模型（无默认值，未指定拒绝运行）
+    /// 续接问答（P3，两步式）：generate 出题落盘 → answer 多档复用同一题库
     Quiz {
-        /// export 产生的 case 目录
-        #[arg(long)]
-        cases: PathBuf,
-
-        /// run 产生的 summary 目录（<case_id>.summary.txt）
-        #[arg(long)]
-        summaries: PathBuf,
-
-        /// 出题与答题模型 selection
-        #[arg(long)]
-        model: String,
-
-        /// 独立判卷模型 selection（评测时显式指定，不设默认）
-        #[arg(long)]
-        judge: String,
-
-        /// 出题/答题/判卷的推理档位；缺省 max（语义任务开满思考，成本经 usage 统计）
-        #[arg(long, default_value = "max")]
-        reasoning: String,
-
-        /// 最多评多少个 case
-        #[arg(long, default_value_t = 1)]
-        limit: usize,
-
-        /// 输出 JSON 路径（缺省打印到 stdout）
-        #[arg(long)]
-        output: Option<PathBuf>,
+        #[command(subcommand)]
+        command: QuizCommands,
     },
 
     /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）

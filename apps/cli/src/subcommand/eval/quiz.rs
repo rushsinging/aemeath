@@ -65,6 +65,13 @@ pub(crate) struct CaseQuiz {
     per_epoch: Vec<EpochStat>,
 }
 
+/// 题目集（generate 产物 / answer 输入）：题库固定后多档位才可比。
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub(crate) struct QuestionSet {
+    pub(crate) case_id: String,
+    pub(crate) items: Vec<QuizItem>,
+}
+
 #[derive(Debug, Default, Serialize)]
 pub(crate) struct QuizReport {
     answerer: Option<String>,
@@ -233,21 +240,17 @@ async fn complete_with_retry(
     Ok(retry.text)
 }
 
-pub(crate) async fn run(
+/// 出题：把 early 历史题目集落盘（`QuestionSet` 数组），供多档位复用。
+pub(crate) async fn generate(
     cases_dir: PathBuf,
-    summaries_dir: PathBuf,
     model: String,
-    judge: String,
     reasoning: String,
     limit: usize,
-    output: Option<PathBuf>,
+    output: PathBuf,
 ) -> Result<(), String> {
     let index = super::run::load_cases_index(&cases_dir)?;
-    let mut report = QuizReport {
-        answerer: Some(model.clone()),
-        judge: Some(judge.clone()),
-        ..Default::default()
-    };
+    let mut sets: Vec<QuestionSet> = Vec::new();
+    let mut usage: Vec<QuizUsage> = Vec::new();
 
     for case in index.iter().take(limit) {
         let case_id = case
@@ -255,25 +258,92 @@ pub(crate) async fn run(
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string();
-        report.cases_total += 1;
-        // 与 run 的实际切分对齐：tail 条数来自 run_summary.json（压缩保留窗口）。
-        let run_summary: Option<serde_json::Value> =
-            std::fs::read_to_string(summaries_dir.join("run_summary.json"))
-                .ok()
-                .and_then(|text| serde_json::from_str(&text).ok());
-        let recent_messages = run_summary
-            .as_ref()
-            .and_then(|report| report.get("cases").and_then(|v| v.as_array()))
-            .and_then(|cases| {
-                cases.iter().find(|item| {
-                    item.get("case_id").and_then(|v| v.as_str()) == Some(case_id.as_str())
-                })
+        let messages = load_case_messages(case, &cases_dir)?;
+        // 出题只依赖 early（压缩点之前）：优先 case.json 的 compacted_message_count。
+        let compacted = case
+            .get("compacted_message_count")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize)
+            .unwrap_or_else(|| messages.len().saturating_sub(messages.len() / 10));
+        let early = &messages[..compacted.min(messages.len())]; // allow unsafe_text_op: Vec slice
+        let early_text =
+            truncate_by_tokens(&message_texts(early).join("\n"), QUIZ_SOURCE_TOKEN_BUDGET);
+        let raw = complete_with_retry(
+            &model,
+            "你是严格的出题人。",
+            &questions_prompt(&early_text),
+            &reasoning,
+            &mut usage,
+            "quiz",
+        )
+        .await?;
+        let Some(questions) = parse_json_items(&raw) else {
+            return Err(format!("{case_id}: 出题输出解析失败"));
+        };
+        let items: Vec<QuizItem> = questions
+            .into_iter()
+            .filter(|item| {
+                !item.question.trim().is_empty()
+                    && item.gold.as_deref().is_some_and(|g| !g.trim().is_empty())
             })
-            .and_then(|item| item.get("recent_messages"))
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize);
-        let summary_path = summaries_dir.join(format!("{case_id}.summary.txt"));
-        let Ok(summary) = std::fs::read_to_string(&summary_path) else {
+            .take(QUIZ_QUESTION_COUNT)
+            .map(|mut item| {
+                if item.epoch.is_none() {
+                    item.epoch = Some("unknown".to_string());
+                }
+                item
+            })
+            .collect();
+        if items.is_empty() {
+            return Err(format!("{case_id}: 出题结果为空"));
+        }
+        println!("[quiz:generate] {case_id} questions={}", items.len());
+        sets.push(QuestionSet { case_id, items });
+    }
+
+    let json = serde_json::to_string_pretty(&sets).map_err(|error| error.to_string())?;
+    write_or_print(Some(&output), &json)?;
+    println!(
+        "generated {} question set(s) → {} (usage stages: {})",
+        sets.len(),
+        output.display(),
+        usage.len()
+    );
+    Ok(())
+}
+
+/// 答题 + 判卷：读固定题库，档位只影响答题/判卷（出题已固定）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn answer(
+    cases_dir: PathBuf,
+    questions: PathBuf,
+    summaries_dir: PathBuf,
+    model: String,
+    judge: String,
+    reasoning: String,
+    limit: usize,
+    output: Option<PathBuf>,
+) -> Result<(), String> {
+    let text = std::fs::read_to_string(&questions)
+        .map_err(|error| format!("读取题库失败 {}: {error}", questions.display()))?;
+    let sets: Vec<QuestionSet> =
+        serde_json::from_str(&text).map_err(|error| format!("解析题库失败: {error}"))?;
+    let mut report = QuizReport {
+        answerer: Some(model.clone()),
+        judge: Some(judge.clone()),
+        ..Default::default()
+    };
+
+    for set in sets.iter().take(limit) {
+        report.cases_total += 1;
+        let case_id = set.case_id.clone();
+        let case = super::run::load_cases_index(&cases_dir)?
+            .into_iter()
+            .find(|item| item.get("case_id").and_then(|v| v.as_str()) == Some(case_id.as_str()))
+            .ok_or_else(|| format!("case 索引中找不到 {case_id}"))?;
+        let Ok(summary) =
+            std::fs::read_to_string(summaries_dir.join(format!("{case_id}.summary.txt")))
+        else {
             report.parse_failed += 1;
             report.cases.push(CaseQuiz {
                 case_id,
@@ -282,19 +352,36 @@ pub(crate) async fn run(
                 answered: 0,
                 correct: 0,
                 correct_rate: None,
-                error: Some(format!("缺少 {}", summary_path.display())),
+                error: Some("缺少 summary 文件".to_string()),
                 items: Vec::new(),
                 per_epoch: Vec::new(),
             });
             continue;
         };
-        let messages = load_case_messages(case, &cases_dir)?;
-
-        match quiz_one(
-            case,
+        let messages = load_case_messages(&case, &cases_dir)?;
+        let recent_messages = {
+            let run_summary: Option<serde_json::Value> =
+                std::fs::read_to_string(summaries_dir.join("run_summary.json"))
+                    .ok()
+                    .and_then(|text| serde_json::from_str(&text).ok());
+            run_summary
+                .as_ref()
+                .and_then(|report| report.get("cases").and_then(|v| v.as_array()))
+                .and_then(|cases| {
+                    cases.iter().find(|item| {
+                        item.get("case_id").and_then(|v| v.as_str()) == Some(case_id.as_str())
+                    })
+                })
+                .and_then(|item| item.get("recent_messages"))
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+        };
+        match answer_with_questions(
+            &case,
             &messages,
             &summary,
             recent_messages,
+            &set.items,
             &model,
             &judge,
             &reasoning,
@@ -302,9 +389,9 @@ pub(crate) async fn run(
         )
         .await
         {
-            Ok(item) => {
+            Ok(result) => {
                 report.evaluated += 1;
-                report.cases.push(item);
+                report.cases.push(result);
             }
             Err(error) => {
                 report.parse_failed += 1;
@@ -338,61 +425,22 @@ pub(crate) async fn run(
     write_or_print(output.as_deref(), &json)
 }
 
-fn load_case_messages(
-    case: &serde_json::Value,
-    cases_dir: &std::path::Path,
-) -> Result<Vec<serde_json::Value>, String> {
-    let path = case
-        .get("messages_path")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| "case 缺少 messages_path".to_string())?;
-    super::run::load_case_json_lines(&cases_dir.join(path))
-}
-
+/// 用给定题目集跑答题 + 判卷（`answer` 与一步式 `quiz_one` 共用）。
 #[allow(clippy::too_many_arguments)]
-async fn quiz_one(
+async fn answer_with_questions(
     case: &serde_json::Value,
     messages: &[serde_json::Value],
     summary: &str,
     recent_messages: Option<usize>,
+    questions: &[QuizItem],
     model: &str,
     judge: &str,
     reasoning: &str,
     usage: &mut Vec<QuizUsage>,
 ) -> Result<CaseQuiz, String> {
-    // 与 run 的切分对齐：run 没有记录 recent（旧输出）时按 10% 条数兜底。
     let recent = recent_messages.unwrap_or(messages.len() / 10);
     let compacted = messages.len().saturating_sub(recent);
-    let early = &messages[..compacted]; // allow unsafe_text_op: Vec slice
     let tail = &messages[compacted..]; // allow unsafe_text_op: Vec slice
-
-    // 出题（答题模型读 early 历史）
-    let early_text = truncate_by_tokens(&message_texts(early).join("\n"), QUIZ_SOURCE_TOKEN_BUDGET);
-    let raw = complete_with_retry(
-        model,
-        "你是严格的出题人。",
-        &questions_prompt(&early_text),
-        reasoning,
-        usage,
-        "quiz",
-    )
-    .await?;
-    let Some(questions) = parse_json_items(&raw) else {
-        return Err("出题输出解析失败".to_string());
-    };
-    let questions: Vec<QuizItem> = questions
-        .into_iter()
-        .filter(|item| {
-            !item.question.trim().is_empty()
-                && item.gold.as_deref().is_some_and(|g| !g.trim().is_empty())
-        })
-        .take(QUIZ_QUESTION_COUNT)
-        .collect();
-    if questions.is_empty() {
-        return Err("出题结果为空".to_string());
-    }
-
-    // 答题（同一模型只看 summary + tail）
     let source = format!(
         "<summary>\n{summary}\n</summary>\n<recent>\n{}\n</recent>",
         truncate_by_tokens(
@@ -400,10 +448,11 @@ async fn quiz_one(
             ANSWER_SOURCE_TOKEN_BUDGET / 2
         )
     );
+    let mut items: Vec<QuizItem> = questions.to_vec();
     let raw = complete_with_retry(
         model,
         "你是答题人。",
-        &answers_prompt(&source, &questions),
+        &answers_prompt(&source, &items),
         reasoning,
         usage,
         "answer",
@@ -412,12 +461,9 @@ async fn quiz_one(
     let Some(answers) = parse_json_items(&raw) else {
         return Err("答题输出解析失败".to_string());
     };
-    let mut items = questions;
     for (item, answer) in items.iter_mut().zip(answers) {
         item.answer = answer.answer;
     }
-
-    // 判卷（独立 judge）
     let raw = complete_with_retry(
         judge,
         "你是独立判卷人。",
@@ -439,11 +485,6 @@ async fn quiz_one(
         }
     }
     let answered = items.iter().filter(|item| item.answer.is_some()).count();
-    let case_id = case
-        .get("case_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    // 分层统计复用跨 case 合并逻辑：单 case 构造临时视图。
     let per_epoch = merge_epoch_stats(&[CaseQuiz {
         case_id: String::new(),
         status: String::new(),
@@ -455,6 +496,10 @@ async fn quiz_one(
         items: items.clone(),
         per_epoch: Vec::new(),
     }]);
+    let case_id = case
+        .get("case_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
     Ok(CaseQuiz {
         case_id: case_id.to_string(),
         status: "evaluated".to_string(),
@@ -466,6 +511,17 @@ async fn quiz_one(
         items,
         per_epoch,
     })
+}
+
+fn load_case_messages(
+    case: &serde_json::Value,
+    cases_dir: &std::path::Path,
+) -> Result<Vec<serde_json::Value>, String> {
+    let path = case
+        .get("messages_path")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "case 缺少 messages_path".to_string())?;
+    super::run::load_case_json_lines(&cases_dir.join(path))
 }
 
 #[cfg(test)]
