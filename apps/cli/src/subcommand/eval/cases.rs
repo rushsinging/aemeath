@@ -49,7 +49,16 @@ pub(crate) fn extract_identifiers(texts: &[String]) -> Vec<String> {
 }
 
 /// 按出现频次挑选 must_keep：高频条目更可能承载任务事实。
-pub(crate) fn rank_identifiers(texts: &[String], limit: usize) -> Vec<String> {
+///
+/// 口径（#2133）：保留「出现次数 >= `min_frequency`」的标识（默认 3），
+/// 按频次降序、同频按字典序，上限 `limit`（默认 1000）。大 session 里只
+/// 出现一次的路径多为一次性噪声，纳入分母会系统性压低召回；若高频标识
+/// 不足（小会话），回退按频次取 top-`limit`。
+pub(crate) fn rank_identifiers(
+    texts: &[String],
+    limit: usize,
+    min_frequency: usize,
+) -> Vec<String> {
     let mut counts: BTreeMap<String, usize> = extract_identifiers(texts)
         .into_iter()
         .map(|item| (item, 0))
@@ -68,7 +77,17 @@ pub(crate) fn rank_identifiers(texts: &[String], limit: usize) -> Vec<String> {
     }
     let mut ordered: Vec<(String, usize)> = counts.into_iter().collect();
     ordered.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-    ordered
+    let frequent: Vec<(String, usize)> = ordered
+        .iter()
+        .filter(|(_, count)| *count >= min_frequency.max(1))
+        .cloned()
+        .collect();
+    let selected = if frequent.is_empty() {
+        ordered
+    } else {
+        frequent
+    };
+    selected
         .into_iter()
         .take(limit)
         .map(|(item, _)| item)
@@ -79,6 +98,7 @@ fn build_case(
     dataset: &Path,
     output_dir: &Path,
     limit: usize,
+    min_frequency: usize,
     max_tokens: u64,
     only_compacted: bool,
     min_compacted_tokens: u64,
@@ -93,6 +113,8 @@ fn build_case(
     }
     let texts: Vec<String> = session.messages.iter().map(message_text).collect();
     let joined = texts.join("\n");
+    let early_end = session.compacted_message_count.min(session.messages.len());
+    let early_texts: Vec<String> = texts[..early_end].to_vec(); // allow unsafe_text_op: Vec slice
     let estimated_tokens = estimate_tokens(&joined);
     if estimated_tokens > max_tokens {
         return Ok(None);
@@ -127,7 +149,9 @@ fn build_case(
         message_count: session.messages.len(),
         estimated_tokens,
         previous_summary: session.previous_summary.clone().unwrap_or_default(),
-        must_keep: rank_identifiers(&texts, limit),
+        // must_keep 语义：被压缩历史里「应保留的事实」——只从 early 段抽取，
+        // 与 recall 同口径（全量会把 tail 仍在窗口的标识算进分母）。
+        must_keep: rank_identifiers(&early_texts, limit, min_frequency),
         must_keep_source: "auto_identifiers".to_string(),
         messages_path: format!("{}/messages.jsonl", session.session_id),
         compacted_message_count: session.compacted_message_count,
@@ -138,16 +162,33 @@ fn build_case(
     Ok(Some(case))
 }
 
-pub(crate) fn run(
-    root: PathBuf,
-    output_dir: PathBuf,
-    limit: usize,
-    min_steps: usize,
-    max_must_keep: usize,
-    max_tokens: u64,
-    only_compacted: bool,
-    min_compacted_tokens: u64,
-) -> Result<(), String> {
+/// `export` 的完整参数（避免超长签名；字段语义见 CLI `--help`）。
+pub(crate) struct ExportOptions {
+    pub(crate) root: PathBuf,
+    pub(crate) output_dir: PathBuf,
+    pub(crate) limit: usize,
+    pub(crate) min_steps: usize,
+    pub(crate) max_must_keep: usize,
+    pub(crate) min_must_keep_frequency: usize,
+    pub(crate) max_tokens: u64,
+    pub(crate) only_compacted: bool,
+    pub(crate) min_compacted_tokens: u64,
+    pub(crate) session: Option<String>,
+}
+
+pub(crate) fn run(options: ExportOptions) -> Result<(), String> {
+    let ExportOptions {
+        root,
+        output_dir,
+        limit,
+        min_steps,
+        max_must_keep,
+        min_must_keep_frequency,
+        max_tokens,
+        only_compacted,
+        min_compacted_tokens,
+        session: session_filter,
+    } = options;
     std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
     let mut index = String::new();
     let mut exported = 0usize;
@@ -157,6 +198,15 @@ pub(crate) fn run(
     for dataset in iter_datasets(&root) {
         if exported >= limit {
             break;
+        }
+        if let Some(target) = session_filter.as_deref() {
+            let stem = dataset
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if stem != target {
+                continue;
+            }
         }
         let Ok(session) = load_session(&dataset) else {
             continue;
@@ -168,6 +218,7 @@ pub(crate) fn run(
             &dataset,
             &output_dir,
             max_must_keep,
+            min_must_keep_frequency,
             max_tokens,
             only_compacted,
             min_compacted_tokens,

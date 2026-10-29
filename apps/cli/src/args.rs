@@ -200,8 +200,12 @@ pub enum CompactEvalCommands {
         min_steps: usize,
 
         /// 每个 case 的 must_keep 上限（按出现频次取前 N）
-        #[arg(long, default_value_t = 200)]
+        #[arg(long, default_value_t = 1000)]
         max_must_keep: usize,
+
+        /// must_keep 最低出现次数（默认 3；只出现一次的路径多为噪声，不计入）
+        #[arg(long, default_value_t = 3)]
+        min_must_keep_frequency: usize,
 
         /// 跳过估算 token 超过该值的会话（超出压缩窗口的巨型历史不适合评测）
         #[arg(long, default_value_t = 3_000_000)]
@@ -214,6 +218,10 @@ pub enum CompactEvalCommands {
         /// 只导出被压缩历史（early）估算 token 不低于该值的会话
         #[arg(long, default_value_t = 100_000)]
         min_compacted_tokens: u64,
+
+        /// 只导出指定会话（dataset 目录名 stem，如 01a182e6-0323-...）
+        #[arg(long)]
+        session: Option<String>,
     },
 
     /// 生产实际反馈指标（重问率/重复读取/错误率/中断/不满信号/成本）
@@ -299,7 +307,7 @@ pub enum CompactEvalCommands {
         limit: usize,
 
         /// 每个 session 的 must_keep 上限（按出现频次取前 N）
-        #[arg(long, default_value_t = 200)]
+        #[arg(long, default_value_t = 1000)]
         max_must_keep: usize,
 
         /// 输出 JSON 路径（缺省打印到 stdout）

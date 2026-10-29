@@ -1,246 +1,293 @@
 # compact 评测模型矩阵（供挑选与更新）
 #
 # 用途：`aemeath eval compact run/quiz` 的候选模型名单。
-# 更新方式：从 ~/.agents/aemeath.json 的 models.providers 同步（本文件只保留
-# 评测相关字段；selection 为 `provider/model-id`，即 --model 的合法取值）。
-schema_version: 1
+# 更新方式：从 models.providers 同步；selection 为 `provider/model-id`（--model 合法取值）。
+# 注意：不含 provider 字段；可用 effort 逐模型标注（available_efforts），不设全局映射。
+schema_version: 3
 updated_at: "2026-10-29"
 
 reasoning:
-  available_levels: [off, minimal, low, medium, high, xhigh, max]
+  levels: [off, minimal, low, medium, high, xhigh, max]
   input_alias:
     none: off
-  eval_request_default: max          # run/quiz 的 --reasoning 默认值
+  eval_request_default: max          # run/quiz 的 --reasoning 默认
   config_key: context.compact_reasoning
   chain: "requested -> clamp(模型上限) -> server_effort_map -> effective(服务端实际档)"
   notes: |
-    归并表（server_effort_map）是服务端实际执行档的权威，允许把低档抬升
-    （如 Zhipu off/minimal/low -> low；DeepSeek 无 max 档时折叠到其最高档）。
-    #2148 已放宽「effective ≤ requested」校验；请求 Off 不再被判配置错误。
+    每个模型条目自带 `available_efforts`（该模型服务端实际可执行到的档位集合）
+    与 `efforts_verified`（是否已按官方文档确认）。请求档超出可用集合时会被
+    clamp/归并到相邻档；`efforts_verified: false` 的模型表示网关透传未逐档验证。
 
 known_risks:
   - id: max-thinking-budget
     summary: "Max 档思考 + COMPACT_MAX_OUTPUT_TOKENS=16384 → thinking 吃满输出预算、正文为空、chunk 降级本地"
     evidence: "session 01a182e6（838K token / 22 chunks）：10 块降级，全部 output=16384 thinking=16384 text_deltas=0"
-    mitigation: "待实现独立 compact 输出预算（如 32K/64K）；或 map 阶段降档；紧急止血 context.compact_reasoning=high"
+    mitigation: "独立 compact 输出预算（32K/64K）/ map 阶段降档 / 紧急 context.compact_reasoning=high"
   - id: empty-model-regression
-    summary: "#2146 曾让 compact 请求传空 model，LLM 调用恒失败静默降级"
+    summary: "#2146 曾让 compact 请求传空 model → LLM 调用恒失败静默降级"
     evidence: "#2152 + PR #2140 已修复并合入 main"
     mitigation: "评测看 quality 档位；非 Llm 行不当成功"
 
-compact_candidates:                 # flash / lite / mini 优先
+compact_candidates:                 # flash / lite 优先
 # 注：max_tokens 为模型输出上限；compact 请求实际最大输出 =
 # min(COMPACT_MAX_OUTPUT_TOKENS=16384, max_tokens)，见 known_risks.max-thinking-budget。
-  - provider: "DeepSeek"
-    model: "DeepSeek V4.1 Flash"
+  - model: "DeepSeek V4.1 Flash"
     selection: "DeepSeek/deepseek-flash"
     driver: deepseek
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [off, low, high]
+    efforts_verified: true
+    efforts_note: "minimal→low、medium/xhigh→high；无 max 档折叠最高档"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Mimo Token Plan"
-    model: "Mimo V2.6 Flash"
+  - model: "Mimo V2.6 Flash"
     selection: "Mimo Token Plan/mimo-v2.6-flash"
     driver: mimo
-    default_effort: medium
+    config_default_effort: medium
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "MiniMax"
-    model: "MiniMax M3"
-    selection: "MiniMax/MiniMax-M3"
-    driver: minimax
-    default_effort: medium
-    context_window: 1048576
-    max_tokens: 20000
-  - provider: "MiniMax"
-    model: "MiniMax M3.1 Flash Preview"
+  - model: "MiniMax M3.1 Flash Preview"
     selection: "MiniMax/MiniMax-M3.1-Flash-Preview"
     driver: minimax
-    default_effort: medium
+    config_default_effort: medium
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Volcengine"
-    model: "Doubao Seed 2.1 Lite"
+  - model: "Doubao Seed 2.1 Lite"
     selection: "Volcengine/doubao-seed-2.1-lite"
     driver: volcengine
-    default_effort: medium
+    config_default_effort: medium
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "方舟阶梯与智谱同构"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Volcengine"
-    model: "DeepSeek V4.1 Flash"
+  - model: "DeepSeek V4.1 Flash"
     selection: "Volcengine/deepseek-v4.1-flash"
     driver: volcengine
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "方舟阶梯与智谱同构"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Volcengine"
-    model: "GLM-5.3 Flash"
+  - model: "GLM-5.3 Flash"
     selection: "Volcengine/glm-5.3-flash"
     driver: volcengine
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "方舟阶梯与智谱同构"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Zhipu Coding Plan"
-    model: "glm-5.3-flash"
+  - model: "glm-5.3-flash"
     selection: "Zhipu Coding Plan/glm-5.3-flash"
     driver: zhipu
-    default_effort: max
+    config_default_effort: max
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "官方 5.3 : off/minimal/low→low、medium/high→high、xhigh/max→max"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Agnes"
-    model: "Agnes 3.0 Flash"
+  - model: "Agnes 3.0 Flash"
     selection: "Agnes/agnes-3.0-flash"
     driver: agnes
-    default_effort: max
+    config_default_effort: max
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 524288
     max_tokens: 20000
-  - provider: "Bailian Token Plan"
-    model: "Qwen3.8 Flash"
+  - model: "Qwen3.8 Flash"
     selection: "Bailian Token Plan/qwen3.8-flash"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1000000
     max_tokens: 20000
-  - provider: "Bailian Token Plan"
-    model: "DeepSeek V4.1 Flash (1017)"
+  - model: "DeepSeek V4.1 Flash (1017)"
     selection: "Bailian Token Plan/deepseek-v4.1-flash-1017"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Strata"
-    model: "Qwen3.8 Flash Next"
+  - model: "Qwen3.8 Flash Next"
     selection: "Strata/qwen3.8-flash-next-q2_0"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 262144
     max_tokens: 20000
-  - provider: "OpenCode"
-    model: "DeepSeek V4.1 Flash"
+  - model: "DeepSeek V4.1 Flash"
     selection: "OpenCode/deepseek-v4.1-flash"
     driver: opencode-go
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1000000
     max_tokens: 20000
-  - provider: "OpenCode"
-    model: "GLM-5.3-Flash"
+  - model: "GLM-5.3-Flash"
     selection: "OpenCode/glm-5.3-flash"
     driver: opencode-go
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1000000
     max_tokens: 20000
-  - provider: "OpenCode"
-    model: "Qwen3.8 Flash"
+  - model: "Qwen3.8 Flash"
     selection: "OpenCode/qwen3.8-flash"
     driver: opencode-go
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1000000
     max_tokens: 20000
-judge_candidates:                   # 跨族强模型（判卷用；不得与 compact 候选重叠）
-  - provider: "DeepSeek"
-    model: "DeepSeek V4 Pro"
+judge_candidates:                   # 跨族强模型（判卷；同族组合按运行时场景人工挑）
+  - model: "DeepSeek V4 Pro"
     selection: "DeepSeek/deepseek-v4-pro"
     driver: deepseek
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [off, low, high]
+    efforts_verified: true
+    efforts_note: "minimal→low、medium/xhigh→high；无 max 档折叠最高档"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Kimi"
-    model: "Kimi K3"
+  - model: "Kimi K3"
     selection: "Kimi/k3"
     driver: kimi
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "k3 系列分组；off→low"
     context_window: 500000
     max_tokens: 20000
-  - provider: "Kimi"
-    model: "Kimi K3 256K"
+  - model: "Kimi K3 256K"
     selection: "Kimi/k3-256k"
     driver: kimi
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "k3 系列分组；off→low"
     context_window: 262144
     max_tokens: 20000
-  - provider: "Kimi"
-    model: "Kimi K3.1 Pro"
+  - model: "Kimi K3.1 Pro"
     selection: "Kimi/k3.1-pro"
     driver: kimi
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "k3 系列分组；off→low"
     context_window: 500000
     max_tokens: 20000
-  - provider: "Mimo Token Plan"
-    model: "Mimo V2.6 Pro"
+  - model: "Mimo V2.6 Pro"
     selection: "Mimo Token Plan/mimo-v2.6-pro"
     driver: mimo
-    default_effort: medium
+    config_default_effort: medium
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "OmniRoute"
-    model: "Chatgpt 5.6 Sol"
+  - model: "Chatgpt 5.6 Sol"
     selection: "OmniRoute/gpt-5.6-sol"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 272000
     max_tokens: 20000
-  - provider: "OmniRoute"
-    model: "Chatgpt 6 Astra"
+  - model: "Chatgpt 6 Astra"
     selection: "OmniRoute/gpt-6-astra"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 272000
     max_tokens: 20000
-  - provider: "OmniRoute"
-    model: "Chatgpt 6.1 Sol"
+  - model: "Chatgpt 6.1 Sol"
     selection: "OmniRoute/gpt-6.1-sol"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 500000
     max_tokens: 20000
-  - provider: "OmniRoute"
-    model: "Chatgpt 6 Sol"
+  - model: "Chatgpt 6 Sol"
     selection: "OmniRoute/gpt-6-sol"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 272000
     max_tokens: 20000
-  - provider: "Volcengine"
-    model: "Doubao Seed 2.1 Pro"
+  - model: "Doubao Seed 2.1 Pro"
     selection: "Volcengine/doubao-seed-2.1-pro"
     driver: volcengine
-    default_effort: medium
+    config_default_effort: medium
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "方舟阶梯与智谱同构"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Volcengine"
-    model: "Kimi K3"
+  - model: "Kimi K3"
     selection: "Volcengine/kimi-k3"
     driver: volcengine
-    default_effort: high
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_note: "方舟阶梯与智谱同构"
     context_window: 1048576
     max_tokens: 20000
-  - provider: "Bailian Token Plan"
-    model: "Qwen3.8 Max"
+  - model: "Qwen3.8 Max"
     selection: "Bailian Token Plan/qwen3.8-max"
     driver: openai
-    default_effort: xhigh
+    config_default_effort: xhigh
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1000000
     max_tokens: 20000
-  - provider: "Qiniu"
-    model: "Kimi K3 Free"
+  - model: "Kimi K3 Free"
     selection: "Qiniu/moonshotai/kimi-k3-free"
     driver: openai
-    default_effort: max
+    config_default_effort: max
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_note: "网关透传，未逐档验证"
     context_window: 1048576
     max_tokens: 20000
 recommended_sets:
   compact:
-    - Bailian Token Plan/deepseek-v4.1-flash-1017   # 当前默认，实测 Llm
-    - Zhipu Coding Plan/glm-5.3-flash               # 同族跨 provider 对照
-    - Volcengine/doubao-seed-2.1-lite               # 官方低成本
+    - Bailian Token Plan/deepseek-v4.1-flash-1017
+    - Zhipu Coding Plan/glm-5.3-flash
+    - Volcengine/doubao-seed-2.1-lite
     - Mimo Token Plan/mimo-v2.6-flash
     - MiniMax/MiniMax-M3.1-Flash-Preview
-  judge_primary: Bailian Token Plan/qwen3.8-max     # 与 compact 候选跨族，1M 窗口
-  judge_crosscheck: OmniRoute/gpt-6.1-sol           # 最强；第三方网关，注意稳定性
+  judge_primary: Bailian Token Plan/qwen3.8-max
+  judge_crosscheck: OmniRoute/gpt-6.1-sol
   judge_alt: Kimi/k3.1-pro
 
 collection_protocol:
-  - "对每个候选依次执行：aemeath eval compact run --cases <dir> --model <selection> --reasoning max --output-dir runs/<sanitized>"
-  - "再执行 quiz：aemeath eval compact quiz --cases <dir> --summaries runs/<sanitized> --model <主模型> --judge <judge_primary> --reasoning max"
-  - "单模型失败/降级不牵连其他 run；结果为多次收集，不做一次性矩阵命令"
-  - "报告维度：quality 档位 → correct_rate/per_epoch → elapsed_ms 与 ms_per_1k_input_tokens → usage token"
+  - "每个候选依次：aemeath eval compact run --cases <dir> --model <selection> --reasoning max --output-dir runs/<sanitized>"
+  - "再 quiz：aemeath eval compact quiz --cases <dir> --summaries runs/<sanitized> --model <主模型> --judge <judge_primary> --reasoning max"
+  - "单模型失败/降级不牵连其他 run；多次收集，不做一次性矩阵命令"
+  - "报告维度：quality → correct_rate/per_epoch → elapsed_ms 与 ms_per_1k_input_tokens → usage token"

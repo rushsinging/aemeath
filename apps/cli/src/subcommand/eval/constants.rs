@@ -56,6 +56,9 @@ pub(crate) static PATH_PATTERN: Lazy<Regex> = Lazy::new(|| {
     .expect("path regex")
 });
 
+/// must_keep 默认最低出现次数（#2133）：只出现一次的路径多为一次性噪声。
+pub(crate) const MIN_MUST_KEEP_FREQUENCY: usize = 3;
+
 /// 评测脚本自身的高频路径，不代表上下文事实。
 pub(crate) const NOISE_PREFIXES: [&str; 3] = ["eval/compact/", "results/", "datasets/"];
 
