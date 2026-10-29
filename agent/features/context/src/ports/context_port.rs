@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::domain::reminder::{ReminderEventSource, ReminderSource};
+use crate::domain::reminder::{ReminderEventSource, ReminderFactData, ReminderKind};
 pub use crate::domain::*;
 
 /// Context Management 对 Agent Runtime 开放的唯一端口。
@@ -104,7 +104,11 @@ pub trait ContextAppendPort: crate::sealed::Sealed + Send + Sync {
 /// Runtime 不感知 placement / dedup / 预算。
 pub trait ReminderControlPort: crate::sealed::Sealed + Send + Sync {
     /// Run 启动：为该 Run 创建 reminder 管线（同 RunId 重复创建替换旧管线）。
-    fn create_reminder_pipeline(&self, _run_id: RunId, _sources: Vec<Arc<dyn ReminderSource>>) {}
+    fn create_reminder_pipeline(&self, _run_id: RunId, _allowed: Vec<ReminderKind>) {}
+
+    /// Runtime 推送一条提醒事实（#2146 数据化接口：只接受数据类型，
+    /// 无 trait 多态；渲染模板由 Context 按 kind 内置）。
+    fn push_reminder_fact(&self, _run_id: &RunId, _fact: ReminderFactData) {}
 
     /// Run 结束：销毁该 Run 的 reminder 管线。
     fn drop_reminder_pipeline(&self, _run_id: &RunId) {}

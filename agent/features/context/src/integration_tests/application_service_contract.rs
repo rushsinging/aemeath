@@ -637,33 +637,23 @@ impl FactSourceFixture {
     }
 }
 
-impl crate::ReminderSource for FactSourceFixture {
-    fn kind(&self) -> crate::ReminderKind {
-        self.kind.clone()
-    }
-
-    fn policy(&self) -> crate::ReminderPolicy {
-        crate::ReminderPolicy {
-            refresh: crate::RefreshTrigger::OnRunStart,
-            placement: self.placement,
-            inject: crate::InjectBehavior {
-                dedup: crate::ReminderDedup::SkipIfUnchanged,
-                priority: self.priority,
+impl FactSourceFixture {
+    /// #2146 数据化：构建提醒事实（原 build/policy 逻辑）。
+    fn fact(&self) -> crate::ReminderFactData {
+        crate::ReminderFactData {
+            kind: self.kind.clone(),
+            policy: crate::ReminderPolicy {
+                refresh: crate::RefreshTrigger::OnRunStart,
+                placement: self.placement,
+                inject: crate::InjectBehavior {
+                    dedup: crate::ReminderDedup::SkipIfUnchanged,
+                    priority: self.priority,
+                },
+                compact: crate::CompactBehavior::Reinstate,
             },
-            compact: crate::CompactBehavior::Reinstate,
-        }
-    }
-
-    fn build(&self) -> Option<crate::ReminderSnapshot> {
-        Some(crate::ReminderSnapshot {
+            enqueue: crate::ReminderEnqueue::Snapshot,
             data: serde_json::to_string(&self.data).expect("快照序列化"),
-        })
-    }
-
-    fn render(&self, snapshot: &crate::ReminderSnapshot, language: &str) -> String {
-        let data: crate::domain::InvocationReminderData =
-            serde_json::from_str(&snapshot.data).expect("快照反序列化");
-        crate::render_invocation_reminder_body(&data, language)
+        }
     }
 }
 
@@ -682,8 +672,19 @@ async fn build_window_renders_reminder_pipeline_injection_by_placement() {
     ReminderControlPort::create_reminder_pipeline(
         &context_service,
         run_id.clone(),
-        vec![task_source.clone(), guidance_source, mismatch_source],
+        vec![
+            task_source.kind.clone(),
+            guidance_source.kind.clone(),
+            mismatch_source.kind.clone(),
+        ],
     );
+    for fact in [
+        task_source.fact(),
+        guidance_source.fact(),
+        mismatch_source.fact(),
+    ] {
+        ReminderControlPort::push_reminder_fact(&context_service, &run_id, fact);
+    }
     ReminderControlPort::reminder_run_started(&context_service, &run_id);
 
     let window = context_service.build_window(&request()).await.unwrap();

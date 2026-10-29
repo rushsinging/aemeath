@@ -170,23 +170,26 @@ pub struct ReminderSnapshot {
     pub data: String,
 }
 
-/// reminder 来源的唯一扩展点：新增 kind 只实现本 trait 并注册，
-/// NEVER 触碰队列、注入调度或渲染分发。
-pub trait ReminderSource: Send + Sync {
-    fn kind(&self) -> ReminderKind;
-    fn policy(&self) -> ReminderPolicy;
-    /// 读当前快照；`None` 表示本轮无内容（如当前无任务），不入队。
-    ///
-    /// 携带消费型事实的 source **MUST** 在 build 只 peek 不取走，把
-    /// 事实的最终标记推迟到 [`ReminderSource::confirm_injected`]——
-    /// 快照入队后若 Run 收口（未注入），事实保留在源头，由下一个
-    /// Run / wakeup 补注入（#252：take 即标记会把完成事实静默丢失）。
-    fn build(&self) -> Option<ReminderSnapshot>;
-    /// 按语言渲染 body。
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String;
-    /// 注入组装确认：快照被组装进本轮 window 后调用。消费型 source
-    /// 在此标记事实已送达；默认 no-op（非消费型 source 无需实现）。
-    fn confirm_injected(&self) {}
+/// Runtime 推送的一条提醒事实（#2146 数据化接口：接口只接受本数据类型，
+/// 无 trait 多态）：kind + 策略 + 渲染载荷。`data` 为 [`InvocationReminderData`]
+/// 的 JSON 序列化——渲染模板由 Context 按 kind 内置
+/// （[`render_invocation_reminder_body`]）。
+pub struct ReminderFactData {
+    pub kind: ReminderKind,
+    pub policy: ReminderPolicy,
+    /// 入队模式：快照替换（多数）或事件累积（后台完成类）。
+    pub enqueue: ReminderEnqueue,
+    /// [`InvocationReminderData`] JSON 载荷。
+    pub data: String,
+}
+
+/// 事实入队模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReminderEnqueue {
+    /// 快照替换：同 kind 新事实替换旧快照。
+    Snapshot,
+    /// 事件累积：后台完成类事实逐条累积。
+    Event,
 }
 
 /// 队列 entry：kind + 快照 + 内容指纹 + 序号 + 注入行为。

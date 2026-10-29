@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::application::background_process::supervisor::BackgroundProcessSupervisor;
 use context::{
     CompactBehavior, InjectBehavior, ReminderDedup, ReminderKind, ReminderPlacement,
-    ReminderPolicy, ReminderPriority, ReminderSnapshot, ReminderSource,
+    ReminderPolicy, ReminderPriority,
 };
 
 /// 任务进度 source：从 `TaskAccess` 读当前 batch 快照。
@@ -23,44 +23,27 @@ impl TaskProgressReminderSource {
     }
 }
 
-impl ReminderSource for TaskProgressReminderSource {
-    fn kind(&self) -> ReminderKind {
-        ReminderKind::task_progress()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        ReminderPolicy {
-            refresh: context::RefreshTrigger::OnStepInterval(
-                crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS,
-            ),
-            placement: ReminderPlacement::TailUserMessage,
-            inject: InjectBehavior {
-                dedup: ReminderDedup::SkipIfUnchanged,
-                priority: ReminderPriority::task_state(),
-            },
-            compact: CompactBehavior::Rebuild,
-        }
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
+impl TaskProgressReminderSource {
+    /// #2146 数据化：构建提醒事实（原 build 逻辑）。无任务时 None。
+    pub(crate) fn fact(&self) -> Option<context::ReminderFactData> {
         super::task_snapshot::build_task_reminder_intent(self.task.as_ref(), self.max_lines).map(
-            |data| ReminderSnapshot {
+            |data| context::ReminderFactData {
+                kind: context::ReminderKind::task_progress(),
+                policy: context::ReminderPolicy {
+                    refresh: context::RefreshTrigger::OnStepInterval(
+                        crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS,
+                    ),
+                    placement: context::ReminderPlacement::TailUserMessage,
+                    inject: context::InjectBehavior {
+                        dedup: context::ReminderDedup::SkipIfUnchanged,
+                        priority: context::ReminderPriority::task_state(),
+                    },
+                    compact: context::CompactBehavior::Rebuild,
+                },
+                enqueue: context::ReminderEnqueue::Snapshot,
                 data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
             },
         )
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        match serde_json::from_str::<context::InvocationReminderData>(&snapshot.data) {
-            Ok(data) => context::render_invocation_reminder_body(&data, language),
-            Err(error) => {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "reminder 快照反序列化失败 kind=task_progress error={error}"
-                );
-                String::new()
-            }
-        }
     }
 }
 
@@ -164,32 +147,14 @@ impl RunStartFactReminderSource {
     }
 }
 
-impl ReminderSource for RunStartFactReminderSource {
-    fn kind(&self) -> ReminderKind {
-        self.kind.clone()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        self.policy.clone()
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
-        Some(ReminderSnapshot {
+impl RunStartFactReminderSource {
+    /// #2146 数据化：构建提醒事实（OnRunStart 快照）。
+    pub(crate) fn fact(&self) -> context::ReminderFactData {
+        context::ReminderFactData {
+            kind: self.kind.clone(),
+            policy: self.policy.clone(),
+            enqueue: context::ReminderEnqueue::Snapshot,
             data: serde_json::to_string(&self.data).expect("reminder 快照序列化不可失败"),
-        })
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        match serde_json::from_str::<context::InvocationReminderData>(&snapshot.data) {
-            Ok(data) => context::render_invocation_reminder_body(&data, language),
-            Err(error) => {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "reminder 快照反序列化失败 kind={} error={error}",
-                    self.kind.as_str(),
-                );
-                String::new()
-            }
         }
     }
 }
@@ -209,83 +174,50 @@ mod tests;
 /// （监督器），渲染委托 Context。
 pub(crate) struct BackgroundProcessReminderSource {
     supervisor: Arc<BackgroundProcessSupervisor>,
-    /// 已 peek 未确认的事实 id（注入确认制的工作集）。
-    peeked_task_ids: std::sync::Mutex<Vec<String>>,
 }
 
 impl BackgroundProcessReminderSource {
     pub(crate) fn new(supervisor: Arc<BackgroundProcessSupervisor>) -> Self {
-        Self {
-            supervisor,
-            peeked_task_ids: std::sync::Mutex::new(Vec::new()),
-        }
+        Self { supervisor }
     }
 }
 
-impl ReminderSource for BackgroundProcessReminderSource {
-    fn kind(&self) -> ReminderKind {
-        ReminderKind::background_process()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        ReminderPolicy {
+impl BackgroundProcessReminderSource {
+    /// 该事实的静态策略（kind + refresh + placement + inject + compact）。
+    pub(crate) fn policy() -> context::ReminderPolicy {
+        context::ReminderPolicy {
             refresh: context::RefreshTrigger::OnEvent(
                 context::ReminderEventSource::background_process(),
             ),
-            placement: ReminderPlacement::TailUserMessage,
-            inject: InjectBehavior {
-                dedup: ReminderDedup::SkipIfUnchanged,
-                priority: ReminderPriority::event(),
+            placement: context::ReminderPlacement::TailUserMessage,
+            inject: context::InjectBehavior {
+                dedup: context::ReminderDedup::SkipIfUnchanged,
+                priority: context::ReminderPriority::event(),
             },
-            compact: CompactBehavior::Rebuild,
+            compact: context::CompactBehavior::Rebuild,
         }
     }
 
-    fn build(&self) -> Option<ReminderSnapshot> {
+    /// #2146 数据化：peek 未通知终态事实构建一条事件 fact；构建成功即标记
+    /// 已通知（事实入队后由队列滞留/重注入保障送达——#252 语义等价）。
+    pub(crate) fn fact(&self) -> Option<context::ReminderFactData> {
         let items = self.supervisor.peek_unnotified_terminal_items();
         if items.is_empty() {
             return None;
         }
-        {
-            let mut peeked = self
-                .peeked_task_ids
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            for item in &items {
-                if !peeked.contains(&item.task_id) {
-                    peeked.push(item.task_id.clone());
-                }
-            }
-        }
+        self.supervisor.mark_notified(
+            &items
+                .iter()
+                .map(|item| item.task_id.clone())
+                .collect::<Vec<_>>(),
+        );
         let data = context::InvocationReminderData::background_process_completed(items);
-        Some(ReminderSnapshot {
+        Some(context::ReminderFactData {
+            kind: context::ReminderKind::background_process(),
+            policy: Self::policy(),
+            enqueue: context::ReminderEnqueue::Event,
             data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
         })
-    }
-
-    fn confirm_injected(&self) {
-        let peeked: Vec<String> = std::mem::take(
-            &mut *self
-                .peeked_task_ids
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()),
-        );
-        if !peeked.is_empty() {
-            self.supervisor.mark_notified(&peeked);
-        }
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        match serde_json::from_str::<context::InvocationReminderData>(&snapshot.data) {
-            Ok(data) => context::render_invocation_reminder_body(&data, language),
-            Err(error) => {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "reminder 快照反序列化失败 kind=background_process error={error}"
-                );
-                String::new()
-            }
-        }
     }
 }
 
@@ -402,42 +334,27 @@ impl MemoryRecallReminderSource {
     }
 }
 
-impl ReminderSource for MemoryRecallReminderSource {
-    fn kind(&self) -> ReminderKind {
-        ReminderKind::memory_recall()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        ReminderPolicy {
-            refresh: context::RefreshTrigger::OnUserMessage,
-            placement: ReminderPlacement::TailUserMessage,
-            inject: InjectBehavior {
-                dedup: ReminderDedup::SkipIfUnchanged,
-                priority: ReminderPriority::memory_recall(),
-            },
-            compact: CompactBehavior::Rebuild,
-        }
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
+impl MemoryRecallReminderSource {
+    /// #2146 数据化：从 refresh 缓存构建事实（OnUserMessage 快照）。
+    pub(crate) fn fact(&self) -> Option<context::ReminderFactData> {
         self.cache
             .lock()
             .expect("recall cache lock poisoned")
             .clone()
-            .map(|data| ReminderSnapshot { data })
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        match serde_json::from_str::<context::InvocationReminderData>(&snapshot.data) {
-            Ok(data) => context::render_invocation_reminder_body(&data, language),
-            Err(error) => {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "reminder 快照反序列化失败 kind=memory_recall error={error}"
-                );
-                String::new()
-            }
-        }
+            .map(|data| context::ReminderFactData {
+                kind: context::ReminderKind::memory_recall(),
+                policy: context::ReminderPolicy {
+                    refresh: context::RefreshTrigger::OnUserMessage,
+                    placement: context::ReminderPlacement::TailUserMessage,
+                    inject: context::InjectBehavior {
+                        dedup: context::ReminderDedup::SkipIfUnchanged,
+                        priority: context::ReminderPriority::memory_recall(),
+                    },
+                    compact: context::CompactBehavior::Rebuild,
+                },
+                enqueue: context::ReminderEnqueue::Snapshot,
+                data,
+            })
     }
 }
 
@@ -446,4 +363,13 @@ fn system_now_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// 测试辅助：按 kind 内置模板渲染事实载荷（与管线同一渲染函数）。
+#[cfg(test)]
+pub(crate) fn render_fact_body(fact: &context::ReminderFactData, language: &str) -> String {
+    match serde_json::from_str::<context::InvocationReminderData>(&fact.data) {
+        Ok(data) => context::render_invocation_reminder_body(&data, language),
+        Err(error) => panic!("事实载荷反序列化失败: {error}"),
+    }
 }

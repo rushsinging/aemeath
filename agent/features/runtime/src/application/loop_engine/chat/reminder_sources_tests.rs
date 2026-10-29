@@ -1,4 +1,5 @@
 use super::*;
+
 use crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS;
 use crate::application::loop_engine::chat::reminder_sources::{
     RunStartFactReminderSource, TaskProgressReminderSource,
@@ -44,8 +45,11 @@ fn task_progress_source_builds_snapshot_from_task_access_and_renders_via_context
         share::config::TaskListConfig::default().max_lines,
     );
 
-    assert_eq!(source.kind().as_str(), "task_progress");
-    let snapshot = source.build().expect("有 active batch 任务");
+    assert_eq!(
+        source.fact().expect("有 active batch 任务").kind.as_str(),
+        "task_progress"
+    );
+    let snapshot = source.fact().expect("有 active batch 任务");
     let decoded: context::InvocationReminderData =
         serde_json::from_str(&snapshot.data).expect("快照为 InvocationReminderData JSON");
     match decoded {
@@ -56,7 +60,8 @@ fn task_progress_source_builds_snapshot_from_task_access_and_renders_via_context
         other => panic!("期望 TaskProgress，得到 {other:?}"),
     }
 
-    let rendered = source.render(&snapshot, "zh");
+    let rendered =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "zh");
     assert!(
         rendered.contains("当前任务进度："),
         "渲染委托 context 文案单一真相"
@@ -70,7 +75,7 @@ fn task_progress_source_builds_none_without_active_batch() {
         Arc::new(empty_store),
         share::config::TaskListConfig::default().max_lines,
     );
-    assert!(source.build().is_none(), "无任务周期 source 本轮不入队");
+    assert!(source.fact().is_none(), "无任务周期 source 本轮不入队");
 }
 
 #[test]
@@ -79,7 +84,7 @@ fn task_progress_source_policy_declares_interval_rebuild_and_tail_placement() {
         Arc::new(access_with_progress(0)),
         share::config::TaskListConfig::default().max_lines,
     );
-    let policy = source.policy();
+    let policy = source.fact().expect("有任务事实").policy;
     assert!(
         matches!(
             policy.refresh,
@@ -101,42 +106,46 @@ fn run_start_fact_source_carries_frozen_data_and_matching_policy() {
         vec!["~/.agents/guidance/_default.md".to_string()],
         share::config::domain::config::GuidanceReloadPolicy::Remind,
     );
-    assert_eq!(guidance.kind().as_str(), "guidance_sources_changed");
-    let snapshot = guidance.build().expect("事实型恒有内容");
+    assert_eq!(guidance.fact().kind.as_str(), "guidance_sources_changed");
+    let snapshot = guidance.fact();
     assert_eq!(
         serde_json::from_str::<context::InvocationReminderData>(&snapshot.data).unwrap(),
         context::InvocationReminderData::GuidanceSourcesChanged {
             paths: vec!["~/.agents/guidance/_default.md".to_string()],
         }
     );
-    let rendered = guidance.render(&snapshot, "zh");
+    let rendered =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "zh");
     assert!(
         rendered.contains("用 Read 工具重新读取"),
         "Remind 形态带 Read 引导：{rendered}"
     );
     assert!(rendered.contains("~/.agents/guidance/_default.md"));
-    let policy = guidance.policy();
+    let policy = guidance.fact().policy;
     assert_eq!(policy.placement, context::ReminderPlacement::SystemTail);
 
     let mismatch =
         RunStartFactReminderSource::model_guidance_mismatch("session-model", "run-model");
-    assert_eq!(mismatch.kind().as_str(), "model_guidance_mismatch");
+    assert_eq!(mismatch.fact().kind.as_str(), "model_guidance_mismatch");
     assert_eq!(
-        mismatch.policy().placement,
+        mismatch.fact().policy.placement,
         context::ReminderPlacement::SystemTail
     );
-    let rendered = mismatch.render(&mismatch.build().unwrap(), "zh");
+    let rendered = crate::application::loop_engine::chat::reminder_sources::render_fact_body(
+        &mismatch.fact(),
+        "zh",
+    );
     assert!(rendered.contains("session-model"));
     assert!(rendered.contains("run-model"));
 
     let memory = RunStartFactReminderSource::memory_updated(3);
-    assert_eq!(memory.kind().as_str(), "memory_updated");
+    assert_eq!(memory.fact().kind.as_str(), "memory_updated");
     assert_eq!(
-        memory.policy().placement,
+        memory.fact().policy.placement,
         context::ReminderPlacement::TailUserMessage
     );
     assert!(matches!(
-        memory.policy().compact,
+        memory.fact().policy.compact,
         context::CompactBehavior::Drop
     ));
 }
@@ -245,8 +254,9 @@ async fn memory_recall_source_never_materializes_outdated_memory() {
         Arc::new(|| 4_242),
     );
     source.refresh("rust ownership").await;
-    let snapshot = source.build().expect("有效条目仍应物化");
-    let body = source.render(&snapshot, "zh");
+    let snapshot = source.fact().expect("有效条目仍应物化");
+    let body =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "zh");
     assert!(body.contains("有效条目"), "有效记忆必须在最终 reminder 中");
     assert!(!body.contains("历史编译器"), "过期记忆不得渗入 reminder");
     assert!(
@@ -263,14 +273,15 @@ async fn recall_refresh_caches_snapshot_and_build_renders() {
         Arc::new(|| 4_242),
     );
     assert!(
-        source.build().is_none(),
+        source.fact().is_none(),
         "refresh 前 build 应为空（无快照不注入）"
     );
 
     source.refresh("怎么用 worktree 隔离分支").await;
 
-    let snapshot = source.build().expect("refresh 后应有快照");
-    let rendered = source.render(&snapshot, "zh");
+    let snapshot = source.fact().expect("refresh 后应有快照");
+    let rendered =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "zh");
     assert!(rendered.contains("相关的记忆"), "渲染应含标题：{rendered}");
     assert!(rendered.contains("git worktree 的创建步骤"));
     assert!(!rendered.contains("烹饪食谱"), "低分候选不入 top-K");
@@ -284,12 +295,12 @@ async fn recall_below_threshold_clears_cache_and_skips_turn() {
         Arc::new(|| 4_242),
     );
     source.refresh("worktree 怎么用").await;
-    assert!(source.build().is_some(), "首次 refresh 应有快照");
+    assert!(source.fact().is_some(), "首次 refresh 应有快照");
 
     // 第二条消息词法零命中（与所有条目无公共词）→ 缓存清空（本 turn 不注入）。
     source.refresh("zzz 完全无关的话题").await;
     assert!(
-        source.build().is_none(),
+        source.fact().is_none(),
         "零命中消息的 refresh 必须清空旧快照（NEVER 用陈旧快照）"
     );
 
@@ -300,7 +311,7 @@ async fn recall_below_threshold_clears_cache_and_skips_turn() {
         Arc::new(|| 4_242),
     );
     low_source.refresh("随便聊聊").await;
-    assert!(low_source.build().is_none(), "top1 概率低于阈值时不得注入");
+    assert!(low_source.fact().is_none(), "top1 概率低于阈值时不得注入");
 }
 
 #[tokio::test]
@@ -312,7 +323,7 @@ async fn recall_scoring_failure_clears_cache_silently() {
     );
     source.refresh("worktree").await;
     assert!(
-        source.build().is_none(),
+        source.fact().is_none(),
         "评分服务不可用必须静默缺席（NEVER 阻断 turn）"
     );
 }
@@ -329,7 +340,7 @@ async fn recall_renews_only_entries_materialized_within_budget() {
         Arc::new(|| 4_242),
     );
     source.refresh("worktree").await;
-    let snapshot = source.build().expect("应物化召回快照");
+    let snapshot = source.fact().expect("应物化召回快照");
     let context::InvocationReminderData::MemoryRecall { entries } =
         serde_json::from_str(&snapshot.data).unwrap()
     else {
@@ -361,7 +372,7 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
         Arc::new(|| 4_242),
     );
     low_source.refresh("worktree").await;
-    assert!(low_source.build().is_none());
+    assert!(low_source.fact().is_none());
     assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
     let failed_source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
@@ -369,7 +380,7 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
         Arc::new(|| 4_242),
     );
     failed_source.refresh("worktree").await;
-    assert!(failed_source.build().is_none());
+    assert!(failed_source.fact().is_none());
     assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
     let accepted_source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
@@ -377,10 +388,10 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
         Arc::new(|| 4_242),
     );
     accepted_source.refresh("不存在的检索词").await;
-    assert!(accepted_source.build().is_none());
+    assert!(accepted_source.fact().is_none());
     assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
     accepted_source.refresh("worktree").await;
-    assert!(accepted_source.build().is_some());
+    assert!(accepted_source.fact().is_some());
     let renewed = memory.list(None).await;
     assert_eq!(renewed[0].last_confirmed_at, 4_242);
     assert_eq!(renewed[0].confirmation_count, 1);
@@ -400,7 +411,7 @@ async fn recall_budget_drops_tail_entries() {
         Arc::new(|| 4_242),
     );
     source.refresh("worktree").await;
-    let snapshot = source.build().expect("应有快照");
+    let snapshot = source.fact().expect("应有快照");
     let data: context::InvocationReminderData =
         serde_json::from_str(&snapshot.data).expect("合法快照");
     let count = match &data {
@@ -425,7 +436,7 @@ async fn recall_preview_keeps_full_content_within_write_limit() {
         Arc::new(|| 4_242),
     );
     source.refresh("完整结论怎么用").await;
-    let snapshot = source.build().expect("应有快照");
+    let snapshot = source.fact().expect("应有快照");
     let data: context::InvocationReminderData =
         serde_json::from_str(&snapshot.data).expect("合法快照");
     match &data {
@@ -450,7 +461,7 @@ async fn recall_preview_trims_overlong_entry_at_sentence_boundary_with_marker() 
         Arc::new(|| 4_242),
     );
     source.refresh("结论是什么").await;
-    let snapshot = source.build().expect("应有快照");
+    let snapshot = source.fact().expect("应有快照");
     let data: context::InvocationReminderData =
         serde_json::from_str(&snapshot.data).expect("合法快照");
     match &data {
@@ -481,9 +492,9 @@ async fn recall_snapshot_data_stable_for_same_result_set() {
         Arc::new(|| 4_242),
     );
     source.refresh("worktree 怎么用").await;
-    let first = source.build().expect("第一次快照").data;
+    let first = source.fact().expect("第一次快照").data;
     source.refresh("worktree 怎么用").await;
-    let second = source.build().expect("第二次快照").data;
+    let second = source.fact().expect("第二次快照").data;
     assert_eq!(
         first, second,
         "相同结果集的快照 data 必须稳定（SkipIfUnchanged 去重前提）"
@@ -495,10 +506,13 @@ fn background_process_source_policy_is_event_tail_dedup_rebuild() {
     let supervisor = Arc::new(
         crate::application::background_process::supervisor::BackgroundProcessSupervisor::new(),
     );
-    let source = BackgroundProcessReminderSource::new(supervisor);
+    let _source = BackgroundProcessReminderSource::new(supervisor);
 
-    assert_eq!(source.kind().as_str(), "background_process");
-    let policy = source.policy();
+    let policy = BackgroundProcessReminderSource::policy();
+    assert_eq!(
+        context::ReminderKind::background_process().as_str(),
+        "background_process"
+    );
     assert!(matches!(
         policy.refresh,
         context::RefreshTrigger::OnEvent(ref event)
@@ -523,7 +537,7 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
     let source = BackgroundProcessReminderSource::new(supervisor.clone());
 
     // 无终态任务：build 为 None（本轮无内容不入队）。
-    assert!(source.build().is_none());
+    assert!(source.fact().is_none());
 
     // 推进一个终态：build 携带完成条目（take 语义）。
     let task_id = supervisor.register(
@@ -538,7 +552,7 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
             Some("ok 3 passed\n".to_string()),
         )
         .unwrap();
-    let snapshot = source.build().expect("终态后应有快照");
+    let snapshot = source.fact().expect("终态后应有快照");
     let decoded: context::InvocationReminderData =
         serde_json::from_str(&snapshot.data).expect("快照为 InvocationReminderData JSON");
     match decoded {
@@ -550,14 +564,13 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
         other => panic!("应为 BackgroundProcessCompleted，实际 {other:?}"),
     }
 
-    // peek 语义（注入确认制）：确认前再 build 仍可见（Run 收口后
-    // 下个 Run 补注入）；注入确认后关闭。
-    assert!(source.build().is_some(), "确认前事实存活");
-    source.confirm_injected();
-    assert!(source.build().is_none(), "注入确认后不再重复");
+    // #2146 数据化：peek 即标记已通知（事实入队后由队列滞留/重注入
+    // 保障送达）；再次取事实不再重复。
+    assert!(source.fact().is_none(), "已通知事实不再重复");
 
     // render 委托 context 双语渲染。
-    let rendered = source.render(&snapshot, "zh");
+    let rendered =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "zh");
     assert!(rendered.contains("后台进程已完成"));
 }
 
@@ -581,13 +594,15 @@ fn config_sources_changed_renders_key_list_and_session_semantics() {
     let source = super::RunStartFactReminderSource::config_sources_changed(vec![
         "config:reloaded".to_string()
     ]);
-    assert_eq!(source.kind().as_str(), "config_sources_changed");
-    let snapshot = source.build().expect("快照必须可构建");
-    let zh = source.render(&snapshot, "zh");
+    assert_eq!(source.fact().kind.as_str(), "config_sources_changed");
+    let snapshot = source.fact();
+    let zh =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "zh");
     assert!(zh.contains("aemeath.json 配置已变更"), "zh 文案：{zh}");
     assert!(zh.contains("config:reloaded"), "变更键 MUST 出现：{zh}");
     assert!(zh.contains("下次会话生效"), "会话冻结语义：{zh}");
     assert!(zh.contains("agent 名册"), "名册提示：{zh}");
-    let en = source.render(&snapshot, "en");
+    let en =
+        crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "en");
     assert!(en.contains("configuration changed"));
 }

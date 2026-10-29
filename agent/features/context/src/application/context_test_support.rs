@@ -192,15 +192,7 @@ impl ContextAppendPort for RecordingContext {
 }
 
 impl ReminderControlPort for RecordingContext {
-    fn create_reminder_pipeline(
-        &self,
-        run_id: RunId,
-        sources: Vec<Arc<dyn crate::ReminderSource>>,
-    ) {
-        self.inner
-            .reminders
-            .create_reminder_pipeline(run_id, sources)
-    }
+    fn create_reminder_pipeline(&self, _run_id: sdk::RunId, _allowed: Vec<crate::ReminderKind>) {}
     fn drop_reminder_pipeline(&self, run_id: &RunId) {
         self.inner.reminders.drop_reminder_pipeline(run_id)
     }

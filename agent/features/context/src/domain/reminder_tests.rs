@@ -330,48 +330,33 @@ fn compose_reminder_user_message_merges_blocks_into_single_message() {
 
 // ---------- run_started 以 step=0 推进：interval source Run 启动即触发 ----------
 
-struct StaticDataTestSource {
-    kind: ReminderKind,
-    policy: ReminderPolicy,
-    snapshot: String,
-}
-
-impl ReminderSource for StaticDataTestSource {
-    fn kind(&self) -> ReminderKind {
-        self.kind.clone()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        self.policy.clone()
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
-        Some(ReminderSnapshot {
-            data: self.snapshot.clone(),
-        })
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        format!("[{language}] {}", snapshot.data)
-    }
-}
-
 #[test]
 fn run_started_triggers_step_interval_source_at_step_zero() {
-    let source = std::sync::Arc::new(StaticDataTestSource {
-        kind: ReminderKind::task_progress(),
+    let kind = ReminderKind::task_progress();
+    let mut pipeline =
+        crate::application::reminder_pipeline::ReminderPipeline::new(vec![kind.clone()]);
+    pipeline.push_fact(crate::domain::reminder::ReminderFactData {
+        kind,
         policy: interval_policy_for_domain(4),
-        snapshot: "total=3 completed=0".to_string(),
+        enqueue: crate::domain::reminder::ReminderEnqueue::Snapshot,
+        data: serde_json::to_string(&crate::domain::InvocationReminderData::TaskProgress(
+            crate::domain::TaskProgressReminderData {
+                total: 3,
+                completed: 0,
+                items: Vec::new(),
+                hidden_count: 0,
+            },
+        ))
+        .expect("载荷序列化"),
     });
-    let mut pipeline = crate::application::reminder_pipeline::ReminderPipeline::new(vec![source]);
 
     pipeline.run_started();
     let injection = pipeline.inject_into_window("zh", "2026-10-04T01:00:00+08:00", 512);
     assert!(
         injection
             .tail_user_message
-            .expect("interval source 在 Run 启动（step=0）触发")
-            .contains("[zh] total=3 completed=0"),
+            .expect("interval 事实在 Run 启动（step=0）触发")
+            .contains("kind=\"task-progress\""),
         "0 是任意间隔的倍数：TaskProgress 无需 OnRunStart + OnStepInterval 双声明"
     );
 }
@@ -390,41 +375,11 @@ fn interval_policy_for_domain(interval: u32) -> ReminderPolicy {
 
 // ---------- build 返回 None：本轮无内容不入队 ----------
 
-struct OptionalTestSource {
-    kind: ReminderKind,
-    snapshot: Option<String>,
-}
-
-impl ReminderSource for OptionalTestSource {
-    fn kind(&self) -> ReminderKind {
-        self.kind.clone()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        static_policy(
-            RefreshTrigger::OnRunStart,
-            ReminderPlacement::TailUserMessage,
-        )
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
-        self.snapshot
-            .as_ref()
-            .map(|data| ReminderSnapshot { data: data.clone() })
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        format!("[{language}] {}", snapshot.data)
-    }
-}
-
 #[test]
 fn build_returning_none_does_not_enqueue() {
-    let source = std::sync::Arc::new(OptionalTestSource {
-        kind: ReminderKind::task_progress(),
-        snapshot: None,
-    });
-    let mut pipeline = crate::application::reminder_pipeline::ReminderPipeline::new(vec![source]);
+    // #2146 数据化：无内容即不推送 fact（等价于旧 build 返回 None）。
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = crate::application::reminder_pipeline::ReminderPipeline::new(vec![kind]);
 
     pipeline.run_started();
     assert!(

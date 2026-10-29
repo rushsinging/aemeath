@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::reminder_pipeline::ReminderPipeline;
-use crate::domain::reminder::{ReminderEventSource, ReminderSource};
+use crate::domain::reminder::{ReminderEventSource, ReminderFactData, ReminderKind};
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
     CompactionDecisionData, ContextAppendData, ContextAppendError, ContextMessage,
@@ -514,11 +514,23 @@ impl ContextAppendPort for ContextApplicationService {
 
 impl ReminderControlPort for ContextApplicationService {
     /// Reminder 管线句柄：Run 启动创建（同 RunId 重复创建替换旧管线）。
-    fn create_reminder_pipeline(&self, run_id: RunId, sources: Vec<Arc<dyn ReminderSource>>) {
+    fn create_reminder_pipeline(&self, run_id: RunId, allowed: Vec<ReminderKind>) {
         self.reminder_pipelines
             .lock()
             .expect("reminder pipelines lock poisoned")
-            .insert(run_id, ReminderPipeline::new(sources));
+            .insert(run_id, ReminderPipeline::new(allowed));
+    }
+
+    /// Runtime 推送一条提醒事实（#2146 数据化接口）。
+    fn push_reminder_fact(&self, run_id: &RunId, fact: ReminderFactData) {
+        if let Some(pipeline) = self
+            .reminder_pipelines
+            .lock()
+            .expect("reminder pipelines lock poisoned")
+            .get_mut(run_id)
+        {
+            pipeline.push_fact(fact);
+        }
     }
 
     /// Reminder 管线句柄：Run 结束销毁。

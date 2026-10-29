@@ -784,36 +784,46 @@ where
                 // Reminder 统一管线（07-reminder-pipeline.md）：数据获取在
                 // Runtime、注入决策在 Context（placement / dedup / 预算 /
                 // compact 处置）。sources 按启动期事实条件注册。
-                let mut reminder_sources: Vec<std::sync::Arc<dyn context::ReminderSource>> = vec![
-                    std::sync::Arc::new(
-                        crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
-                            runtime_context.task(),
-                            share::config::TaskListConfig::default().max_lines,
-                        ),
-                    ),
-                    // #252 PR2：后台进程完成通知（OnEvent；Wakeup Run 内的
-                    // 完成事实注入同源——build take 语义保证只通知一次）。
-                    std::sync::Arc::new(
-                        crate::application::loop_engine::chat::reminder_sources::BackgroundProcessReminderSource::new(
-                            shell.background_process_supervisor(),
-                        ),
-                    ),
+                // Reminder 统一管线（07-reminder-pipeline.md）：数据获取在
+                // Runtime、注入决策在 Context。#2146 数据化接口：Runtime 经
+                // `push_reminder_fact` 推送事实（kind + 策略 + 载荷），
+                // Context 按策略时机入队、按 kind 内置模板渲染。
+                let task_progress_source =
+                    crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
+                        runtime_context.task(),
+                        share::config::TaskListConfig::default().max_lines,
+                    );
+                let background_process_source =
+                    crate::application::loop_engine::chat::reminder_sources::BackgroundProcessReminderSource::new(
+                        shell.background_process_supervisor(),
+                    );
+                let mut allowed_kinds: Vec<context::ReminderKind> = vec![
+                    context::ReminderKind::task_progress(),
+                    context::ReminderKind::background_process(),
                 ];
+                let mut startup_facts: Vec<context::ReminderFactData> = Vec::new();
+                if let Some(fact) = task_progress_source.fact() {
+                    startup_facts.push(fact);
+                }
+                if let Some(fact) = background_process_source.fact() {
+                    startup_facts.push(fact);
+                }
                 if !turn_boundary_config.guidance_changed_paths.is_empty() {
                     log::debug!(
                         target: crate::LOG_TARGET,
-                        "reminder_source_registered kind=guidance_sources_changed trigger=turn_boundary_config paths={:?}",
+                        "reminder_fact_registered kind=guidance_sources_changed trigger=turn_boundary_config paths={:?}",
                         turn_boundary_config.guidance_changed_paths,
                     );
-                    reminder_sources.push(std::sync::Arc::new(
+                    startup_facts.push(
                         crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::guidance_sources_changed(
                             turn_boundary_config.guidance_changed_paths.clone(),
                             runtime_context
                                 .config_ref()
                                 .config()
                                 .guidance_reload_policy(),
-                        ),
-                    ));
+                        )
+                        .fact(),
+                    );
                 }
                 // #2046：aemeath.json 配置变更（含 agents 名册）——模型可见
                 // Remind（ConfigReloaded 事件只到 TUI/SDK，本 Remind 是会话内
@@ -823,15 +833,12 @@ where
                     Ok(config::ConfigRefreshOutcomeData::Reloaded { .. })
                 ) {
                     let changed_keys = vec!["config:reloaded".to_string()];
-                    log::debug!(
-                        target: crate::LOG_TARGET,
-                        "reminder_source_registered kind=config_sources_changed trigger=turn_boundary_config"
-                    );
-                    reminder_sources.push(std::sync::Arc::new(
+                    startup_facts.push(
                         crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::config_sources_changed(
                             changed_keys,
-                        ),
-                    ));
+                        )
+                        .fact(),
+                    );
                 }
                 // #2015：防御复检被拒的组件变更——保留旧版已定案（loop_phases
                 // 内 warn + 事件剔除）；此处记录被拒面供后续组件装配 issue
@@ -844,33 +851,22 @@ where
                     );
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
-                    log::debug!(
-                        target: crate::LOG_TARGET,
-                        "reminder_source_registered kind=model_guidance_mismatch session_model={} run_model={}",
-                        shell.prompt_model_id,
-                        runtime_context.provider_ref().model.model,
-                    );
-                    reminder_sources.push(std::sync::Arc::new(
+                    startup_facts.push(
                         crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::model_guidance_mismatch(
                             shell.prompt_model_id.clone(),
                             runtime_context.provider_ref().model.model.clone(),
-                        ),
-                    ));
+                        )
+                        .fact(),
+                    );
                 }
                 if let Some(notice) = reflection_tasks.take_memory_update_notice() {
-                    // The TUI already showed the notice when reflection finished;
-                    // the model needs the same facts in the turn that follows it.
-                    log::debug!(
-                        target: crate::LOG_TARGET,
-                        "reminder_source_registered kind=memory_updated changed={}",
-                        notice.changed,
+                    startup_facts.push(
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::memory_updated(notice.changed)
+                            .fact(),
                     );
-                    reminder_sources.push(std::sync::Arc::new(
-                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::memory_updated(notice.changed),
-                    ));
                 }
-                // per-message 记忆召回（#1834）：开关开且评分端口已装配时注册 source
-                // 并写入 slot（accept_step_input 在 turn 边界 refresh 预物化）。
+                // per-message 记忆召回（#1834）：开关开且评分端口已装配时注册
+                // source 并写入 slot（accept_step_input 在 turn 边界 refresh 预物化）。
                 if let Some(scorer) = runtime_context.scoring_for_recall() {
                     if runtime_context.config_ref().config().scoring().memory_recall {
                         let recall_source = std::sync::Arc::new(
@@ -879,11 +875,7 @@ where
                                 scorer,
                             ),
                         );
-                        log::debug!(
-                            target: crate::LOG_TARGET,
-                            "reminder_source_registered kind=memory_recall trigger=on_user_message",
-                        );
-                        reminder_sources.push(recall_source.clone());
+                        allowed_kinds.push(context::ReminderKind::memory_recall());
                         if runtime_context.memory_recall_slot().set(recall_source).is_err() {
                             log::warn!(
                                 target: crate::LOG_TARGET,
@@ -895,8 +887,13 @@ where
                 let reminder_context_port = runtime_context.context();
                 reminder_context_port.reminders.create_reminder_pipeline(
                     run_id.clone(),
-                    std::mem::take(&mut reminder_sources),
+                    allowed_kinds,
                 );
+                for fact in startup_facts {
+                    reminder_context_port
+                        .reminders
+                        .push_reminder_fact(&run_id, fact);
+                }
                 reminder_context_port.reminders.reminder_run_started(&run_id);
                 // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
                 // 触发点——启动时显式触发 background_process 事件，把监督器内

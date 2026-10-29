@@ -1692,7 +1692,9 @@
         "render_invocation_reminder_body",
         "test_support",
         "wire_isolated_context",
-        "wire_isolated_context_with_workspace_skills"
+        "wire_isolated_context_with_workspace_skills",
+        "ReminderEnqueue",
+        "ReminderFactData"
       ],
       "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+ToolCallReceiptData/ToolCallState：后台进程 Backgrounded 中间态跨 crate 消费（receipt 状态语义）；+BackgroundProcessCompletionStatus/BackgroundProcessReminderItemData：#252 通知数据跨 crate 消费（runtime source 构造 reminder 条目）",
       "profile": "fast"
@@ -2958,14 +2960,6 @@
           "owner_crate": "context",
           "type": "sealed",
           "allowed_impl_crates": []
-        },
-        {
-          "trait_name": "ReminderSource",
-          "owner_crate": "context",
-          "type": "injected-host",
-          "allowed_impl_crates": [
-            "runtime"
-          ]
         },
         {
           "trait_name": "RsiLlmPort",

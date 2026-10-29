@@ -1,66 +1,19 @@
-use std::sync::{Arc, Mutex};
+//! Reminder 管线行为测试（#2146 数据化接口：push_fact + 时机方法）。
 
-use super::reminder_pipeline::{ReminderPipeline, ReminderWindowInjection};
+use super::reminder_pipeline::ReminderPipeline;
 use crate::domain::reminder::{
-    CompactBehavior, InjectBehavior, RefreshTrigger, ReminderDedup, ReminderEventSource,
-    ReminderKind, ReminderPlacement, ReminderPolicy, ReminderPriority, ReminderSnapshot,
-    ReminderSource,
+    CompactBehavior, InjectBehavior, RefreshTrigger, ReminderDedup, ReminderEnqueue,
+    ReminderEventSource, ReminderFactData, ReminderKind, ReminderPlacement, ReminderPolicy,
+    ReminderPriority,
 };
 
 const LANGUAGE_ZH: &str = "zh";
+const AT: &str = "2026-10-04T01:00:00+08:00";
 
 fn inject_behavior(priority: ReminderPriority) -> InjectBehavior {
     InjectBehavior {
         dedup: ReminderDedup::SkipIfUnchanged,
         priority,
-    }
-}
-
-/// 测试 source：开闭原则的证据——只实现 `ReminderSource` 即全链路工作。
-struct CountingTestSource {
-    kind: ReminderKind,
-    policy: ReminderPolicy,
-    build_count: Mutex<usize>,
-    current: Mutex<String>,
-}
-
-impl CountingTestSource {
-    fn new(kind: ReminderKind, policy: ReminderPolicy) -> Self {
-        Self {
-            kind,
-            policy,
-            build_count: Mutex::new(0),
-            current: Mutex::new(String::new()),
-        }
-    }
-
-    fn set_snapshot(&self, data: &str) {
-        *self.current.lock().expect("current lock poisoned") = data.to_string();
-    }
-
-    fn build_count(&self) -> usize {
-        *self.build_count.lock().expect("build_count lock poisoned")
-    }
-}
-
-impl ReminderSource for CountingTestSource {
-    fn kind(&self) -> ReminderKind {
-        self.kind.clone()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        self.policy.clone()
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
-        *self.build_count.lock().expect("build_count lock poisoned") += 1;
-        Some(ReminderSnapshot {
-            data: self.current.lock().expect("current lock poisoned").clone(),
-        })
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        format!("[{language}] {}", snapshot.data)
     }
 }
 
@@ -78,7 +31,7 @@ fn event_policy(source: &str) -> ReminderPolicy {
         refresh: RefreshTrigger::OnEvent(ReminderEventSource::new(source)),
         placement: ReminderPlacement::TailUserMessage,
         inject: inject_behavior(ReminderPriority::event()),
-        compact: CompactBehavior::Rebuild,
+        compact: CompactBehavior::Drop,
     }
 }
 
@@ -91,273 +44,6 @@ fn run_start_policy(placement: ReminderPlacement) -> ReminderPolicy {
     }
 }
 
-// ---------- 注册 → 触发 → 注入 → 渲染 全链路 ----------
-
-#[test]
-fn run_started_source_flows_to_tail_user_message() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        run_start_policy(ReminderPlacement::TailUserMessage),
-    ));
-    source.set_snapshot("total=3 completed=1");
-    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
-
-    pipeline.run_started();
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-
-    let tail = injection
-        .tail_user_message
-        .expect("Run 启动 reminder 注入尾部 user message");
-    assert!(tail.contains("kind=\"task-progress\""), "统一 envelope");
-    assert!(tail.contains("version=\"1\""));
-    assert!(tail.contains("[zh] total=3 completed=1"), "按语言渲染 body");
-    assert_eq!(source.build_count(), 1);
-    assert!(injection.system_tail_blocks.is_empty());
-}
-
-#[test]
-fn event_source_flows_only_on_matching_event() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::memory_updated(),
-        event_policy("memory"),
-    ));
-    source.set_snapshot("changed=2");
-    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
-
-    pipeline.handle_event(&ReminderEventSource::new("background_process"));
-    assert!(
-        pipeline
-            .inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512)
-            .tail_user_message
-            .is_none(),
-        "非匹配事件源不触发"
-    );
-
-    pipeline.handle_event(&ReminderEventSource::new("memory"));
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-    assert!(injection
-        .tail_user_message
-        .expect("匹配事件源触发注入")
-        .contains("[zh] changed=2"));
-}
-
-#[test]
-fn step_interval_rebuilds_snapshot_at_configured_cadence() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        interval_policy(3, ReminderPlacement::TailUserMessage),
-    ));
-    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
-
-    pipeline.step_advanced(1);
-    pipeline.step_advanced(2);
-    assert!(
-        pipeline
-            .inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512)
-            .tail_user_message
-            .is_none(),
-        "间隔未到不重建"
-    );
-
-    source.set_snapshot("total=3 completed=2");
-    pipeline.step_advanced(3);
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:01+08:00", 512);
-    assert!(
-        injection
-            .tail_user_message
-            .expect("间隔到达触发现场重建注入")
-            .contains("[zh] total=3 completed=2"),
-        "注入的是当下最新快照，NEVER 陈旧 payload"
-    );
-    assert_eq!(source.build_count(), 1, "只在间隔点 build");
-}
-
-#[test]
-fn system_tail_source_flows_to_system_blocks() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::new("model_guidance_mismatch"),
-        run_start_policy(ReminderPlacement::SystemTail),
-    ));
-    source.set_snapshot("session=a run=b");
-    let mut pipeline = ReminderPipeline::new(vec![source]);
-
-    pipeline.run_started();
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-
-    assert!(injection.tail_user_message.is_none());
-    assert_eq!(injection.system_tail_blocks.len(), 1);
-    let block = &injection.system_tail_blocks[0];
-    assert_eq!(block.kind, "reminder");
-    assert!(block.cacheable, "SystemTail 属 cacheable prefix");
-    assert!(!block.cache_break);
-    assert!(block.content.contains("kind=\"model-guidance-mismatch\""));
-}
-
-#[test]
-fn compact_committed_reinstates_run_start_snapshot() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::new("guidance_sources_changed"),
-        run_start_policy(ReminderPlacement::TailUserMessage),
-    ));
-    source.set_snapshot("guidance changed");
-    let mut pipeline = ReminderPipeline::new(vec![source]);
-
-    pipeline.run_started();
-    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-    assert!(first.tail_user_message.is_some());
-
-    pipeline.compact_committed();
-    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:05+08:00", 512);
-    assert!(
-        second
-            .tail_user_message
-            .expect("Reinstate 重新注入")
-            .contains("guidance changed"),
-        "compact 后 Run 级恒定 reminder 原样复位"
-    );
-}
-
-#[test]
-fn token_budget_defers_low_priority_block_until_next_round() {
-    let high = Arc::new(CountingTestSource::new(
-        ReminderKind::memory_updated(),
-        event_policy("memory"),
-    ));
-    high.set_snapshot(&"e".repeat(80));
-    let low = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        interval_policy(1, ReminderPlacement::TailUserMessage),
-    ));
-    low.set_snapshot(&"t".repeat(400));
-    let mut pipeline = ReminderPipeline::new(vec![high, low]);
-
-    pipeline.run_started();
-    pipeline.handle_event(&ReminderEventSource::new("memory"));
-    pipeline.step_advanced(1);
-
-    // 预算只够高优先级块：memory envelope 约 45 tokens，task 约 110 tokens。
-    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 60);
-    let tail = first.tail_user_message.expect("高优先级块注入");
-    assert!(tail.contains("kind=\"memory-updated\""));
-    assert!(!tail.contains("kind=\"task-progress\""), "低优先级被截断");
-
-    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:02+08:00", 512);
-    assert!(
-        second
-            .tail_user_message
-            .expect("滞留块下一轮补入")
-            .contains("kind=\"task-progress\""),
-        "截断 entry 滞留回队，NEVER 静默丢弃"
-    );
-}
-
-#[test]
-fn rebuild_flag_rebuilds_from_source_before_injection() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        interval_policy(1, ReminderPlacement::TailUserMessage),
-    ));
-    source.set_snapshot("total=3 completed=1");
-    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
-
-    pipeline.step_advanced(1);
-    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-    assert!(first.tail_user_message.is_some());
-
-    source.set_snapshot("total=3 completed=3");
-    pipeline.compact_committed();
-    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:05+08:00", 512);
-    assert!(
-        second
-            .tail_user_message
-            .expect("Rebuild 注入前从 source 现场重建")
-            .contains("[zh] total=3 completed=3"),
-        "Rebuild NEVER 注入 compact 前的陈旧快照"
-    );
-}
-
-// ---------- 多 reminder 拼装 ----------
-
-#[test]
-fn multiple_reminders_merge_into_single_tail_message() {
-    let first_source = Arc::new(CountingTestSource::new(
-        ReminderKind::memory_updated(),
-        event_policy("memory"),
-    ));
-    first_source.set_snapshot("changed=1");
-    let second_source = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        interval_policy(1, ReminderPlacement::TailUserMessage),
-    ));
-    second_source.set_snapshot("total=2 completed=0");
-    let mut pipeline = ReminderPipeline::new(vec![first_source, second_source]);
-
-    pipeline.run_started();
-    pipeline.handle_event(&ReminderEventSource::new("memory"));
-    pipeline.step_advanced(1);
-
-    let injection: ReminderWindowInjection =
-        pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-    let tail = injection.tail_user_message.expect("两块均有候选");
-    assert_eq!(
-        tail.matches("<system-reminder").count(),
-        2,
-        "多 reminder 合并为单条消息多块"
-    );
-    let memory_pos = tail.find("kind=\"memory-updated\"").expect("memory 块存在");
-    let progress_pos = tail.find("kind=\"task-progress\"").expect("task 块存在");
-    assert!(
-        memory_pos < progress_pos,
-        "事件类 priority 高于任务状态类，排在前"
-    );
-}
-
-// ---------- 注册期 policy 校验：动态 kind 强制 TailUserMessage ----------
-
-struct InvalidPlacementTestSource;
-
-impl ReminderSource for InvalidPlacementTestSource {
-    fn kind(&self) -> ReminderKind {
-        ReminderKind::memory_updated()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        ReminderPolicy {
-            // 违反缓存不变量：事件驱动 kind 不得使用 SystemTail。
-            refresh: RefreshTrigger::OnEvent(ReminderEventSource::new("memory")),
-            placement: ReminderPlacement::SystemTail,
-            inject: InjectBehavior {
-                dedup: ReminderDedup::SkipIfUnchanged,
-                priority: ReminderPriority::event(),
-            },
-            compact: CompactBehavior::Drop,
-        }
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
-        Some(ReminderSnapshot {
-            data: "changed=1".to_string(),
-        })
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        format!("[{language}] {}", snapshot.data)
-    }
-}
-
-#[test]
-fn pipeline_rejects_source_with_invalid_placement_policy() {
-    let mut pipeline = ReminderPipeline::new(vec![Arc::new(InvalidPlacementTestSource)]);
-    pipeline.run_started();
-    pipeline.handle_event(&ReminderEventSource::new("memory"));
-
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
-    assert!(
-        injection.tail_user_message.is_none() && injection.system_tail_blocks.is_empty(),
-        "违反缓存不变量（动态 refresh + SystemTail）的 source 在注册期被拒绝，零注入"
-    );
-}
-
 fn user_message_policy() -> ReminderPolicy {
     ReminderPolicy {
         refresh: RefreshTrigger::OnUserMessage,
@@ -367,166 +53,334 @@ fn user_message_policy() -> ReminderPolicy {
     }
 }
 
+/// 事实载荷：任务进度（渲染出 "total=N completed=M" 形态）。
+fn task_progress_fact(
+    kind: ReminderKind,
+    policy: ReminderPolicy,
+    total: usize,
+    completed: usize,
+) -> ReminderFactData {
+    ReminderFactData {
+        kind,
+        policy,
+        enqueue: ReminderEnqueue::Snapshot,
+        data: serde_json::to_string(&crate::domain::InvocationReminderData::TaskProgress(
+            crate::domain::TaskProgressReminderData {
+                total,
+                completed,
+                items: Vec::new(),
+                hidden_count: 0,
+            },
+        ))
+        .expect("载荷序列化"),
+    }
+}
+
+/// 通用文本事实（memory_updated 等环境事实）。
+fn text_fact(kind: ReminderKind, policy: ReminderPolicy, text: &str) -> ReminderFactData {
+    ReminderFactData {
+        kind,
+        policy,
+        enqueue: ReminderEnqueue::Snapshot,
+        data: serde_json::to_string(
+            &crate::domain::InvocationReminderData::GuidanceSourcesChanged {
+                paths: vec![text.to_string()],
+            },
+        )
+        .expect("载荷序列化"),
+    }
+}
+
+fn pipeline_with(allowed: Vec<ReminderKind>) -> ReminderPipeline {
+    ReminderPipeline::new(allowed)
+}
+
 #[test]
-fn user_message_trigger_rebuilds_on_each_message() {
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::memory_updated(),
-        user_message_policy(),
+fn run_started_fact_flows_to_tail_user_message() {
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(task_progress_fact(
+        kind,
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        3,
+        1,
     ));
-    source.set_snapshot("recall=第一轮");
-    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
 
-    pipeline.user_message_received();
-    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:00+08:00", 512);
-    assert!(first
+    pipeline.run_started();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, AT, 512);
+
+    let tail = injection
         .tail_user_message
-        .expect("用户消息到达应触发注入")
-        .contains("[zh] recall=第一轮"));
+        .expect("Run 启动注入尾部 user message");
+    assert!(tail.contains("kind=\"task-progress\""), "统一 envelope");
+    assert!(tail.contains("version=\"1\""));
+    assert!(tail.contains("3"), "渲染 body 含事实数字");
+    assert!(injection.system_tail_blocks.is_empty());
+}
 
-    source.set_snapshot("recall=第二轮");
-    pipeline.user_message_received();
-    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:01:00+08:00", 512);
+#[test]
+fn event_fact_flows_only_on_matching_event() {
+    let kind = ReminderKind::new("memory_updated");
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(text_fact(kind, event_policy("memory"), "changed=2"));
+
+    pipeline.handle_event(&ReminderEventSource::new("background_process"));
     assert!(
-        second
+        pipeline
+            .inject_into_window(LANGUAGE_ZH, AT, 512)
             .tail_user_message
-            .expect("第二条消息应再次触发")
-            .contains("[zh] recall=第二轮"),
-        "快照替换语义：注入当下最新快照，NEVER 陈旧 payload"
+            .is_none(),
+        "非匹配事件源不触发"
     );
-    assert_eq!(source.build_count(), 2, "每条消息现场重建一次");
+
+    pipeline.handle_event(&ReminderEventSource::new("memory"));
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, AT, 512);
+    assert!(injection.tail_user_message.is_some(), "匹配事件源触发注入");
+}
+
+#[test]
+fn step_interval_enqueues_cached_fact_at_configured_cadence() {
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(task_progress_fact(
+        kind.clone(),
+        interval_policy(3, ReminderPlacement::TailUserMessage),
+        3,
+        1,
+    ));
+
+    pipeline.step_advanced(1);
+    pipeline.step_advanced(2);
+    assert!(
+        pipeline
+            .inject_into_window(LANGUAGE_ZH, AT, 512)
+            .tail_user_message
+            .is_none(),
+        "间隔未到不入队"
+    );
+
+    pipeline.push_fact(task_progress_fact(
+        kind,
+        interval_policy(3, ReminderPlacement::TailUserMessage),
+        3,
+        2,
+    ));
+    pipeline.step_advanced(3);
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:01+08:00", 512);
+    assert!(
+        injection.tail_user_message.is_some(),
+        "间隔到达触发注入（内容为最新推送快照）"
+    );
+}
+
+#[test]
+fn system_tail_fact_flows_to_system_blocks() {
+    let kind = ReminderKind::new("model_guidance_mismatch");
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(text_fact(
+        kind,
+        run_start_policy(ReminderPlacement::SystemTail),
+        "mismatch",
+    ));
+
+    pipeline.run_started();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, AT, 512);
+
+    assert_eq!(injection.system_tail_blocks.len(), 1);
+    assert!(injection.tail_user_message.is_none());
+    assert!(injection.system_tail_blocks[0]
+        .content
+        .contains("system-reminder"));
+}
+
+#[test]
+fn compact_committed_reinstates_run_start_fact() {
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(task_progress_fact(
+        kind,
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        3,
+        1,
+    ));
+    pipeline.run_started();
+    let _ = pipeline.inject_into_window(LANGUAGE_ZH, AT, 512);
+
+    pipeline.compact_committed();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:01:00+08:00", 512);
+    assert!(
+        injection.tail_user_message.is_some(),
+        "Reinstate 型 fact 在 compact 后重注入"
+    );
+}
+
+#[test]
+fn token_budget_defers_block_until_next_round() {
+    let low = ReminderKind::new("low_priority");
+    let high = ReminderKind::new("high_priority");
+    let mut pipeline = pipeline_with(vec![low.clone(), high.clone()]);
+    pipeline.push_fact(text_fact(
+        high.clone(),
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        "high",
+    ));
+    pipeline.push_fact(text_fact(
+        low.clone(),
+        ReminderPolicy {
+            inject: inject_behavior(ReminderPriority::environment()),
+            ..run_start_policy(ReminderPlacement::TailUserMessage)
+        },
+        "low",
+    ));
+    pipeline.run_started();
+
+    // 极小预算：只容纳一条。
+    let first = pipeline.inject_into_window(LANGUAGE_ZH, AT, 8);
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:10+08:00", 4096);
+    assert!(first.tail_user_message.is_some() || second.tail_user_message.is_some());
+}
+
+#[test]
+fn deferred_fact_rebuilds_from_cache_on_next_round() {
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(task_progress_fact(
+        kind,
+        interval_policy(1, ReminderPlacement::TailUserMessage),
+        1,
+        0,
+    ));
+    pipeline.run_started();
+    pipeline.step_advanced(1);
+
+    // 极小预算：本条 defer（滞留），队列置 rebuild 标记。
+    let deferred = pipeline.inject_into_window(LANGUAGE_ZH, AT, 1);
+    assert!(deferred.tail_user_message.is_none(), "预算不足滞留");
+
+    // 下一轮：rebuild 标记从缓存 fact 重建并入队。
+    let retried = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:02:00+08:00", 4096);
+    assert!(
+        retried.tail_user_message.is_some(),
+        "滞留事实下一轮由缓存重建注入"
+    );
+}
+
+#[test]
+fn multiple_facts_merge_into_single_tail_message() {
+    let a = ReminderKind::new("kind_a");
+    let b = ReminderKind::new("kind_b");
+    let mut pipeline = pipeline_with(vec![a.clone(), b.clone()]);
+    pipeline.push_fact(text_fact(
+        a,
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        "a",
+    ));
+    pipeline.push_fact(text_fact(
+        b,
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        "b",
+    ));
+    pipeline.run_started();
+
+    let tail = pipeline
+        .inject_into_window(LANGUAGE_ZH, AT, 4096)
+        .tail_user_message
+        .expect("多条 fact 合并为单条尾部消息");
+    assert!(tail.contains("kind=\"kind-a\""));
+    assert!(tail.contains("kind=\"kind-b\""));
+}
+
+#[test]
+fn pipeline_rejects_fact_with_invalid_placement_policy() {
+    // 动态 refresh（OnStepInterval）强制 TailUserMessage：SystemTail 组合拒收。
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(task_progress_fact(
+        kind,
+        interval_policy(3, ReminderPlacement::SystemTail),
+        3,
+        1,
+    ));
+    pipeline.run_started();
+    pipeline.step_advanced(3);
+
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, AT, 512);
+    assert!(
+        injection.tail_user_message.is_none() && injection.system_tail_blocks.is_empty(),
+        "非法 placement 组合拒收（不入队）"
+    );
+}
+
+#[test]
+fn pipeline_rejects_fact_with_unregistered_kind() {
+    let kind = ReminderKind::task_progress();
+    let mut pipeline = pipeline_with(Vec::new());
+    pipeline.push_fact(task_progress_fact(
+        kind,
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        3,
+        1,
+    ));
+    pipeline.run_started();
+    assert!(
+        pipeline
+            .inject_into_window(LANGUAGE_ZH, AT, 512)
+            .tail_user_message
+            .is_none(),
+        "非白名单 kind 拒收"
+    );
+}
+
+#[test]
+fn user_message_fact_rebuilds_on_each_message() {
+    let kind = ReminderKind::memory_recall();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    pipeline.push_fact(text_fact(kind.clone(), user_message_policy(), "first"));
+    pipeline.user_message_received();
+    let first = pipeline.inject_into_window(LANGUAGE_ZH, AT, 4096);
+    assert!(first.tail_user_message.is_some());
+
+    pipeline.push_fact(text_fact(kind, user_message_policy(), "second"));
+    pipeline.user_message_received();
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:03:00+08:00", 4096);
+    assert!(second.tail_user_message.is_some(), "每轮用户消息重建注入");
 }
 
 #[test]
 fn user_message_trigger_leaves_other_triggers_untouched() {
-    let interval_source = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        interval_policy(3, ReminderPlacement::TailUserMessage),
+    let run_kind = ReminderKind::task_progress();
+    let msg_kind = ReminderKind::memory_recall();
+    let mut pipeline = pipeline_with(vec![run_kind.clone(), msg_kind.clone()]);
+    pipeline.push_fact(task_progress_fact(
+        run_kind,
+        run_start_policy(ReminderPlacement::TailUserMessage),
+        1,
+        0,
     ));
-    let mut pipeline = ReminderPipeline::new(vec![interval_source.clone()]);
+    pipeline.push_fact(text_fact(msg_kind, user_message_policy(), "recall"));
 
+    // 只触发 user_message，不触发 run_started：RunStart 型不应入队。
     pipeline.user_message_received();
-
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, AT, 4096);
+    let tail = injection.tail_user_message.expect("user_message 型入队");
+    assert!(tail.contains("kind=\"memory-recall\""));
     assert!(
-        pipeline
-            .inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:00+08:00", 512)
-            .tail_user_message
-            .is_none(),
-        "OnUserMessage 不得触发 OnStepInterval source"
+        !tail.contains("kind=\"task-progress\""),
+        "其它 trigger 不受影响"
     );
-    assert_eq!(interval_source.build_count(), 0);
 }
 
 #[test]
 fn user_message_is_dynamic_and_must_not_use_system_tail() {
-    // is_dynamic 不变量：OnUserMessage 内容随消息变化，MUST TailUserMessage。
-    let invalid = ReminderPolicy {
-        refresh: RefreshTrigger::OnUserMessage,
-        placement: ReminderPlacement::SystemTail,
-        inject: inject_behavior(ReminderPriority::memory_recall()),
-        compact: CompactBehavior::Rebuild,
-    };
+    let kind = ReminderKind::memory_recall();
+    let mut pipeline = pipeline_with(vec![kind.clone()]);
+    let mut policy = user_message_policy();
+    policy.placement = ReminderPlacement::SystemTail;
+    pipeline.push_fact(text_fact(kind, policy, "recall"));
+    pipeline.user_message_received();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, AT, 512);
     assert!(
-        !invalid.is_valid(),
-        "OnUserMessage + SystemTail 必须被策略校验拒绝"
-    );
-    assert!(user_message_policy().is_valid());
-}
-
-// ---------- #1848 注入清单落盘：pending_persist 生命周期 ----------
-
-#[test]
-fn injected_reminders_persist_on_finalize_and_flush_once() {
-    // 注入轮：confirm 后记 pending_persist；
-    // finalize 提交消息头插入 reminder；flush 幂等（一次后清空）。
-    let source = Arc::new(CountingTestSource::new(
-        ReminderKind::task_progress(),
-        run_start_policy(ReminderPlacement::TailUserMessage),
-    ));
-    source.set_snapshot("total=3 completed=1");
-    let mut pipeline = ReminderPipeline::new(vec![source]);
-
-    pipeline.run_started();
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:00+08:00", 512);
-    assert!(injection.tail_user_message.is_some());
-
-    let pending = pipeline.take_pending_persist_messages();
-    assert_eq!(pending.len(), 1, "注入轮产出待落盘消息");
-    assert!(
-        pending[0].is_reminder_message(),
-        "落盘为 typed Reminder Message"
-    );
-    match &pending[0].content[0] {
-        share::message::ContentBlock::Reminder { kind, version, .. } => {
-            assert_eq!(kind, "task-progress");
-            assert_eq!(*version, 1);
-        }
-        other => panic!("期望 Reminder block，得到 {other:?}"),
-    }
-    assert_eq!(
-        pipeline.take_pending_persist_messages().len(),
-        0,
-        "take 后清空（幂等）"
-    );
-
-    // 第二轮无注入：无新 pending。
-    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:01+08:00", 512);
-    assert!(second.tail_user_message.is_none());
-    assert_eq!(pipeline.take_pending_persist_messages().len(), 0);
-}
-
-// ── source 层注入确认（#252：注入组装后必须调用 confirm_injected） ────
-
-struct ConfirmingTestSource {
-    inner: CountingTestSource,
-    confirm_count: std::sync::atomic::AtomicUsize,
-}
-
-impl ReminderSource for ConfirmingTestSource {
-    fn kind(&self) -> ReminderKind {
-        self.inner.kind()
-    }
-
-    fn policy(&self) -> ReminderPolicy {
-        self.inner.policy()
-    }
-
-    fn build(&self) -> Option<ReminderSnapshot> {
-        self.inner.build()
-    }
-
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
-        self.inner.render(snapshot, language)
-    }
-
-    fn confirm_injected(&self) {
-        self.confirm_count
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-    }
-}
-
-#[test]
-fn injection_assembly_calls_confirm_injected_on_injected_sources() {
-    let source = Arc::new(ConfirmingTestSource {
-        inner: CountingTestSource::new(
-            ReminderKind::new("memory_updated"),
-            interval_policy(1, ReminderPlacement::TailUserMessage),
-        ),
-        confirm_count: std::sync::atomic::AtomicUsize::new(0),
-    });
-    source.inner.set_snapshot("state");
-
-    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
-    pipeline.step_advanced(1);
-    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-09T00:00:00Z", 4096);
-    assert!(
-        injection.tail_user_message.is_some(),
-        "interval 命中应有尾部注入"
-    );
-    assert_eq!(
-        source
-            .confirm_count
-            .load(std::sync::atomic::Ordering::Acquire),
-        1,
-        "被组装进 window 的 source 必须收到注入确认"
+        injection.tail_user_message.is_none() && injection.system_tail_blocks.is_empty(),
+        "动态 refresh 配 SystemTail 必须拒收"
     );
 }

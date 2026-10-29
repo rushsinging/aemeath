@@ -558,33 +558,43 @@ impl AgentRunner for CliAgentRunner {
                 },
             );
             // Reminder 统一管线（07-reminder-pipeline.md）：sub run 与 main 同一
-            // 机制——sources 按 derived 启动期事实条件注册，句柄随 derived run 销毁。
-            let mut derived_reminder_sources: Vec<std::sync::Arc<dyn context::ReminderSource>> =
-                vec![std::sync::Arc::new(
-                    crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
-                        runtime_context.task(),
-                        share::config::TaskListConfig::default().max_lines,
-                    ),
-                )];
+            // 机制。#2146 数据化接口：Runtime 推送事实，句柄随 derived run 销毁。
+            let task_progress_source =
+                crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
+                    runtime_context.task(),
+                    share::config::TaskListConfig::default().max_lines,
+                );
+            let mut derived_allowed: Vec<context::ReminderKind> =
+                vec![context::ReminderKind::task_progress()];
+            let mut derived_facts: Vec<context::ReminderFactData> = Vec::new();
+            if let Some(fact) = task_progress_source.fact() {
+                derived_facts.push(fact);
+            }
             if model_name != parent_frame.context.provider_ref().model.model {
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "reminder_source_registered kind=model_guidance_mismatch session_model={} run_model={} scope=derived",
+                    "reminder_fact_registered kind=model_guidance_mismatch session_model={} run_model={} scope=derived",
                     parent_frame.context.provider_ref().model.model,
                     model_name,
                 );
-                derived_reminder_sources.push(std::sync::Arc::new(
+                derived_facts.push(
                     crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::model_guidance_mismatch(
                         parent_frame.context.provider_ref().model.model.clone(),
                         model_name.clone(),
-                    ),
-                ));
+                    )
+                    .fact(),
+                );
             }
             let derived_context_port = runtime_context.context();
             derived_context_port.reminders.create_reminder_pipeline(
                 run_id.clone(),
-                std::mem::take(&mut derived_reminder_sources),
+                std::mem::take(&mut derived_allowed),
             );
+            for fact in derived_facts {
+                derived_context_port
+                    .reminders
+                    .push_reminder_fact(&run_id, fact);
+            }
             derived_context_port.reminders.reminder_run_started(&run_id);
             let persistence =
                 crate::application::loop_engine::run_services::RuntimeStepPersistence::new(

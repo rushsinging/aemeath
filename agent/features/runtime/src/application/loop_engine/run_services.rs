@@ -121,6 +121,20 @@ where
         // Main 与 Derived 统一在此推进 step 计数（历史实现 Derived 在
         // invoke 前递增、Main 不递增导致 OnStepInterval 在 Main 从不触发）。
         let step_ordinal = execution.advance_step_ordinal();
+        // #2146 数据化：step 边界推送任务进度事实（数据在 Runtime），
+        // 管线下一次 step_advanced 按 OnStepInterval 倍数入队。
+        let task_progress_source =
+            crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
+                self.context_request.runtime_context.task(),
+                share::config::TaskListConfig::default().max_lines,
+            );
+        if let Some(fact) = task_progress_source.fact() {
+            self.context_request
+                .runtime_context
+                .context()
+                .reminders
+                .push_reminder_fact(&self.run_id, fact);
+        }
         self.context_request
             .runtime_context
             .context()
@@ -148,6 +162,13 @@ where
                 .filter(|text| !text.trim().is_empty());
             if let Some(text) = latest_user_text {
                 recall_source.refresh(&text).await;
+            }
+            if let Some(fact) = recall_source.fact() {
+                self.context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .push_reminder_fact(&self.run_id, fact);
             }
             self.context_request
                 .runtime_context
