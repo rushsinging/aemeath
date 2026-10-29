@@ -18,23 +18,33 @@ fn static_policy(refresh: RefreshTrigger, placement: ReminderPlacement) -> Remin
     }
 }
 
+/// 队列便捷入队策略（只关心 inject 行为的测试场景）。
+fn policy_with(inject: InjectBehavior) -> ReminderPolicy {
+    ReminderPolicy {
+        refresh: RefreshTrigger::OnRunStart,
+        placement: ReminderPlacement::TailUserMessage,
+        inject,
+        compact: CompactBehavior::Reinstate,
+    }
+}
+
 fn queue_with_entries() -> ReminderQueue {
     let mut queue = ReminderQueue::new();
     queue.push_snapshot(
         ReminderKind::task_progress(),
         snapshot_of("total=3 completed=1"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::task_state(),
-        },
+        }),
     );
     queue.push_event(
         ReminderKind::memory_updated(),
         snapshot_of("changed=2"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::event(),
-        },
+        }),
     );
     queue
 }
@@ -58,18 +68,18 @@ fn push_snapshot_replaces_pending_entry_of_same_kind() {
     queue.push_snapshot(
         ReminderKind::task_progress(),
         snapshot_of("total=3 completed=1"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::task_state(),
-        },
+        }),
     );
     queue.push_snapshot(
         ReminderKind::task_progress(),
         snapshot_of("total=3 completed=2"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::task_state(),
-        },
+        }),
     );
 
     let candidates = queue.begin_injection();
@@ -87,18 +97,18 @@ fn push_event_accumulates_entries_of_same_kind() {
     queue.push_event(
         ReminderKind::memory_updated(),
         snapshot_of("changed=1"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::event(),
-        },
+        }),
     );
     queue.push_event(
         ReminderKind::memory_updated(),
         snapshot_of("changed=3"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::event(),
-        },
+        }),
     );
 
     let candidates = queue.begin_injection();
@@ -131,10 +141,10 @@ fn confirm_injection_skips_same_fingerprint_next_round() {
     queue.push_snapshot(
         ReminderKind::task_progress(),
         snapshot_of("total=3 completed=1"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::task_state(),
-        },
+        }),
     );
 
     let mut queue = queue_with_entries();
@@ -146,10 +156,10 @@ fn confirm_injection_skips_same_fingerprint_next_round() {
     queue.push_snapshot(
         ReminderKind::task_progress(),
         snapshot_of("total=3 completed=1"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::task_state(),
-        },
+        }),
     );
     assert!(
         queue.begin_injection().is_empty(),
@@ -160,10 +170,10 @@ fn confirm_injection_skips_same_fingerprint_next_round() {
     queue.push_snapshot(
         ReminderKind::task_progress(),
         snapshot_of("total=3 completed=2"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::task_state(),
-        },
+        }),
     );
     let candidates = queue.begin_injection();
     assert_eq!(kinds_of(&candidates), vec!["task_progress".to_string()]);
@@ -250,10 +260,10 @@ fn apply_compact_outcome_drop_removes_and_blocks_kind() {
     queue.push_event(
         ReminderKind::memory_updated(),
         snapshot_of("changed=9"),
-        InjectBehavior {
+        policy_with(InjectBehavior {
             dedup: ReminderDedup::SkipIfUnchanged,
             priority: ReminderPriority::event(),
-        },
+        }),
     );
     assert!(
         !kinds_of(&queue.begin_injection()).contains(&"memory_updated".to_string()),
@@ -333,12 +343,15 @@ fn compose_reminder_user_message_merges_blocks_into_single_message() {
 #[test]
 fn run_started_triggers_step_interval_source_at_step_zero() {
     let kind = ReminderKind::task_progress();
+    let mut store = crate::domain::reminder::ReminderFactStore::default();
     let mut pipeline =
         crate::application::reminder_pipeline::ReminderPipeline::new(vec![kind.clone()]);
-    pipeline.push_fact(crate::domain::reminder::ReminderFactData {
+    store.push(crate::domain::reminder::ReminderFactData {
         kind,
         policy: interval_policy_for_domain(4),
         enqueue: crate::domain::reminder::ReminderEnqueue::Snapshot,
+        lifetime: crate::domain::reminder::ReminderFactLifetime::Snapshot,
+        rollback_keys: Vec::new(),
         data: serde_json::to_string(&crate::domain::InvocationReminderData::TaskProgress(
             crate::domain::TaskProgressReminderData {
                 total: 3,
@@ -350,8 +363,8 @@ fn run_started_triggers_step_interval_source_at_step_zero() {
         .expect("载荷序列化"),
     });
 
-    pipeline.run_started();
-    let injection = pipeline.inject_into_window("zh", "2026-10-04T01:00:00+08:00", 512);
+    pipeline.run_started(&store);
+    let injection = pipeline.inject_into_window(&store, "zh", "2026-10-04T01:00:00+08:00", 512);
     assert!(
         injection
             .tail_user_message
@@ -379,12 +392,13 @@ fn interval_policy_for_domain(interval: u32) -> ReminderPolicy {
 fn build_returning_none_does_not_enqueue() {
     // #2146 数据化：无内容即不推送 fact（等价于旧 build 返回 None）。
     let kind = ReminderKind::task_progress();
+    let store = crate::domain::reminder::ReminderFactStore::default();
     let mut pipeline = crate::application::reminder_pipeline::ReminderPipeline::new(vec![kind]);
 
-    pipeline.run_started();
+    pipeline.run_started(&store);
     assert!(
         pipeline
-            .inject_into_window("zh", "2026-10-04T01:00:00+08:00", 512)
+            .inject_into_window(&store, "zh", "2026-10-04T01:00:00+08:00", 512)
             .tail_user_message
             .is_none(),
         "无内容（如当前无任务）的周期 source 本轮不注入"

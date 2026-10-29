@@ -380,6 +380,19 @@ impl BackgroundProcessSupervisor {
 
     /// 注入确认：把已组装进 window 的事实标记为已通知（幂等；未列出的
     /// 保持未标记，供后续 Run 补注入）。
+    /// 撤销「已交付」标记（#2146 方案 A 收口回滚）：Run 收口时仍未注入的
+    /// OneShot 事实凭 `rollback_keys` 复位，下个 Run 重新 peek 补注入。
+    pub(crate) fn mark_unnotified(&self, task_ids: &[String]) {
+        let mut tasks = self.tasks.lock().expect("后台进程表锁中毒");
+        for task_id in task_ids {
+            if let Ok(process_id) = BackgroundProcessId::parse(task_id) {
+                if let Some(task) = tasks.get_mut(&process_id) {
+                    task.notified = false;
+                }
+            }
+        }
+    }
+
     pub(crate) fn mark_notified(&self, task_ids: &[String]) {
         let mut tasks = self.tasks.lock().expect("后台进程表锁中毒");
         for task_id in task_ids {

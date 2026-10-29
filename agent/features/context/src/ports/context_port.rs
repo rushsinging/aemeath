@@ -110,7 +110,17 @@ pub trait ReminderControlPort: crate::sealed::Sealed + Send + Sync {
     /// 无 trait 多态；渲染模板由 Context 按 kind 内置）。
     fn push_reminder_fact(&self, _run_id: &RunId, _fact: ReminderFactData) {}
 
-    /// Run 结束：销毁该 Run 的 reminder 管线。
+    /// 显式失效：生产者「无内容」时清除该 kind 的驻留事实
+    /// （不得靠不推送隐式保留旧值；#2146 方案 A 失效契约）。
+    fn remove_reminder_fact(&self, _kind: &ReminderKind) {}
+
+    /// Run 收口前查询：仍未注入的 `OneShot` 回滚标识
+    /// （宿主凭此撤销「已交付」标记，下个 Run 重新补注入）。
+    fn drain_uninjected_oneshot_keys(&self, _run_id: &RunId) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Run 结束：销毁该 Run 的 reminder 管线（事实数据留在 store，跨 Run 存活）。
     fn drop_reminder_pipeline(&self, _run_id: &RunId) {}
 
     /// Run 启动事件：`OnRunStart` 类 source 入队。

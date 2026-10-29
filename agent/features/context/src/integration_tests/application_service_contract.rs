@@ -652,6 +652,8 @@ impl FactSourceFixture {
                 compact: crate::CompactBehavior::Reinstate,
             },
             enqueue: crate::ReminderEnqueue::Snapshot,
+            lifetime: crate::ReminderFactLifetime::Snapshot,
+            rollback_keys: Vec::new(),
             data: serde_json::to_string(&self.data).expect("快照序列化"),
         }
     }
@@ -761,4 +763,87 @@ async fn append_delegates_finalized_step_to_session_backing() {
     };
     let receipt = service().append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(3));
+}
+
+// ---------- #2146 方案 A：事实生命周期跨 Run 契约 ----------
+
+#[tokio::test]
+async fn snapshot_fact_survives_run_teardown_and_run_scoped_does_not() {
+    let context_service = service();
+    let snapshot_kind = crate::ReminderKind::task_progress();
+    let scoped_kind = crate::ReminderKind::new("model_guidance_mismatch");
+
+    // Run 1：推送 Snapshot + RunScoped 事实后收口（销毁管线）。
+    let run1 = request().run_id;
+    ReminderControlPort::create_reminder_pipeline(
+        &context_service,
+        run1.clone(),
+        vec![snapshot_kind.clone(), scoped_kind.clone()],
+    );
+    ReminderControlPort::push_reminder_fact(
+        &context_service,
+        &run1,
+        FactSourceFixture::task_progress().fact(),
+    );
+    let mut scoped = FactSourceFixture::model_mismatch("session/model", "run/model").fact();
+    scoped.lifetime = crate::ReminderFactLifetime::RunScoped;
+    ReminderControlPort::push_reminder_fact(&context_service, &run1, scoped);
+    ReminderControlPort::drop_reminder_pipeline(&context_service, &run1);
+
+    // Run 2：Snapshot 事实仍在 store 并注入；RunScoped 已随 Run 创建清空。
+    let run2 = request().run_id;
+    ReminderControlPort::create_reminder_pipeline(
+        &context_service,
+        run2.clone(),
+        vec![snapshot_kind.clone(), scoped_kind.clone()],
+    );
+    ReminderControlPort::reminder_run_started(&context_service, &run2);
+    let window = context_service.build_window(&request()).await.unwrap();
+    let reminders: Vec<String> = window
+        .messages
+        .iter()
+        .map(Message::text_content)
+        .filter(|text| text.contains("<system-reminder"))
+        .collect();
+    assert!(
+        reminders.iter().any(|text| text.contains("task-progress")),
+        "Snapshot 事实跨 Run 存活并注入"
+    );
+    assert!(
+        !reminders
+            .iter()
+            .any(|text| text.contains("model-guidance-mismatch")),
+        "RunScoped 事实不得跨 Run 残留"
+    );
+}
+
+#[tokio::test]
+async fn removed_fact_is_not_reinjected() {
+    let context_service = service();
+    let kind = crate::ReminderKind::task_progress();
+    let run = request().run_id;
+    ReminderControlPort::create_reminder_pipeline(
+        &context_service,
+        run.clone(),
+        vec![kind.clone()],
+    );
+    ReminderControlPort::push_reminder_fact(
+        &context_service,
+        &run,
+        FactSourceFixture::task_progress().fact(),
+    );
+    ReminderControlPort::reminder_run_started(&context_service, &run);
+    // 显式失效：生产者「无内容」（任务清空）时必须调，此后不得重注入旧进度。
+    ReminderControlPort::remove_reminder_fact(&context_service, &kind);
+    ReminderControlPort::reminder_step_advanced(&context_service, &run, 4);
+
+    let window = context_service.build_window(&request()).await.unwrap();
+    assert!(
+        !window
+            .messages
+            .iter()
+            .map(Message::text_content)
+            .any(|text| text.contains("task-progress")),
+        "remove 后不得注入陈旧事实"
+    );
 }

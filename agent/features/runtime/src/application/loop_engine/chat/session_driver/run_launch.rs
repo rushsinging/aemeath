@@ -802,7 +802,11 @@ where
                     context::ReminderKind::background_process(),
                 ];
                 let mut startup_facts: Vec<context::ReminderFactData> = Vec::new();
-                if let Some(fact) = task_progress_source.fact() {
+                // 无任务 = 无内容：显式失效上一 Run 的进度快照（否则 Rebuild
+                // 重注入陈旧进度，无法区分「旧进度」与「当前无任务」）。
+                let task_progress_fact = task_progress_source.fact();
+                let task_progress_present = task_progress_fact.is_some();
+                if let Some(fact) = task_progress_fact {
                     startup_facts.push(fact);
                 }
                 if let Some(fact) = background_process_source.fact() {
@@ -889,6 +893,11 @@ where
                     run_id.clone(),
                     allowed_kinds,
                 );
+                if !task_progress_present {
+                    reminder_context_port
+                        .reminders
+                        .remove_reminder_fact(&context::ReminderKind::task_progress());
+                }
                 for fact in startup_facts {
                     reminder_context_port
                         .reminders
@@ -1145,11 +1154,30 @@ where
                         log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                     }
                 }
-                // Reminder 管线句柄随 Run 销毁：Run-scoped 状态不跨 Run 泄漏
-                //（07-reminder-pipeline.md）。
+                // #2146 方案 A 收口回滚：仍未注入的 OneShot 事实（后台完成）
+                // 撤销「已交付」标记——事实数据留在 session 级 store 之外的
+                // 数据源里，下个 Run 启动时重新 peek 补注入，不得静默丢失。
+                let stranded_oneshot = runtime_context
+                    .context()
+                    .reminders
+                    .drain_uninjected_oneshot_keys(&run_id);
+                if !stranded_oneshot.is_empty() {
+                    shell
+                        .background_processes
+                        .supervisor()
+                        .mark_unnotified(&stranded_oneshot);
+                    log::info!(
+                        target: crate::LOG_TARGET,
+                        "reminder oneshot rolled back count={}",
+                        stranded_oneshot.len(),
+                    );
+                }
+                // Reminder 管线句柄随 Run 销毁：Run 级调度状态不跨 Run 泄漏；
+                // 事实数据驻留 session 级 store，跨 Run 存活（#2146 方案 A）。
                 runtime_context
                     .context()
-                    .reminders.drop_reminder_pipeline(&run_id);
+                    .reminders
+                    .drop_reminder_pipeline(&run_id);
                 // Run 收口滞留检测（#252 注入确认制兜底）：reminder 管线
                 // 销毁后监督器若仍有未确认完成事实，补发 wakeup 信号立即
                 // 补注入（否则需等下一个任务完成 / 用户输入捎带）。

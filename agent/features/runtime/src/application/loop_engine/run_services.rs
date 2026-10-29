@@ -128,12 +128,20 @@ where
                 self.context_request.runtime_context.task(),
                 share::config::TaskListConfig::default().max_lines,
             );
-        if let Some(fact) = task_progress_source.fact() {
-            self.context_request
+        match task_progress_source.fact() {
+            Some(fact) => self
+                .context_request
                 .runtime_context
                 .context()
                 .reminders
-                .push_reminder_fact(&self.run_id, fact);
+                .push_reminder_fact(&self.run_id, fact),
+            // 无任务 = 无内容：显式失效，避免 Rebuild 时重注入陈旧进度。
+            None => self
+                .context_request
+                .runtime_context
+                .context()
+                .reminders
+                .remove_reminder_fact(&context::ReminderKind::task_progress()),
         }
         self.context_request
             .runtime_context
@@ -163,12 +171,20 @@ where
             if let Some(text) = latest_user_text {
                 recall_source.refresh(&text).await;
             }
-            if let Some(fact) = recall_source.fact() {
-                self.context_request
+            match recall_source.fact() {
+                Some(fact) => self
+                    .context_request
                     .runtime_context
                     .context()
                     .reminders
-                    .push_reminder_fact(&self.run_id, fact);
+                    .push_reminder_fact(&self.run_id, fact),
+                // 召回为空/评分未通过：显式失效，不得保留上一轮快照。
+                None => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .remove_reminder_fact(&context::ReminderKind::memory_recall()),
             }
             self.context_request
                 .runtime_context

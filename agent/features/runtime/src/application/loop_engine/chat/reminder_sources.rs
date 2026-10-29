@@ -41,6 +41,8 @@ impl TaskProgressReminderSource {
                     compact: context::CompactBehavior::Rebuild,
                 },
                 enqueue: context::ReminderEnqueue::Snapshot,
+                lifetime: context::ReminderFactLifetime::Snapshot,
+                rollback_keys: Vec::new(),
                 data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
             },
         )
@@ -154,6 +156,8 @@ impl RunStartFactReminderSource {
             kind: self.kind.clone(),
             policy: self.policy.clone(),
             enqueue: context::ReminderEnqueue::Snapshot,
+            lifetime: context::ReminderFactLifetime::RunScoped,
+            rollback_keys: Vec::new(),
             data: serde_json::to_string(&self.data).expect("reminder 快照序列化不可失败"),
         }
     }
@@ -211,11 +215,14 @@ impl BackgroundProcessReminderSource {
                 .map(|item| item.task_id.clone())
                 .collect::<Vec<_>>(),
         );
+        let rollback_keys: Vec<String> = items.iter().map(|item| item.task_id.clone()).collect();
         let data = context::InvocationReminderData::background_process_completed(items);
         Some(context::ReminderFactData {
             kind: context::ReminderKind::background_process(),
             policy: Self::policy(),
             enqueue: context::ReminderEnqueue::Event,
+            lifetime: context::ReminderFactLifetime::OneShot,
+            rollback_keys,
             data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
         })
     }
@@ -353,6 +360,8 @@ impl MemoryRecallReminderSource {
                     compact: context::CompactBehavior::Rebuild,
                 },
                 enqueue: context::ReminderEnqueue::Snapshot,
+                lifetime: context::ReminderFactLifetime::Snapshot,
+                rollback_keys: Vec::new(),
                 data,
             })
     }

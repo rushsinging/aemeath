@@ -689,7 +689,9 @@ impl AgentRunner for CliAgentRunner {
                 finalizer,
             )
             .await;
-            // Reminder 管线句柄随 derived run 销毁（07-reminder-pipeline.md）。
+            // Reminder 管线句柄随 derived run 销毁；事实数据驻留 session 级
+            // store，跨 Run 存活（#2146 方案 A）。derived 白名单不含 OneShot
+            // kind（后台完成只走主 Run），因此无需收口回滚。
             runtime_context.context().reminders.drop_reminder_pipeline(&run_id);
             sub_run_terminal
         })

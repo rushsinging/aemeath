@@ -1,17 +1,15 @@
 //! Reminder 注入管线（07-reminder-pipeline.md）：Run 级队列 + 注入决策。
 //!
-//! #2146 数据化接口：Runtime 经 [`ReminderPipeline::push_fact`] 推送
-//! [`ReminderFactData`]（kind + 策略 + 渲染载荷），本管线按策略的
-//! refresh trigger 在对应时机入队；渲染模板由 Context 按 kind 内置
-//! （`render_invocation_reminder_body`）。原 `ReminderSource` trait
-//! 多态形态退役（数据在 Runtime、管线在 Context 的缝改经数据推送）。
-
-use std::collections::HashMap;
+//! #2146 数据化接口 + 方案 A 生命周期契约：事实数据驻留 session 级
+//! [`ReminderFactStore`]（跨 Run 存活、显式失效），本管线只持 Run 级
+//! 调度队列，按事实策略的 refresh trigger 在对应时机从 store 取数入队；
+//! 渲染模板由 Context 按 kind 内置（`render_invocation_reminder_body`）。
+//! 原 `ReminderSource` trait 多态形态退役。
 
 use crate::domain::reminder::{
     compose_reminder_envelope, compose_tail_user_message, render_invocation_reminder_body,
-    InjectionCandidate, RefreshTrigger, ReminderEnqueue, ReminderEnvelopeInput,
-    ReminderEventSource, ReminderFactData, ReminderKind, ReminderPlacement, ReminderPolicy,
+    CompactBehavior, InjectionCandidate, RefreshTrigger, ReminderEnqueue, ReminderEnvelopeInput,
+    ReminderEventSource, ReminderFactData, ReminderFactStore, ReminderKind, ReminderPlacement,
     ReminderQueue, ReminderSnapshot,
 };
 use crate::domain::{estimate_tokens, ContextMessage, InvocationReminderData, SystemBlock};
@@ -36,8 +34,6 @@ pub struct ReminderPipeline {
     queue: ReminderQueue,
     /// 本 Run 允许的 kind 白名单（create 时注册）。
     allowed: Vec<ReminderKind>,
-    /// 各 kind 最新推送的事实（数据缓存：时机到来时入队）。
-    facts: HashMap<ReminderKind, ReminderFactData>,
     /// 本 Run 已注入、待 step 收口落盘的尾部 reminder 消息（#1848）：
     /// append_finalized 时取走并插入提交消息头部（u 之后 a 之前），
     /// 使注入轮后的请求前缀逐 token 稳定（prompt cache 命中）。
@@ -49,16 +45,18 @@ impl ReminderPipeline {
         Self {
             queue: ReminderQueue::new(),
             allowed,
-            facts: HashMap::new(),
             pending_persist: Vec::new(),
         }
     }
 
-    /// Runtime 推送一条事实（数据入口，#2146）：更新缓存；入队统一由
-    /// 时机方法驱动（run_started / step_advanced / handle_event /
-    /// task_mutated / user_message_received 按 policy.refresh 匹配）。
-    /// 非白名单 kind 拒收（warn）；策略合法性在此校验。
-    pub fn push_fact(&mut self, fact: ReminderFactData) {
+    /// 该管线允许的 kind（白名单）。
+    pub fn allows(&self, kind: &ReminderKind) -> bool {
+        self.allowed.contains(kind)
+    }
+
+    /// 推送 OneShot 事实（事件型）：直接入队，不入 store（消费即一次性）。
+    /// 白名单/自洽性由调用方（service）校验；此处再守一次 allowed。
+    pub fn push_oneshot(&mut self, fact: ReminderFactData) {
         if !self.allowed.contains(&fact.kind) {
             log::warn!(
                 target: LOG_TARGET,
@@ -67,69 +65,76 @@ impl ReminderPipeline {
             );
             return;
         }
-        if !fact.policy.is_valid() {
-            log::warn!(
-                target: LOG_TARGET,
-                "reminder_fact_rejected reason=dynamic_refresh_with_system_tail kind={}",
-                fact.kind.as_str(),
-            );
-            return;
-        }
-        let kind = fact.kind.clone();
-        self.facts.insert(kind, fact);
+        self.enqueue_fact(&fact);
+    }
+
+    /// 显式失效：丢弃该 kind 的待注入条目与指纹（保持队列与 store 一致）。
+    pub fn discard_pending(&mut self, kind: &ReminderKind) {
+        self.queue.discard(kind);
+    }
+
+    /// Run 收口：取走仍未注入的 OneShot 回滚标识（供 Runtime 撤销交付标记）。
+    pub fn drain_uninjected_oneshot_keys(&mut self) -> Vec<String> {
+        self.queue.drain_uninjected_oneshot_keys()
     }
 
     /// Run 启动：`OnRunStart` 型缓存事实入队；`OnStepInterval` 以 step=0
     /// 推进（0 是任意间隔的倍数——「启动即一次 + 周期重注入」无需双声明）。
-    pub fn run_started(&mut self) {
-        self.enqueue_matching("run_started", |trigger| {
+    pub fn run_started(&mut self, store: &ReminderFactStore) {
+        self.enqueue_matching(store, "run_started", |trigger| {
             matches!(trigger, RefreshTrigger::OnRunStart)
         });
-        self.enqueue_interval(0);
+        self.enqueue_interval(store, 0);
     }
 
     /// Runtime 推送事件：`OnEvent(source)` 匹配的缓存事实入队
     /// （事件累积语义——若推送时 refresh 不匹配此事件，此处兜底）。
-    pub fn handle_event(&mut self, event_source: &ReminderEventSource) {
+    pub fn handle_event(&mut self, store: &ReminderFactStore, event_source: &ReminderEventSource) {
         self.enqueue_matching(
+            store,
             "event",
             |trigger| matches!(trigger, RefreshTrigger::OnEvent(owned) if owned == event_source),
         );
     }
 
     /// task store 变更后：`OnTaskMutation` 型缓存事实入队。
-    pub fn task_mutated(&mut self) {
-        self.enqueue_matching("task_mutated", |trigger| {
+    pub fn task_mutated(&mut self, store: &ReminderFactStore) {
+        self.enqueue_matching(store, "task_mutated", |trigger| {
             matches!(trigger, RefreshTrigger::OnTaskMutation)
         });
     }
 
     /// 用户消息到达：`OnUserMessage` 型缓存事实入队（快照替换语义）。
-    pub fn user_message_received(&mut self) {
-        self.enqueue_matching("user_message", |trigger| {
+    pub fn user_message_received(&mut self, store: &ReminderFactStore) {
+        self.enqueue_matching(store, "user_message", |trigger| {
             matches!(trigger, RefreshTrigger::OnUserMessage)
         });
     }
 
     /// step 边界推进：`OnStepInterval(n)` 在 step 为 n 的倍数时入队。
-    pub fn step_advanced(&mut self, step: u64) {
-        self.enqueue_interval(step);
+    pub fn step_advanced(&mut self, store: &ReminderFactStore, step: u64) {
+        self.enqueue_interval(store, step);
     }
 
-    fn enqueue_interval(&mut self, step: u64) {
-        self.enqueue_matching("step_interval", |trigger| {
+    fn enqueue_interval(&mut self, store: &ReminderFactStore, step: u64) {
+        self.enqueue_matching(store, "step_interval", |trigger| {
             matches!(trigger, RefreshTrigger::OnStepInterval(interval)
                 if *interval > 0 && step.is_multiple_of(u64::from(*interval)))
         });
     }
 
     /// auto-compact `Committed`：按 per-kind compact 处置分发（Skipped 不调用）。
-    pub fn compact_committed(&mut self) {
-        let outcomes = self
-            .facts
-            .values()
+    pub fn compact_committed(&mut self, store: &ReminderFactStore) {
+        let mut outcomes: Vec<(ReminderKind, CompactBehavior)> = store
+            .facts()
             .map(|fact| (fact.kind.clone(), fact.policy.compact))
-            .collect::<Vec<_>>();
+            .collect();
+        // 队列内仍待注入的事件型事实（OneShot 不入 store）同样需要处置。
+        for entry in self.queue.pending_entries() {
+            if !outcomes.iter().any(|(kind, _)| *kind == entry.kind) {
+                outcomes.push((entry.kind.clone(), entry.policy.compact));
+            }
+        }
         self.queue.apply_compact_outcome(&outcomes);
     }
 
@@ -137,11 +142,12 @@ impl ReminderPipeline {
     /// 预算截断滞留 → 按 placement 分组产出。
     pub fn inject_into_window(
         &mut self,
+        store: &ReminderFactStore,
         language: &str,
         at: &str,
         token_budget: usize,
     ) -> ReminderWindowInjection {
-        self.rebuild_flagged_facts();
+        self.rebuild_flagged_facts(store);
         let candidates = self.queue.begin_injection();
         if candidates.is_empty() {
             return ReminderWindowInjection::default();
@@ -153,13 +159,9 @@ impl ReminderPipeline {
         let mut injected_seqs = Vec::new();
         let mut deferred_seqs = Vec::new();
         let mut budget_used = 0usize;
-        let policies = self.policies_by_kind();
 
         for candidate in &candidates {
-            let placement = policies
-                .get(&candidate.kind)
-                .map(|policy| policy.placement)
-                .unwrap_or(ReminderPlacement::TailUserMessage);
+            let placement = candidate.policy.placement;
             let (envelope, persist_block) = render_block(candidate, placement, language, at);
             let block_tokens = estimate_tokens(&envelope);
             if budget_used + block_tokens > token_budget {
@@ -228,63 +230,58 @@ impl ReminderPipeline {
 
     fn enqueue_matching(
         &mut self,
+        store: &ReminderFactStore,
         trigger_label: &str,
         predicate: impl Fn(&RefreshTrigger) -> bool,
     ) {
-        let matched: Vec<ReminderKind> = self
-            .facts
-            .values()
+        let matched: Vec<ReminderFactData> = store
+            .facts()
             .filter(|fact| predicate(&fact.policy.refresh))
-            .map(|fact| fact.kind.clone())
+            .filter(|fact| self.allowed.contains(&fact.kind))
+            .cloned()
             .collect();
-        for kind in matched {
-            if let Some(fact) = self.facts.get(&kind) {
-                let snapshot = ReminderSnapshot {
-                    data: fact.data.clone(),
-                };
-                match fact.enqueue {
-                    ReminderEnqueue::Event => {
-                        self.queue
-                            .push_event(kind.clone(), snapshot, fact.policy.inject)
-                    }
-                    ReminderEnqueue::Snapshot => {
-                        self.queue
-                            .push_snapshot(kind.clone(), snapshot, fact.policy.inject)
-                    }
-                }
-                log::debug!(
-                    target: LOG_TARGET,
-                    "reminder_enqueued trigger={trigger_label} kind={}",
-                    kind.as_str(),
-                );
-            }
+        for fact in matched {
+            self.enqueue_fact(&fact);
+            log::debug!(
+                target: LOG_TARGET,
+                "reminder_enqueued trigger={trigger_label} kind={}",
+                fact.kind.as_str(),
+            );
         }
     }
 
-    fn rebuild_flagged_facts(&mut self) {
-        let flagged: Vec<ReminderKind> = self
-            .facts
-            .keys()
+    fn enqueue_fact(&mut self, fact: &ReminderFactData) {
+        let snapshot = ReminderSnapshot {
+            data: fact.data.clone(),
+        };
+        match fact.enqueue {
+            ReminderEnqueue::Event => self.queue.push_event_with_rollback(
+                fact.kind.clone(),
+                snapshot,
+                fact.policy.clone(),
+                fact.rollback_keys.clone(),
+            ),
+            ReminderEnqueue::Snapshot => self.queue.push_snapshot_with_rollback(
+                fact.kind.clone(),
+                snapshot,
+                fact.policy.clone(),
+                fact.rollback_keys.clone(),
+            ),
+        }
+    }
+
+    fn rebuild_flagged_facts(&mut self, store: &ReminderFactStore) {
+        let flagged: Vec<ReminderKind> = store
+            .facts()
+            .map(|fact| fact.kind.clone())
             .filter(|kind| self.queue.needs_rebuild(kind))
-            .cloned()
             .collect();
         for kind in flagged {
-            if let Some(fact) = self.facts.get(&kind) {
-                let snapshot = ReminderSnapshot {
-                    data: fact.data.clone(),
-                };
-                self.queue
-                    .push_snapshot(kind.clone(), snapshot, fact.policy.inject);
+            if let Some(fact) = store.get(&kind) {
+                self.enqueue_fact(fact);
             }
             self.queue.clear_rebuild_flag(&kind);
         }
-    }
-
-    fn policies_by_kind(&self) -> HashMap<ReminderKind, ReminderPolicy> {
-        self.facts
-            .values()
-            .map(|fact| (fact.kind.clone(), fact.policy.clone()))
-            .collect()
     }
 }
 

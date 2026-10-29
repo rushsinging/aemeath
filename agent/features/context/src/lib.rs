@@ -42,8 +42,8 @@ pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_s
 pub use adapters::{MainContextFactory, NoOpCanonicalSessionWriter};
 pub use domain::reminder::{
     render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
-    ReminderDedup, ReminderEnqueue, ReminderEventSource, ReminderFactData, ReminderKind,
-    ReminderPlacement, ReminderPolicy, ReminderPriority, ReminderSnapshot,
+    ReminderDedup, ReminderEnqueue, ReminderEventSource, ReminderFactData, ReminderFactLifetime,
+    ReminderKind, ReminderPlacement, ReminderPolicy, ReminderPriority, ReminderSnapshot,
 };
 pub use domain::session::{
     DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionManagementError,

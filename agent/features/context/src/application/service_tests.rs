@@ -675,6 +675,8 @@ fn guidance_fact(
             compact: crate::domain::reminder::CompactBehavior::Reinstate,
         },
         enqueue: crate::domain::reminder::ReminderEnqueue::Snapshot,
+        lifetime: crate::domain::reminder::ReminderFactLifetime::Snapshot,
+        rollback_keys: Vec::new(),
         data: serde_json::to_string(
             &crate::domain::InvocationReminderData::GuidanceSourcesChanged {
                 paths: vec![body.to_string()],
