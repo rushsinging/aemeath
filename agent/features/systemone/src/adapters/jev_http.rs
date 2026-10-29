@@ -142,3 +142,6 @@ impl ScoringPort for JevHttpScoringAdapter {
 #[cfg(test)]
 #[path = "jev_http_tests.rs"]
 mod tests;
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for JevHttpScoringAdapter {}

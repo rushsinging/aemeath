@@ -825,21 +825,11 @@ fn factory_assembled_context_event_sink_is_real_not_noop() {
 fn scoring_slots_preserve_independent_identity_per_accessor() {
     use std::sync::Arc;
 
-    struct NoopScoring;
-
-    #[async_trait::async_trait]
-    impl systemone::ScoringPort for NoopScoring {
-        async fn answer(
-            &self,
-            _state: &systemone::ScoringState,
-            _questions: &[systemone::ScoringQuestion],
-        ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-            Ok(Vec::new())
-        }
-    }
-
-    let recall_port: Arc<dyn systemone::ScoringPort> = Arc::new(NoopScoring);
-    let skill_match_port: Arc<dyn systemone::ScoringPort> = Arc::new(NoopScoring);
+    // #2146：ScoringPort 实现权归 systemone crate。
+    let noop_scoring =
+        || systemone::test_support::scripted_scoring(|_state, _questions| Ok(Vec::new()));
+    let recall_port: Arc<dyn systemone::ScoringPort> = noop_scoring();
+    let skill_match_port: Arc<dyn systemone::ScoringPort> = noop_scoring();
     let fixture = SessionRunFixture::builder()
         .with_scoring_slots(Some(recall_port.clone()), Some(skill_match_port.clone()))
         .build();

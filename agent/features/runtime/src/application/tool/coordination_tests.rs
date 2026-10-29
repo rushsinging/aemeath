@@ -923,29 +923,17 @@ fn streaming_round_pairing_validation_rejects_orphan_results() {
     );
 }
 
-/// #1836 权限预筛：policy Allow + 高风险评分 → 提级 require_approval
-///（单向加严），低风险 → 原样 executable。
-struct FixedRiskScoring {
-    p_true: f64,
-}
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for FixedRiskScoring {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        _questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        Ok(vec![systemone::ScoringAnswer::noul(
-            self.p_true,
-            systemone::CalibrationLevel::Raw,
-        )
-        .expect("answer 构造")])
-    }
-}
-
+/// #2146：ScoringPort 实现权归 systemone crate；固定风险替身经其脚本端口。
 fn triage_policy_with(p_true: f64) -> crate::application::tool::PolicyTriage {
-    crate::application::tool::PolicyTriage::new(std::sync::Arc::new(FixedRiskScoring { p_true }))
+    crate::application::tool::PolicyTriage::new(systemone::test_support::scripted_scoring(
+        move |_state, _questions| {
+            Ok(vec![systemone::ScoringAnswer::noul(
+                p_true,
+                systemone::CalibrationLevel::Raw,
+            )
+            .expect("answer 构造")])
+        },
+    ))
 }
 
 async fn prepare_with_triage(

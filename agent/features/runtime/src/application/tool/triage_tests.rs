@@ -1,49 +1,40 @@
 //! 权限/风险预筛（#1836）：System One noul 评分对 policy Allow 判定的
 //! **单向加严**（Allow + 高风险 → 提级审批理由；NEVER 放宽既有判定）。
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use super::*;
 
-/// 可编排 fake 评分端口：返回固定 p_true 或失败；记录收到的题目。
-struct FakeNoulScoring {
+/// #2146：ScoringPort 实现权归 systemone crate；替身经其脚本端口
+///（captured 共享记录收到的题目）。
+fn triage_with(
     p_true: f64,
     fail: bool,
-    captured: Mutex<Vec<systemone::ScoringQuestion>>,
-}
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for FakeNoulScoring {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        self.captured
+) -> (
+    PolicyTriage,
+    Arc<std::sync::Mutex<Vec<systemone::ScoringQuestion>>>,
+) {
+    let captured: Arc<std::sync::Mutex<Vec<systemone::ScoringQuestion>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured2 = Arc::clone(&captured);
+    let port = systemone::test_support::scripted_scoring(move |_state, questions| {
+        captured2
             .lock()
             .expect("capture 锁")
             .extend(questions.iter().cloned());
-        if self.fail {
+        if fail {
             return Err(systemone::ScoringUnavailable::new(
                 systemone::UnavailableKind::Server,
                 "评分服务不可用",
             ));
         }
         Ok(vec![systemone::ScoringAnswer::noul(
-            self.p_true,
+            p_true,
             systemone::CalibrationLevel::Raw,
         )
         .expect("answer 构造")])
-    }
-}
-
-fn triage_with(p_true: f64, fail: bool) -> (PolicyTriage, Arc<FakeNoulScoring>) {
-    let fake = Arc::new(FakeNoulScoring {
-        p_true,
-        fail,
-        captured: Mutex::new(Vec::new()),
     });
-    (PolicyTriage::new(fake.clone()), fake)
+    (PolicyTriage::new(port), captured)
 }
 
 fn sample_request() -> policy::PolicyRequestData {
@@ -103,7 +94,7 @@ async fn threshold_boundary_counts_as_high_risk() {
 async fn noul_question_uses_permission_triage_wording() {
     let (triage, fake) = triage_with(0.0, false);
     let _ = triage.escalate(&sample_request()).await;
-    let captured = fake.captured.lock().expect("capture 锁").clone();
+    let captured = fake.lock().expect("capture 锁").clone();
     assert_eq!(captured.len(), 1, "单题单问");
     match &captured[0] {
         systemone::ScoringQuestion::Noul { instructions, .. } => {

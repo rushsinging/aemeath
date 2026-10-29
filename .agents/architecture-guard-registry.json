@@ -2992,12 +2992,8 @@
         {
           "trait_name": "ScoringPort",
           "owner_crate": "systemone",
-          "type": "fake-pending",
-          "allowed_impl_crates": [
-            "m",
-            "r",
-            "t"
-          ]
+          "type": "sealed",
+          "allowed_impl_crates": []
         },
         {
           "trait_name": "SessionManagementPort",

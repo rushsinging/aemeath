@@ -145,79 +145,6 @@ fn run_start_fact_source_carries_frozen_data_and_matching_policy() {
 
 use crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource;
 
-/// 按 content 是否含关键词给概率的评分桩。
-struct KeywordScoring {
-    keyword: &'static str,
-    high: f64,
-}
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for KeywordScoring {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        let criteria = match &questions[0] {
-            systemone::ScoringQuestion::Choice { criteria, .. } => criteria,
-            systemone::ScoringQuestion::Noul { .. } => {
-                // 单候选 Noul 路径：按 state 是否含关键词给 p_true。
-                let p = if _state.as_str().contains(self.keyword) {
-                    self.high
-                } else {
-                    1.0 - self.high
-                };
-                return Ok(vec![systemone::ScoringAnswer::noul(
-                    p,
-                    systemone::CalibrationLevel::Raw,
-                )
-                .expect("答案构造")]);
-            }
-            _ => panic!("应为 Choice/Noul"),
-        };
-        let probabilities: Vec<(String, f64)> = criteria
-            .iter()
-            .enumerate()
-            .map(|(index, (_, content))| {
-                let probability = if content.contains(self.keyword) {
-                    self.high
-                } else {
-                    (1.0 - self.high) / (criteria.len().saturating_sub(1).max(1)) as f64
-                };
-                (index.to_string(), probability)
-            })
-            .collect();
-        let (top_key, top_probability) = probabilities
-            .iter()
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(key, p)| (key.clone(), *p))
-            .expect("非空");
-        Ok(vec![systemone::ScoringAnswer::choice(
-            top_key,
-            probabilities,
-            top_probability,
-            systemone::CalibrationLevel::Raw,
-        )
-        .expect("答案构造")])
-    }
-}
-
-struct FailingScoring;
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for FailingScoring {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        _questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        Err(systemone::ScoringUnavailable::new(
-            systemone::UnavailableKind::Connect,
-            "服务未启动",
-        ))
-    }
-}
-
 async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
     use memory::api::MemoryPort as _;
 
@@ -246,6 +173,51 @@ async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
     Arc::new(memory)
 }
 
+/// #2146：ScoringPort 实现权归 systemone crate；关键词评分替身。
+fn keyword_scoring(keyword: &'static str, high: f64) -> std::sync::Arc<dyn systemone::ScoringPort> {
+    systemone::test_support::scripted_scoring(move |state, questions| match &questions[0] {
+        systemone::ScoringQuestion::Choice { criteria, .. } => {
+            let probabilities: Vec<(String, f64)> = criteria
+                .iter()
+                .enumerate()
+                .map(|(index, (_, content))| {
+                    let probability = if content.contains(keyword) {
+                        high
+                    } else {
+                        (1.0 - high) / (criteria.len().saturating_sub(1).max(1)) as f64
+                    };
+                    (index.to_string(), probability)
+                })
+                .collect();
+            let (top_key, top_probability) = probabilities
+                .iter()
+                .max_by(|(_, a), (_, b)| a.total_cmp(b))
+                .map(|(key, p)| (key.clone(), *p))
+                .expect("非空");
+            Ok(vec![systemone::ScoringAnswer::choice(
+                top_key,
+                probabilities,
+                top_probability,
+                systemone::CalibrationLevel::Raw,
+            )
+            .expect("答案构造")])
+        }
+        systemone::ScoringQuestion::Noul { .. } => {
+            let p = if state.as_str().contains(keyword) {
+                high
+            } else {
+                1.0 - high
+            };
+            Ok(vec![systemone::ScoringAnswer::noul(
+                p,
+                systemone::CalibrationLevel::Raw,
+            )
+            .expect("答案构造")])
+        }
+        _ => panic!("应为 Choice/Noul"),
+    })
+}
+
 #[tokio::test]
 async fn memory_recall_source_never_materializes_outdated_memory() {
     let memory = recall_memory(vec![
@@ -269,10 +241,7 @@ async fn memory_recall_source_never_materializes_outdated_memory() {
     assert!(memory.mark_outdated(&stale_id).await.expect("标记过期"));
     let source = MemoryRecallReminderSource::with_clock(
         memory,
-        Arc::new(KeywordScoring {
-            keyword: "ownership",
-            high: 0.95,
-        }),
+        keyword_scoring("ownership", 0.95),
         Arc::new(|| 4_242),
     );
     source.refresh("rust ownership").await;
@@ -290,10 +259,7 @@ async fn memory_recall_source_never_materializes_outdated_memory() {
 async fn recall_refresh_caches_snapshot_and_build_renders() {
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec!["git worktree 的创建步骤", "完全无关的烹饪食谱"]).await,
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.9,
-        }),
+        keyword_scoring("worktree", 0.9),
         Arc::new(|| 4_242),
     );
     assert!(
@@ -314,10 +280,7 @@ async fn recall_refresh_caches_snapshot_and_build_renders() {
 async fn recall_below_threshold_clears_cache_and_skips_turn() {
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec!["git worktree 的创建步骤", "另一条 rust 笔记"]).await,
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.9,
-        }),
+        keyword_scoring("worktree", 0.9),
         Arc::new(|| 4_242),
     );
     source.refresh("worktree 怎么用").await;
@@ -333,10 +296,7 @@ async fn recall_below_threshold_clears_cache_and_skips_turn() {
     // 评分概率低于阈值 → 本 turn 不注入。
     let low_source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec!["git worktree 的创建步骤"]).await,
-        Arc::new(KeywordScoring {
-            keyword: "不命中",
-            high: 0.3,
-        }),
+        keyword_scoring("不命中", 0.3),
         Arc::new(|| 4_242),
     );
     low_source.refresh("随便聊聊").await;
@@ -347,7 +307,7 @@ async fn recall_below_threshold_clears_cache_and_skips_turn() {
 async fn recall_scoring_failure_clears_cache_silently() {
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec!["git worktree 的创建步骤"]).await,
-        Arc::new(FailingScoring),
+        systemone::test_support::unavailable_scoring("服务未启动"),
         Arc::new(|| 4_242),
     );
     source.refresh("worktree").await;
@@ -365,10 +325,7 @@ async fn recall_renews_only_entries_materialized_within_budget() {
     let memory = recall_memory(contents.iter().map(String::as_str).collect()).await;
     let source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.9,
-        }),
+        keyword_scoring("worktree", 0.9),
         Arc::new(|| 4_242),
     );
     source.refresh("worktree").await;
@@ -400,10 +357,7 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
     let memory = recall_memory(vec!["worktree 单条召回"]).await;
     let low_source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.3,
-        }),
+        keyword_scoring("worktree", 0.3),
         Arc::new(|| 4_242),
     );
     low_source.refresh("worktree").await;
@@ -411,7 +365,7 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
     assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
     let failed_source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
-        Arc::new(FailingScoring),
+        systemone::test_support::unavailable_scoring("服务未启动"),
         Arc::new(|| 4_242),
     );
     failed_source.refresh("worktree").await;
@@ -419,10 +373,7 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
     assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
     let accepted_source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.9,
-        }),
+        keyword_scoring("worktree", 0.9),
         Arc::new(|| 4_242),
     );
     accepted_source.refresh("不存在的检索词").await;
@@ -445,10 +396,7 @@ async fn recall_budget_drops_tail_entries() {
             "git worktree 的磁盘占用排查",
         ])
         .await,
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.9,
-        }),
+        keyword_scoring("worktree", 0.9),
         Arc::new(|| 4_242),
     );
     source.refresh("worktree").await;
@@ -473,10 +421,7 @@ async fn recall_preview_keeps_full_content_within_write_limit() {
     let content = format!("{}。完整结论必须完整注入。", "详".repeat(480));
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec![&content]).await,
-        Arc::new(KeywordScoring {
-            keyword: "完整",
-            high: 0.9,
-        }),
+        keyword_scoring("完整", 0.9),
         Arc::new(|| 4_242),
     );
     source.refresh("完整结论怎么用").await;
@@ -501,10 +446,7 @@ async fn recall_preview_trims_overlong_entry_at_sentence_boundary_with_marker() 
     let overlong = format!("第一句结论完整保留。{}", "尾部冗余细节。".repeat(120));
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec![&overlong]).await,
-        Arc::new(KeywordScoring {
-            keyword: "结论",
-            high: 0.9,
-        }),
+        keyword_scoring("结论", 0.9),
         Arc::new(|| 4_242),
     );
     source.refresh("结论是什么").await;
@@ -535,10 +477,7 @@ async fn recall_snapshot_data_stable_for_same_result_set() {
     let entries = vec!["git worktree 的创建步骤", "rust 所有权笔记"];
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(entries.clone()).await,
-        Arc::new(KeywordScoring {
-            keyword: "worktree",
-            high: 0.9,
-        }),
+        keyword_scoring("worktree", 0.9),
         Arc::new(|| 4_242),
     );
     source.refresh("worktree 怎么用").await;

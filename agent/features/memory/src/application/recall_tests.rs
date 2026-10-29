@@ -5,47 +5,6 @@ use crate::adapters::MemoryPolicy;
 use crate::domain::{MemoryCategory, MemoryId, MemoryLayer, MemorySource};
 
 /// 概率按 content 是否含关键词分配的评分桩。
-struct KeywordScoringPort {
-    keyword: &'static str,
-}
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for KeywordScoringPort {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        let criteria = match &questions[0] {
-            systemone::ScoringQuestion::Choice { criteria, .. } => criteria,
-            _ => panic!("应为 Choice"),
-        };
-        let probabilities: Vec<(String, f64)> = criteria
-            .iter()
-            .enumerate()
-            .map(|(index, (_, content))| {
-                let p = if content.contains(self.keyword) {
-                    0.85
-                } else {
-                    0.05
-                };
-                (index.to_string(), p)
-            })
-            .collect();
-        let (top_key, top_probability) = probabilities
-            .iter()
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(key, probability)| (key.clone(), *probability))
-            .expect("非空");
-        Ok(vec![systemone::ScoringAnswer::choice(
-            top_key,
-            probabilities,
-            top_probability,
-            systemone::CalibrationLevel::Raw,
-        )
-        .expect("答案构造")])
-    }
-}
 
 async fn memory_with(entries: Vec<&str>) -> crate::adapters::InMemoryMemory {
     let memory = crate::adapters::InMemoryMemory::new(MemoryPolicy {
@@ -74,6 +33,59 @@ async fn memory_with(entries: Vec<&str>) -> crate::adapters::InMemoryMemory {
     memory
 }
 
+/// #2146：ScoringPort 实现权归 systemone crate；关键词命中打分替身。
+fn keyword_scoring(keyword: &'static str) -> std::sync::Arc<dyn systemone::ScoringPort> {
+    systemone::test_support::scripted_scoring(move |_state, questions| {
+        let criteria = match &questions[0] {
+            systemone::ScoringQuestion::Choice { criteria, .. } => criteria,
+            _ => panic!("应为 Choice"),
+        };
+        let probabilities: Vec<(String, f64)> = criteria
+            .iter()
+            .enumerate()
+            .map(|(index, (_, content))| {
+                let p = if content.contains(keyword) {
+                    0.85
+                } else {
+                    0.05
+                };
+                (index.to_string(), p)
+            })
+            .collect();
+        Ok(vec![systemone::ScoringAnswer::choice(
+            probabilities
+                .iter()
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(k, _)| k.clone())
+                .unwrap_or_default(),
+            probabilities,
+            0.9,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("答案构造")])
+    })
+}
+
+/// 恒不可用替身。
+fn failing_scoring() -> std::sync::Arc<dyn systemone::ScoringPort> {
+    systemone::test_support::unavailable_scoring("服务未启动")
+}
+
+/// Noul 单值替身。
+fn single_noul_scoring(p_true: f64) -> std::sync::Arc<dyn systemone::ScoringPort> {
+    systemone::test_support::scripted_scoring(move |_state, questions| {
+        assert!(
+            matches!(questions[0], systemone::ScoringQuestion::Noul { .. }),
+            "单候选必须走 Noul 题型"
+        );
+        Ok(vec![systemone::ScoringAnswer::noul(
+            p_true,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("答案构造")])
+    })
+}
+
 #[tokio::test]
 async fn recall_relevant_returns_top_k_with_probabilities() {
     let memory = memory_with(vec![
@@ -82,11 +94,9 @@ async fn recall_relevant_returns_top_k_with_probabilities() {
         "rust 生命周期注解实践",
     ])
     .await;
-    let scorer = KeywordScoringPort {
-        keyword: "ownership",
-    };
+    let scorer = keyword_scoring("ownership");
 
-    let recalled = recall_relevant(&memory, &scorer, "rust 所有权", 4_242, 20, 2)
+    let recalled = recall_relevant(&memory, scorer.as_ref(), "rust 所有权", 4_242, 20, 2)
         .await
         .expect("评分可用");
 
@@ -104,9 +114,9 @@ async fn recall_relevant_returns_top_k_with_probabilities() {
 #[tokio::test]
 async fn recall_relevant_returns_empty_when_no_lexical_hits() {
     let memory = memory_with(vec!["完全不相关的内容"]).await;
-    let scorer = KeywordScoringPort { keyword: "x" };
+    let scorer = keyword_scoring("x");
 
-    let recalled = recall_relevant(&memory, &scorer, "zzz 无匹配词", 4_242, 20, 3)
+    let recalled = recall_relevant(&memory, scorer.as_ref(), "zzz 无匹配词", 4_242, 20, 3)
         .await
         .expect("词法零命中应 Ok(空)");
 
@@ -115,58 +125,20 @@ async fn recall_relevant_returns_empty_when_no_lexical_hits() {
 
 #[tokio::test]
 async fn recall_relevant_propagates_scoring_unavailable() {
-    struct FailingScoringPort;
-    #[async_trait::async_trait]
-    impl systemone::ScoringPort for FailingScoringPort {
-        async fn answer(
-            &self,
-            _state: &systemone::ScoringState,
-            _questions: &[systemone::ScoringQuestion],
-        ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-            Err(systemone::ScoringUnavailable::new(
-                systemone::UnavailableKind::Connect,
-                "服务未启动",
-            ))
-        }
-    }
     let memory = memory_with(vec!["rust ownership 规则", "rust 生命周期"]).await;
 
-    let outcome = recall_relevant(&memory, &FailingScoringPort, "rust", 4_242, 20, 3).await;
+    let outcome = recall_relevant(&memory, failing_scoring().as_ref(), "rust", 4_242, 20, 3).await;
 
     let error = outcome.expect_err("评分失败必须向上传播");
     assert_eq!(error.kind(), systemone::UnavailableKind::Connect);
 }
 
-/// 单候选走 Noul 题型的评分桩。
-struct SingleNoulScoringPort {
-    p_true: f64,
-}
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for SingleNoulScoringPort {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        assert!(
-            matches!(questions[0], systemone::ScoringQuestion::Noul { .. }),
-            "单候选必须走 Noul 题型"
-        );
-        Ok(vec![systemone::ScoringAnswer::noul(
-            self.p_true,
-            systemone::CalibrationLevel::Raw,
-        )
-        .expect("答案构造")])
-    }
-}
-
 #[tokio::test]
 async fn recall_single_candidate_uses_noul_gate() {
     let memory = memory_with(vec!["git worktree 的创建步骤"]).await;
-    let scorer = SingleNoulScoringPort { p_true: 0.88 };
+    let scorer = single_noul_scoring(0.88);
 
-    let recalled = recall_relevant(&memory, &scorer, "worktree", 4_242, 20, 3)
+    let recalled = recall_relevant(&memory, scorer.as_ref(), "worktree", 4_242, 20, 3)
         .await
         .expect("评分可用");
 
@@ -273,10 +245,8 @@ async fn event_read_ops_per_message_recall_emits_candidates_with_content() {
         events: recorder.clone(),
         recorder: Arc::clone(&recorder),
     };
-    let scorer = KeywordScoringPort {
-        keyword: "worktree",
-    };
-    let recalled = recall_relevant(&port, &scorer, "worktree", 4_242, 20, 3)
+    let scorer = keyword_scoring("worktree");
+    let recalled = recall_relevant(&port, scorer.as_ref(), "worktree", 4_242, 20, 3)
         .await
         .expect("recall");
     assert!(!recalled.is_empty());
@@ -324,11 +294,9 @@ async fn recall_relevant_excludes_stale_entries_from_injection() {
     let stale_id = stale.id;
     memory.write(stale).await.expect("写入待过期条目");
     assert!(memory.mark_outdated(&stale_id).await.expect("标记过期"));
-    let scorer = KeywordScoringPort {
-        keyword: "ownership",
-    };
+    let scorer = keyword_scoring("ownership");
 
-    let recalled = recall_relevant(&memory, &scorer, "rust 所有权指南", 4_242, 20, 2)
+    let recalled = recall_relevant(&memory, scorer.as_ref(), "rust 所有权指南", 4_242, 20, 2)
         .await
         .expect("评分可用");
 

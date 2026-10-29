@@ -161,3 +161,6 @@ async fn http_serve_unknown_path_returns_404() {
     assert_eq!(response.status(), 404);
     let _ = shutdown.send(());
 }
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for StubPort {}

@@ -118,3 +118,6 @@ async fn local_client_maps_connection_failure_to_transport_kind() {
         "传输层失败归传输类 kind：{error}"
     );
 }
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for StubPort {}
