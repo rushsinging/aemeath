@@ -836,7 +836,8 @@ async fn llm_generate(
     let output = binding
         .invoker
         .invoke_text(&binding.model, &{
-            let mut request = compact_invoke_request(request, binding.max_output_tokens);
+            let mut request =
+                compact_invoke_request(&binding.model.model, request, binding.max_output_tokens);
             // 取消真相源单通道（#2146）：端口无独立取消参数。
             request.cancellation = cancel.clone();
             request
@@ -1021,10 +1022,11 @@ async fn llm_extract_facts_or_local_fallback(
         Err(error @ CompactLlmError::InvalidSummary(_)) => {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+                "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} detail={:?} input_messages={} input_tokens={}",
                 chunk_index + 1,
                 total_chunks,
                 error.kind_label(),
+                compact_failure_detail(&error),
                 messages.len(),
                 crate::domain::token_budget::estimate_messages_tokens(messages),
             );
@@ -1035,6 +1037,21 @@ async fn llm_extract_facts_or_local_fallback(
         }
         Err(error) => Err(error),
     }
+}
+
+/// 降级原因详情（诊断用）：完整错误文本，按字符截断到 400 字符。
+///
+/// 只记 `kind_label` 会把 `ProviderError` 的内部原因（HTTP 状态、请求校验
+/// 失败文案、取消等）整条丢掉，事后无法定位降级根因。此处截断后随日志输出；
+/// 质量载荷里的 `failure` 标签保持简短不变（用户可见语义不扩散）。
+fn compact_failure_detail(error: &CompactLlmError) -> String {
+    const DETAIL_MAX_CHARS: usize = 400;
+    let text = error.to_string();
+    if text.chars().count() <= DETAIL_MAX_CHARS {
+        return text;
+    }
+    let truncated: String = text.chars().take(DETAIL_MAX_CHARS).collect();
+    format!("{truncated}…")
 }
 
 /// 单 chunk 的本地降级：按文本摘要折叠该 chunk 的消息为 fact 批次。
@@ -1327,10 +1344,11 @@ async fn compact_messages_map_reduce(
     for (chunk_index, error) in failed_chunks {
         log::warn!(
             target: crate::LOG_TARGET,
-            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} detail={:?} input_messages={} input_tokens={}",
             chunk_index + 1,
             total_chunks,
             error.kind_label(),
+            compact_failure_detail(&error),
             chunks[chunk_index].len(),
             estimate_messages_tokens(&chunks[chunk_index]),
         );
@@ -1514,12 +1532,17 @@ async fn compact_messages_map_reduce(
 mod compact_summary_tests;
 
 /// 组 compact LLM 调用请求（Off reasoning；取消由调用方 token 传入）。
+///
+/// `model` MUST 取自 [`crate::domain::CompactLlmBinding`]：provider 侧按
+/// `request.model` 校验非空并直接作为调用模型，空串会在发请求前被
+/// `invocation model must not be empty` 拦下，静默降级为本地压缩。
 fn compact_invoke_request(
+    model: &str,
     messages: Vec<Message>,
     max_output_tokens: u32,
 ) -> provider::ProviderRequestData {
     provider::ProviderRequestData::new(
-        String::new(),
+        model.to_string(),
         messages,
         max_output_tokens,
         share::reasoning::ReasoningLevel::Off,
