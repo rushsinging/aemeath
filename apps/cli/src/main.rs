@@ -105,6 +105,9 @@ async fn main() {
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());
         }
+        Some(Commands::Eval { command }) => {
+            subcommand::eval::run(command).await;
+        }
         None => {
             // 无子命令 — 默认调用 run，使用顶层参数
             chat::run_chat(cli.run_args.into()).await;

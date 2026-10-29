@@ -224,25 +224,8 @@ impl CompactModelResolver {
     pub fn to_llm_binding(&self) -> Option<context::CompactLlmBinding> {
         match self.resolve() {
             Ok(target) => {
-                let binding = target.binding();
-                let window = target.context_window().or_else(|| {
-                    if matches!(target.origin(), CompactModelOrigin::Configured) {
-                        log::warn!(
-                            target: crate::LOG_TARGET,
-                            "[compact] compact 模型未声明输入窗口，改用保守窗口 {COMPACT_UNKNOWN_MODEL_WINDOW}"
-                        );
-                        Some(COMPACT_UNKNOWN_MODEL_WINDOW)
-                    } else {
-                        None
-                    }
-                });
-                Some(context::CompactLlmBinding {
-                    invoker: std::sync::Arc::clone(&binding.provider),
-                    model: binding.model.clone(),
-                    max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
-                        .min(binding.max_tokens.max(1)),
-                    compact_context_window: window,
-                })
+                let reasoning = self.config.committed_snapshot().context_compact_reasoning();
+                Some(project_to_llm_binding(&target, reasoning))
             }
             Err(error) => {
                 log::warn!(
@@ -252,6 +235,50 @@ impl CompactModelResolver {
                 None
             }
         }
+    }
+
+    /// 评测/诊断（#2133 P2 多模型矩阵）：按显式 selection 解析一次绑定。
+    /// 不读 `context.compact_model`、不写缓存；失败返回 Err（评测 MUST 显式失败，
+    /// 不静默降级）。
+    pub fn resolve_explicit_binding(
+        &self,
+        selection: &str,
+    ) -> Result<context::CompactLlmBinding, CompactModelResolveError> {
+        let snapshot = self.config.committed_snapshot();
+        let binding = self.build_configured_binding(&snapshot, selection)?;
+        let target = CompactModelTarget::new(binding, CompactModelOrigin::Configured);
+        Ok(project_to_llm_binding(
+            &target,
+            snapshot.context_compact_reasoning(),
+        ))
+    }
+}
+
+/// `CompactModelTarget` → `CompactLlmBinding` 唯一投影（与生产同构造）。
+/// reasoning 来自 `context.compact_reasoning`（默认 High：语义任务开思考）。
+fn project_to_llm_binding(
+    target: &CompactModelTarget,
+    reasoning: share::reasoning::ReasoningLevel,
+) -> context::CompactLlmBinding {
+    let binding = target.binding();
+    let window = target.context_window().or_else(|| {
+        if matches!(target.origin(), CompactModelOrigin::Configured) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "[compact] compact 模型未声明输入窗口，改用保守窗口 {COMPACT_UNKNOWN_MODEL_WINDOW}"
+            );
+            Some(COMPACT_UNKNOWN_MODEL_WINDOW)
+        } else {
+            None
+        }
+    });
+    context::CompactLlmBinding {
+        invoker: std::sync::Arc::clone(&binding.provider),
+        model: binding.model.clone(),
+        max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
+            .min(binding.max_tokens.max(1)),
+        compact_context_window: window,
+        reasoning,
     }
 }
 

@@ -58,6 +58,7 @@ fn summary_test_binding(
         },
         max_output_tokens: 1024,
         compact_context_window: window,
+        reasoning: share::reasoning::ReasoningLevel::Off,
     }
 }
 
@@ -3025,7 +3026,12 @@ fn compact_invoke_request_carries_binding_model() {
     // 回归：请求 model 曾传空串，provider 侧以
     // `invocation model must not be empty` 在发请求前拒绝，导致每个 chunk
     // 静默降级为本地压缩（quality=PartialMapFallback）。
-    let request = compact_invoke_request("compact-test", vec![Message::user("hello")], 1024);
+    let request = compact_invoke_request(
+        "compact-test",
+        vec![Message::user("hello")],
+        1024,
+        share::reasoning::ReasoningLevel::Off,
+    );
     assert_eq!(request.model, "compact-test");
     assert_eq!(request.max_output_tokens, 1024);
     assert_eq!(request.reasoning, share::reasoning::ReasoningLevel::Off);

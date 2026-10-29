@@ -520,6 +520,8 @@ pub struct CompactLlmBinding {
     pub max_output_tokens: u32,
     /// compact 调用模型的输入窗口（None = 与注入窗口一致）。
     pub compact_context_window: Option<usize>,
+    /// compact 调用的推理档位（#2133：语义任务默认开思考，成本经 usage 统计）。
+    pub reasoning: share::reasoning::ReasoningLevel,
 }
 
 #[derive(Clone)]
