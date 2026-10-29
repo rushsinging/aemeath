@@ -176,7 +176,7 @@ pub enum QuizCommands {
         #[arg(long)]
         model: String,
 
-        /// 出题推理档位（缺省 max）
+        /// 出题推理档位（缺省 max，跟随全局默认）
         #[arg(long, default_value = "max")]
         reasoning: String,
 
@@ -211,9 +211,13 @@ pub enum QuizCommands {
         #[arg(long)]
         judge: String,
 
-        /// 答题/判卷推理档位（缺省 max）
+        /// 答题推理档位（缺省 max，跟随全局默认）
         #[arg(long, default_value = "max")]
         reasoning: String,
+
+        /// 判卷推理档位（缺省跟随 --reasoning；判卷质量优先时可单独抬高）
+        #[arg(long)]
+        judge_reasoning: Option<String>,
 
         /// 最多评多少个 case
         #[arg(long, default_value_t = 1)]

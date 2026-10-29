@@ -67,9 +67,8 @@ pub struct ContextConfig {
     pub compact_model: Option<String>,
     /// Compact 调用的推理档位（off/minimal/low/medium/high/xhigh/max）。
     ///
-    /// 未配置默认 `Max`：压缩是语义任务，默认开满思考（用户拍板）；成本经
-    /// usage 统计呈现，而非关思考省成本；经 server_effort_map 归并后为各厂
-    /// 可执行的对应档。需要实验/调优时按模型覆盖。
+    /// 未配置默认 `Max`：实测（19 题固定题库）low 68% / high 79% / max 89%
+    /// 续接正确率，档位提升显著；成本敏感时显式配置或用 `--reasoning low`。
     #[serde(default, alias = "compactReasoning")]
     pub compact_reasoning: Option<String>,
 }

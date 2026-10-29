@@ -15,7 +15,10 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use super::constants::{ANSWER_SOURCE_TOKEN_BUDGET, QUIZ_QUESTION_COUNT, QUIZ_SOURCE_TOKEN_BUDGET};
+use super::constants::{
+    ANSWER_SOURCE_TOKEN_BUDGET, QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS, QUIZ_SOURCE_TOKEN_BUDGET,
+    QUIZ_TOKENS_PER_QUESTION,
+};
 use super::telemetry::write_or_print;
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -124,10 +127,17 @@ fn message_texts(messages: &[serde_json::Value]) -> Vec<String> {
     messages.iter().map(super::dataset::message_text).collect()
 }
 
-fn questions_prompt(early_text: &str) -> String {
+/// 题数按 early 规模浮动（每 `QUIZ_TOKENS_PER_QUESTION` 一题，clamp 到上下限）。
+pub(crate) fn question_count_for(early_tokens: u64) -> usize {
+    let by_size = (early_tokens / QUIZ_TOKENS_PER_QUESTION as u64) as usize;
+    by_size.clamp(QUIZ_MIN_QUESTIONS, QUIZ_MAX_QUESTIONS)
+}
+
+fn questions_prompt(early_text: &str, question_count: usize) -> String {
+    let per_epoch = question_count.div_ceil(3).max(1);
     format!(
         "你在为一次上下文压缩验收出题。下面是按时间顺序排列的早期历史（已被压缩为摘要）。\n\
-         把它按顺序均分为三段：early（最老）、mid、recent（临近压缩点），每段出 2 道\n\
+         把它按顺序均分为三段：early（最老）、mid、recent（临近压缩点），每段出 {per_epoch} 道\n\
          只有读了该段才能答出的事实题（目标、决策、改动文件、关键约束、未完成事项），\n\
          每题标注来源段并附简短标准答案。\n\
          只输出一个 JSON 数组，元素形如 {{\"epoch\":\"early|mid|recent\",\"question\":\"...\",\"gold\":\"...\"}}。\n\
@@ -266,12 +276,14 @@ pub(crate) async fn generate(
             .map(|value| value as usize)
             .unwrap_or_else(|| messages.len().saturating_sub(messages.len() / 10));
         let early = &messages[..compacted.min(messages.len())]; // allow unsafe_text_op: Vec slice
-        let early_text =
-            truncate_by_tokens(&message_texts(early).join("\n"), QUIZ_SOURCE_TOKEN_BUDGET);
+        let early_joined = message_texts(early).join("\n");
+        let early_tokens = crate::subcommand::eval::dataset::estimate_tokens(&early_joined);
+        let question_count = question_count_for(early_tokens);
+        let early_text = truncate_by_tokens(&early_joined, QUIZ_SOURCE_TOKEN_BUDGET);
         let raw = complete_with_retry(
             &model,
             "你是严格的出题人。",
-            &questions_prompt(&early_text),
+            &questions_prompt(&early_text, question_count),
             &reasoning,
             &mut usage,
             "quiz",
@@ -286,7 +298,7 @@ pub(crate) async fn generate(
                 !item.question.trim().is_empty()
                     && item.gold.as_deref().is_some_and(|g| !g.trim().is_empty())
             })
-            .take(QUIZ_QUESTION_COUNT)
+            .take(question_count)
             .map(|mut item| {
                 if item.epoch.is_none() {
                     item.epoch = Some("unknown".to_string());
@@ -321,9 +333,11 @@ pub(crate) async fn answer(
     model: String,
     judge: String,
     reasoning: String,
+    judge_reasoning: Option<String>,
     limit: usize,
     output: Option<PathBuf>,
 ) -> Result<(), String> {
+    let judge_reasoning = judge_reasoning.unwrap_or_else(|| reasoning.clone());
     let text = std::fs::read_to_string(&questions)
         .map_err(|error| format!("读取题库失败 {}: {error}", questions.display()))?;
     let sets: Vec<QuestionSet> =
@@ -385,6 +399,7 @@ pub(crate) async fn answer(
             &model,
             &judge,
             &reasoning,
+            &judge_reasoning,
             &mut report.usage,
         )
         .await
@@ -436,6 +451,7 @@ async fn answer_with_questions(
     model: &str,
     judge: &str,
     reasoning: &str,
+    judge_reasoning: &str,
     usage: &mut Vec<QuizUsage>,
 ) -> Result<CaseQuiz, String> {
     let recent = recent_messages.unwrap_or(messages.len() / 10);
@@ -468,7 +484,7 @@ async fn answer_with_questions(
         judge,
         "你是独立判卷人。",
         &verdict_prompt(&items),
-        reasoning,
+        judge_reasoning,
         usage,
         "verdict",
     )

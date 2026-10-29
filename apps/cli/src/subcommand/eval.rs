@@ -92,11 +92,20 @@ async fn run_compact(command: CompactEvalCommands) {
                 model,
                 judge,
                 reasoning,
+                judge_reasoning,
                 limit,
                 output,
             } => {
                 quiz::answer(
-                    cases, questions, summaries, model, judge, reasoning, limit, output,
+                    cases,
+                    questions,
+                    summaries,
+                    model,
+                    judge,
+                    reasoning,
+                    judge_reasoning,
+                    limit,
+                    output,
                 )
                 .await
             }

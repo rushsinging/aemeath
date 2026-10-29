@@ -97,8 +97,15 @@ pub(crate) const QUIZ_SOURCE_TOKEN_BUDGET: usize = 800_000;
 /// 续接问答（P3）：答题者可见的 summary + tail 预算（估算 token）。
 pub(crate) const ANSWER_SOURCE_TOKEN_BUDGET: usize = 200_000;
 
-/// 续接问答（P3）：单 case 出题数（early/mid/recent 三段各 2 题）。
-pub(crate) const QUIZ_QUESTION_COUNT: usize = 6;
+/// 续接问答（P3）：题数按 early 规模浮动——每个该 token 数出 1 题
+/// （814K early → 20 题）。
+pub(crate) const QUIZ_TOKENS_PER_QUESTION: usize = 40_000;
+
+/// 续接问答（P3）：题数下限。
+pub(crate) const QUIZ_MIN_QUESTIONS: usize = 10;
+
+/// 续接问答（P3）：题数上限。
+pub(crate) const QUIZ_MAX_QUESTIONS: usize = 30;
 
 /// 读取类工具：路径集合差分用于衡量「压缩后重复读取」。
 pub(crate) const TOOL_READ_NAMES: [&str; 3] = ["Read", "Grep", "Glob"];

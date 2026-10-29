@@ -310,8 +310,9 @@ impl ConfigSnapshot {
     /// 让空白 selection 被误当成"已配置"。
     /// Compact 调用的推理档位；未配置或非法值回退 `Max`。
     ///
-    /// 压缩/续接问答是语义任务，默认开满思考（用户拍板：成本经 usage
-    /// 统计呈现，而非关思考省成本；归并表保证各厂执行其可用最高档）。
+    /// 实测（01a182e6，19 题固定题库）：low 68% → high 79% → max 89%，
+    /// early 段 0.57→0.71→0.86；档位提升质量显著，代价是 2.7× 耗时。
+    /// 默认取 max；成本敏感场景显式 `--reasoning low` 覆盖。
     pub fn context_compact_reasoning(&self) -> crate::reasoning::ReasoningLevel {
         self.inner
             .context
