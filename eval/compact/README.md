@@ -148,6 +148,14 @@ eval/compact/
 1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
 PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**。
 
+### 已归档评测记录
+
+`results/quiz_01a182e6_report.md`：真实会话 01a182e6（814K token）的三档 compact ×
+60 题续接问答完整记录（含三轮题库反转的方法学教训与复现命令）；原始数据
+`results/quiz_01a182e6_{questions,compact-low,compact-high,compact-max}_tier60.json`。
+
+结论：**默认档保持 low**（low 83% / high 90% / max 88%，high 成本 1.45×、max 2.7×）。
+
 ### 出题标准决定结论（两次反转的教训，必读）
 
 | 题库 | early 正确率（low/high/max） | 看起来的结论 |
