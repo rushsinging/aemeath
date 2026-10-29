@@ -151,8 +151,11 @@ impl SystemPromptAssembly {
         sections.push(
             share::i18n::prompt::discipline::universal_execution_discipline(language).to_string(),
         );
+        // 段间分隔固定为单个空行：各段（尤其磁盘 guidance 文件）可能自带
+        // 尾部换行，直接 join 会叠出连续三空行，故逐段裁掉尾部空白。
         sections
             .into_iter()
+            .map(|section| section.trim_end().to_owned())
             .filter(|section| !section.is_empty())
             .collect::<Vec<_>>()
             .join("\n\n")

@@ -1,3 +1,4 @@
+pub(crate) mod cleanup_command;
 pub(crate) mod config_form_command;
 pub(crate) mod config_form_render;
 pub(crate) mod connect_command;

@@ -91,3 +91,6 @@ async fn failing_task_does_not_block_others() {
         .iter()
         .any(|(kind, result)| *kind == TaskKind::HarnessRsi && result.is_err()));
 }
+
+// #2146 密封解锁：测试替身（crate 内）。
+impl crate::sealed::Sealed for CountingTask {}

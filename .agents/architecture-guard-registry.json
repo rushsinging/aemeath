@@ -2227,7 +2227,8 @@
         "systemone.rs",
         "systemone_tests.rs",
         "tools.rs",
-        "update.rs"
+        "update.rs",
+        "workflow_cleanup.rs"
       ],
       "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
       "profile": "fast"

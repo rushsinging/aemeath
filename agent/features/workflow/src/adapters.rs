@@ -2,7 +2,7 @@
 
 mod file_persistence;
 
-pub use file_persistence::FileWorkflowPersistence;
+pub use file_persistence::{CleanupReport, FileWorkflowPersistence};
 
 #[cfg(test)]
 mod file_persistence_tests;

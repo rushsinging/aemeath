@@ -237,3 +237,25 @@ async fn corrupt_jsonl_line_fails_closed() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn error_detail_round_trips_and_omits_when_absent() {
+    // 失败明细随记录往返：只有真实明细才写字段，缺省时整体省略，
+    // 保证旧记录/旧比对形态不因新增诊断字段漂移。
+    let with_detail = record("reflection-detail", 1_700_000_000)
+        .with_error_detail(Some("provider stream ended early".to_string()));
+    let json = serde_json::to_string(&with_detail).expect("serialize record");
+    assert!(
+        json.contains("\"error_detail\":\"provider stream ended early\""),
+        "{json}"
+    );
+    let decoded: ReflectionRecord = serde_json::from_str(&json).expect("deserialize record");
+    assert_eq!(
+        decoded.error_detail.as_deref(),
+        Some("provider stream ended early")
+    );
+
+    let plain = record("reflection-plain", 1_700_000_000);
+    let json = serde_json::to_string(&plain).expect("serialize record");
+    assert!(!json.contains("error_detail"), "{json}");
+}

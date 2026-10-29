@@ -35,6 +35,14 @@
 //! - `CliArgsAdapter`/`EnvAdapter`/`FileAdapter` 为 wire 内部实现收窄 crate 内（此前消费
 //!   分析误报：share/config 存在另一套同名独立实现，词命中假阳性）。
 
+/// 实现密封基建（#2146 实现权治理）：crate 内共享一个 Sealed 标记。
+/// `pub(crate)` 模块 + `pub` trait——crate 外不可命名（路径不可达），
+/// 因此「实现权」编译期归属本 crate；seal 的 PL trait 绑定
+/// `crate::sealed::Sealed` 作为超 trait。
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
 mod constants;
 
 pub(crate) use crate::constants::LOG_TARGET;

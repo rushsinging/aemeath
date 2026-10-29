@@ -309,6 +309,7 @@ async fn runtime_failure_is_materialized_by_memory_history_workflow() {
         &identity(),
         ReflectionErrorCategory::TimedOut,
         12,
+        Some("provider 流在终止帧前结束".to_string()),
     )
     .await
     .unwrap();
@@ -319,6 +320,17 @@ async fn runtime_failure_is_materialized_by_memory_history_workflow() {
         Some(ReflectionErrorCategory::TimedOut)
     );
     assert_eq!(summaries[0].duration_ms, 12);
+    assert_eq!(
+        summaries[0].error_category,
+        Some(ReflectionErrorCategory::TimedOut)
+    );
+    // 明细只落盘不入 safe summary（避免诊断文本外泄到面向用户的摘要投影）。
+    let stored = history.records.lock().unwrap();
+    assert_eq!(
+        stored[0].error_detail.as_deref(),
+        Some("provider 流在终止帧前结束"),
+        "失败明细 MUST 随记录落盘，否则只剩 error_category 无法定位"
+    );
 }
 
 /// 消息摘要字符预算（#1827）：超预算时最早消息被截出 prompt（取最近部分），

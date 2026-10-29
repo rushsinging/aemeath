@@ -233,7 +233,7 @@ impl ReflectionTaskAdapter {
             timeout,
             #[cfg(test)]
             executor: std::sync::Arc::new(|_request, _cancel| {
-                Box::pin(async { Err(ReflectionError::LlmCall) })
+                Box::pin(async { Err(ReflectionError::LlmCall("scripted failure".to_string())) })
             }),
             pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
             reflection_binding: None,
@@ -537,6 +537,7 @@ impl ReflectionTaskAdapter {
                     &persistence.identity,
                     category,
                     started.elapsed().as_millis() as u64,
+                    None,
                 )
                 .await
                 .is_err()

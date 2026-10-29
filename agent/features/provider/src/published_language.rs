@@ -438,14 +438,59 @@ pub struct LlmTextOutputData {
     pub token_usage: Option<TokenUsageData>,
 }
 
+/// 实现密封（#2146）：`LlmInvokePort` 的实现权**只属于 provider crate**。
+///
+/// 原理：超 trait 绑定 + 路径不可命名的双重锁——外部 crate 要
+/// `impl LlmInvokePort for X`，编译器要求 `X: sealed::Sealed`；满足它的
+/// 唯一途径是 `impl sealed::Sealed for X`，而本模块是 `pub(crate)`
+/// （crate 外不可命名），外部物理上写不出该 impl。
+///
+/// 获准实现（composition 装配与测试经本 crate 构造面获得）：
+/// - 生产：[`LlmClient`](crate::composition::LlmClient)
+/// - 测试：`provider::test_support::scripted_llm` / `scripted_llm_async`
+///
+/// 消费不受影响：`Arc<dyn LlmInvokePort>` 注入与泛型 bound 无需实现权。
+/// seal 是单向门：撤销属 breaking change（能力演进收口在 provider）。
+mod sealed {
+    /// 解锁标记：仅 provider crate 内对获准类型实现。
+    /// 名义 `pub`（满足超 trait 可见性检查），但所在模块私有——
+    /// crate 外不可命名，构成编译期密封。
+    pub trait Sealed {}
+}
+
+// ─── 密封解锁（#2146）：获准实现集中在定义文件内 ───
+impl sealed::Sealed for crate::adapters::client::LlmClient {}
+#[cfg(any(test, feature = "dev"))]
+impl sealed::Sealed for crate::test_support::ScriptedLlmInvokePort {}
+#[cfg(any(test, feature = "dev"))]
+impl sealed::Sealed for crate::test_support::AsyncScriptedLlmInvokePort {}
+
 /// LLM 调用能力端口（#2146 单端口收敛）：流式是唯一必须实现的 verb，
 /// 文本消费由默认方法 [`LlmInvokePort::invoke_text`] 收口提供——
 /// 非流式即流式的退化，不再作为独立 trait 存在，各实现免费获得文本能力。
 ///
+/// # 实现权（编译期密封）
+///
+/// 除 provider 外任何 crate **NEVER** 也不能实现本 trait（含测试 fake）——
+/// 需要可控行为时经 `provider::test_support` 的脚本化端口构造：
+///
+/// ```compile_fail
+/// # use provider::{LlmInvokePort, ModelInfo, ProviderRequestData, ProviderResponseStream, ProviderError};
+/// struct MyFake;
+/// # #[async_trait::async_trait]
+/// impl LlmInvokePort for MyFake {
+/// #   async fn invoke_stream(&self, _m: &ModelInfo, _r: &ProviderRequestData)
+/// #       -> Result<ProviderResponseStream, ProviderError> { unimplemented!() }
+///     // ...
+/// }
+/// // error[E0277]: the trait bound `MyFake: Sealed` is not satisfied
+/// // （Sealed 在 pub(crate) 模块中，外部不可命名 → 编译期拒绝）
+/// ```
+///
 /// 取消语义：唯一真相源是 `request.cancellation`（单通道）；
 /// 触发时返回 [`ProviderError`] 的 `Cancelled` 变体。
 #[async_trait::async_trait]
-pub trait LlmInvokePort: Send + Sync {
+pub trait LlmInvokePort: sealed::Sealed + Send + Sync {
     /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流
     /// （`ProviderResponseChunk`，`Stop`/`Error` 终止帧）。
     ///
