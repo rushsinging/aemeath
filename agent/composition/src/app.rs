@@ -1198,12 +1198,29 @@ async fn eval_compact_resolver() -> Result<runtime::CompactModelResolver, String
 /// 评测用通用文本调用（#2133 P3 续接问答）：按显式 selection 完成一次补全。
 /// 结构化任务由调用方在 prompt 内约束输出 JSON；reasoning 固定 Off
 /// （server_effort_map 归并为权威，#2148）。
+/// 一次评测调用的 token 用量（#2133：开思考的成本经统计呈现）。
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct EvalUsageData {
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
+}
+
+/// 一次评测文本调用的结果：正文 + token 用量。
+pub struct EvalCompleteOutcome {
+    pub text: String,
+    pub usage: EvalUsageData,
+}
+
 pub async fn eval_llm_complete(
     selection: &str,
     system: &str,
     user_prompt: &str,
     max_output_tokens: u32,
-) -> Result<String, String> {
+    reasoning: &str,
+) -> Result<EvalCompleteOutcome, String> {
+    let reasoning = share::reasoning::ReasoningLevel::parse(reasoning)
+        .ok_or_else(|| format!("非法 reasoning 档位：{reasoning}"))?;
     let resolver = eval_compact_resolver().await?;
     let binding = resolver
         .resolve_explicit_binding(selection)
@@ -1212,7 +1229,7 @@ pub async fn eval_llm_complete(
         binding.model.model.clone(),
         vec![share::message::Message::user(user_prompt.to_string())],
         max_output_tokens,
-        share::reasoning::ReasoningLevel::Off,
+        reasoning,
     );
     request.system = system.to_string();
     let output = binding
@@ -1220,7 +1237,18 @@ pub async fn eval_llm_complete(
         .invoke_text(&binding.model, &request)
         .await
         .map_err(|error| format!("LLM 调用失败：{error}"))?;
-    Ok(output.text)
+    let usage = output
+        .token_usage
+        .map(|usage| EvalUsageData {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        })
+        .unwrap_or_default();
+    Ok(EvalCompleteOutcome {
+        text: output.text,
+        usage,
+    })
 }
 
 /// 评测执行入口（#2133）：对一批消息跑一次真实压缩。
@@ -1233,6 +1261,7 @@ pub async fn run_compact_for_eval(
     messages_json: Vec<serde_json::Value>,
     previous_summary: Option<&str>,
     selection: Option<&str>,
+    reasoning_override: Option<&str>,
 ) -> Result<EvalCompactOutcome, String> {
     let resolver = eval_compact_resolver().await?;
     let binding = match selection {
@@ -1245,6 +1274,13 @@ pub async fn run_compact_for_eval(
                 .to_string()
         })?,
     };
+    // --reasoning 覆盖（默认来自 context.compact_reasoning，未配置=High）。
+    let mut binding = binding;
+    if let Some(raw) = reasoning_override {
+        let reasoning = share::reasoning::ReasoningLevel::parse(raw)
+            .ok_or_else(|| format!("非法 reasoning 档位：{raw}"))?;
+        binding.reasoning = reasoning;
+    }
     let model = format!("{}/{}", binding.model.provider, binding.model.model);
     let context_size = binding.model.context_limit.unwrap_or_default();
 

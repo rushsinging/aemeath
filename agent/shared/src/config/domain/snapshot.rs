@@ -308,6 +308,19 @@ impl ConfigSnapshot {
     ///
     /// 再次归一化空白，避免绕过 `ContextConfig` 反序列化的程序化构造
     /// 让空白 selection 被误当成"已配置"。
+    /// Compact 调用的推理档位；未配置或非法值回退 `High`。
+    ///
+    /// 压缩/续接问答是语义任务，默认开思考（成本经 usage 统计可见，
+    /// 而非关思考省成本）。
+    pub fn context_compact_reasoning(&self) -> crate::reasoning::ReasoningLevel {
+        self.inner
+            .context
+            .compact_reasoning
+            .as_deref()
+            .and_then(crate::reasoning::ReasoningLevel::parse)
+            .unwrap_or(crate::reasoning::ReasoningLevel::High)
+    }
+
     pub fn context_compact_model(&self) -> Option<&str> {
         self.inner
             .context

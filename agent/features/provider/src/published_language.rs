@@ -434,6 +434,8 @@ pub struct LlmTextOutputData {
     pub text_delta_count: usize,
     pub non_text_delta_count: usize,
     pub stream_completed: bool,
+    /// 本次调用的 token 用量（流尾 Usage 帧；provider 未上报时为 `None`）。
+    pub token_usage: Option<TokenUsageData>,
 }
 
 /// LLM 调用能力端口（#2146 单端口收敛）：流式是唯一必须实现的 verb，
@@ -485,6 +487,7 @@ pub async fn collect_text(
     let mut text = String::new();
     let mut text_delta_count = 0usize;
     let mut non_text_delta_count = 0usize;
+    let mut token_usage = TokenUsageData::default();
     while let Some(event) = stream.next().await {
         match event {
             ProviderResponseChunk::Content(ProviderContentData::Text(part)) => {
@@ -492,8 +495,8 @@ pub async fn collect_text(
                 text.push_str(&part);
             }
             ProviderResponseChunk::Content(_) => non_text_delta_count += 1,
-            // Usage 帧不属于内容增量。
-            ProviderResponseChunk::Usage(_) => {}
+            // Usage 帧不属于内容增量；取流尾快照（后到覆盖先到）。
+            ProviderResponseChunk::Usage(usage) => token_usage.merge_reported(usage),
             ProviderResponseChunk::Stop(stop_reason) => {
                 return Ok(LlmTextOutputData {
                     text,
@@ -501,6 +504,7 @@ pub async fn collect_text(
                     text_delta_count,
                     non_text_delta_count,
                     stream_completed: true,
+                    token_usage: token_usage.into_reported(),
                 });
             }
             ProviderResponseChunk::Error(error) => return Err(error),

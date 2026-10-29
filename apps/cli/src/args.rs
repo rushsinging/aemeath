@@ -237,6 +237,11 @@ pub enum CompactEvalCommands {
         /// 缺省跟随 context.compact_model
         #[arg(long)]
         model: Option<String>,
+
+        /// 压缩调用的推理档位（off/minimal/low/medium/high/xhigh/max）；
+        /// 缺省跟随 context.compact_reasoning（未配置=high）
+        #[arg(long)]
+        reasoning: Option<String>,
     },
 
     /// 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，
@@ -257,6 +262,10 @@ pub enum CompactEvalCommands {
         /// 独立判卷模型 selection（评测时显式指定，不设默认）
         #[arg(long)]
         judge: String,
+
+        /// 出题/答题/判卷的推理档位；缺省 high（语义任务开思考，成本经 usage 统计）
+        #[arg(long, default_value = "high")]
+        reasoning: String,
 
         /// 最多评多少个 case
         #[arg(long, default_value_t = 1)]

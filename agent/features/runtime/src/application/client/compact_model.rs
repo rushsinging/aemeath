@@ -223,7 +223,10 @@ impl CompactModelResolver {
     /// `None` = 本次走本地压缩（模型解析失败，保留 warn 日志）。
     pub fn to_llm_binding(&self) -> Option<context::CompactLlmBinding> {
         match self.resolve() {
-            Ok(target) => Some(project_to_llm_binding(&target)),
+            Ok(target) => {
+                let reasoning = self.config.committed_snapshot().context_compact_reasoning();
+                Some(project_to_llm_binding(&target, reasoning))
+            }
             Err(error) => {
                 log::warn!(
                     target: crate::LOG_TARGET,
@@ -244,12 +247,19 @@ impl CompactModelResolver {
         let snapshot = self.config.committed_snapshot();
         let binding = self.build_configured_binding(&snapshot, selection)?;
         let target = CompactModelTarget::new(binding, CompactModelOrigin::Configured);
-        Ok(project_to_llm_binding(&target))
+        Ok(project_to_llm_binding(
+            &target,
+            snapshot.context_compact_reasoning(),
+        ))
     }
 }
 
 /// `CompactModelTarget` → `CompactLlmBinding` 唯一投影（与生产同构造）。
-fn project_to_llm_binding(target: &CompactModelTarget) -> context::CompactLlmBinding {
+/// reasoning 来自 `context.compact_reasoning`（默认 High：语义任务开思考）。
+fn project_to_llm_binding(
+    target: &CompactModelTarget,
+    reasoning: share::reasoning::ReasoningLevel,
+) -> context::CompactLlmBinding {
     let binding = target.binding();
     let window = target.context_window().or_else(|| {
         if matches!(target.origin(), CompactModelOrigin::Configured) {
@@ -268,6 +278,7 @@ fn project_to_llm_binding(target: &CompactModelTarget) -> context::CompactLlmBin
         max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
             .min(binding.max_tokens.max(1)),
         compact_context_window: window,
+        reasoning,
     }
 }
 

@@ -34,6 +34,15 @@ pub(crate) struct QuizItem {
     pub(crate) epoch: Option<String>,
 }
 
+/// 一次 quiz 各阶段的 token 用量（#2133：开思考的成本经统计呈现）。
+#[derive(Debug, Default, Clone, Serialize)]
+pub(crate) struct QuizUsage {
+    pub(crate) stage: String,
+    pub(crate) input_tokens: Option<u32>,
+    pub(crate) output_tokens: Option<u32>,
+    pub(crate) reasoning_tokens: Option<u32>,
+}
+
 /// 按 epoch 分层的续接正确率：验证「多次压缩后早期决断的记忆衰减」。
 #[derive(Debug, Default, Clone, Serialize)]
 pub(crate) struct EpochStat {
@@ -66,6 +75,8 @@ pub(crate) struct QuizReport {
     correct_rate_mean: Option<f64>,
     /// 跨 case 按 epoch 合并：early 段正确率显著低于 recent 即记忆衰减信号。
     per_epoch: Vec<EpochStat>,
+    /// 各阶段 token 用量（出题/答题/判卷分开，成本可见）。
+    usage: Vec<QuizUsage>,
     cases: Vec<CaseQuiz>,
 }
 
@@ -189,21 +200,37 @@ fn verdict_prompt(items: &[QuizItem]) -> String {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn complete_with_retry(
     selection: &str,
     system: &str,
     prompt: &str,
+    reasoning: &str,
+    usage_sink: &mut Vec<QuizUsage>,
+    stage: &str,
 ) -> Result<String, String> {
-    let first = composition::app::eval_llm_complete(selection, system, prompt, 16_384).await?;
-    if parse_json_items(&first).is_some() {
-        return Ok(first);
+    let record = |outcome: &composition::app::EvalCompleteOutcome| QuizUsage {
+        stage: stage.to_string(),
+        input_tokens: outcome.usage.input_tokens,
+        output_tokens: outcome.usage.output_tokens,
+        reasoning_tokens: outcome.usage.reasoning_tokens,
+    };
+    let first = composition::app::eval_llm_complete(selection, system, prompt, 16_384, reasoning)
+        .await
+        .map_err(|error| error.to_string())?;
+    usage_sink.push(record(&first));
+    if parse_json_items(&first.text).is_some() {
+        return Ok(first.text);
     }
     // 解析失败重试一次（对齐反思口径：修复指令重发）。
     let retry_prompt =
         format!("{prompt}\n\n上一次输出不是纯 JSON 数组。请只输出 JSON 数组，不要任何其他文字。");
-    composition::app::eval_llm_complete(selection, system, &retry_prompt, 16_384)
-        .await
-        .map_err(|error| format!("重试仍失败：{error}"))
+    let retry =
+        composition::app::eval_llm_complete(selection, system, &retry_prompt, 16_384, reasoning)
+            .await
+            .map_err(|error| format!("重试仍失败：{error}"))?;
+    usage_sink.push(record(&retry));
+    Ok(retry.text)
 }
 
 pub(crate) async fn run(
@@ -211,6 +238,7 @@ pub(crate) async fn run(
     summaries_dir: PathBuf,
     model: String,
     judge: String,
+    reasoning: String,
     limit: usize,
     output: Option<PathBuf>,
 ) -> Result<(), String> {
@@ -262,7 +290,18 @@ pub(crate) async fn run(
         };
         let messages = load_case_messages(case, &cases_dir)?;
 
-        match quiz_one(case, &messages, &summary, recent_messages, &model, &judge).await {
+        match quiz_one(
+            case,
+            &messages,
+            &summary,
+            recent_messages,
+            &model,
+            &judge,
+            &reasoning,
+            &mut report.usage,
+        )
+        .await
+        {
             Ok(item) => {
                 report.evaluated += 1;
                 report.cases.push(item);
@@ -310,6 +349,7 @@ fn load_case_messages(
     super::run::load_case_json_lines(&cases_dir.join(path))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn quiz_one(
     case: &serde_json::Value,
     messages: &[serde_json::Value],
@@ -317,6 +357,8 @@ async fn quiz_one(
     recent_messages: Option<usize>,
     model: &str,
     judge: &str,
+    reasoning: &str,
+    usage: &mut Vec<QuizUsage>,
 ) -> Result<CaseQuiz, String> {
     // 与 run 的切分对齐：run 没有记录 recent（旧输出）时按 10% 条数兜底。
     let recent = recent_messages.unwrap_or(messages.len() / 10);
@@ -326,8 +368,15 @@ async fn quiz_one(
 
     // 出题（答题模型读 early 历史）
     let early_text = truncate_by_tokens(&message_texts(early).join("\n"), QUIZ_SOURCE_TOKEN_BUDGET);
-    let raw =
-        complete_with_retry(model, "你是严格的出题人。", &questions_prompt(&early_text)).await?;
+    let raw = complete_with_retry(
+        model,
+        "你是严格的出题人。",
+        &questions_prompt(&early_text),
+        reasoning,
+        usage,
+        "quiz",
+    )
+    .await?;
     let Some(questions) = parse_json_items(&raw) else {
         return Err("出题输出解析失败".to_string());
     };
@@ -351,8 +400,15 @@ async fn quiz_one(
             ANSWER_SOURCE_TOKEN_BUDGET / 2
         )
     );
-    let raw =
-        complete_with_retry(model, "你是答题人。", &answers_prompt(&source, &questions)).await?;
+    let raw = complete_with_retry(
+        model,
+        "你是答题人。",
+        &answers_prompt(&source, &questions),
+        reasoning,
+        usage,
+        "answer",
+    )
+    .await?;
     let Some(answers) = parse_json_items(&raw) else {
         return Err("答题输出解析失败".to_string());
     };
@@ -362,7 +418,15 @@ async fn quiz_one(
     }
 
     // 判卷（独立 judge）
-    let raw = complete_with_retry(judge, "你是独立判卷人。", &verdict_prompt(&items)).await?;
+    let raw = complete_with_retry(
+        judge,
+        "你是独立判卷人。",
+        &verdict_prompt(&items),
+        reasoning,
+        usage,
+        "verdict",
+    )
+    .await?;
     let Some(verdicts) = parse_json_items(&raw) else {
         return Err("判卷输出解析失败".to_string());
     };

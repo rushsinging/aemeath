@@ -64,6 +64,7 @@ async fn run_case(
     case: &serde_json::Value,
     cases_dir: &std::path::Path,
     selection: Option<&str>,
+    reasoning: Option<&str>,
 ) -> Result<composition::app::EvalCompactOutcome, String> {
     let messages_path = case
         .get("messages_path")
@@ -74,7 +75,7 @@ async fn run_case(
         .get("previous_summary")
         .and_then(|value| value.as_str())
         .filter(|text| !text.is_empty());
-    composition::app::run_compact_for_eval(messages, previous, selection)
+    composition::app::run_compact_for_eval(messages, previous, selection, reasoning)
         .await
         .map_err(|error| error.to_string())
 }
@@ -84,6 +85,7 @@ pub(crate) async fn run(
     output_dir: PathBuf,
     limit: usize,
     model: Option<String>,
+    reasoning: Option<String>,
 ) -> Result<(), String> {
     std::fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
     let index = load_cases_index(&cases_dir)?;
@@ -106,7 +108,7 @@ pub(crate) async fn run(
         .map(|messages| messages.len())
         .unwrap_or_default();
         let started = Instant::now();
-        match run_case(case, &cases_dir, model.as_deref()).await {
+        match run_case(case, &cases_dir, model.as_deref(), reasoning.as_deref()).await {
             Ok(outcome) => {
                 let elapsed_ms = started.elapsed().as_millis() as u64;
                 report.binding_model = report.binding_model.or(Some(outcome.model.clone()));

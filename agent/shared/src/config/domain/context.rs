@@ -65,6 +65,13 @@ pub struct ContextConfig {
         deserialize_with = "deserialize_compact_model"
     )]
     pub compact_model: Option<String>,
+    /// Compact 调用的推理档位（off/minimal/low/medium/high/xhigh/max）。
+    ///
+    /// 默认 `off`：压缩是结构化 JSON 批量任务，高思考档会把输出预算耗在
+    /// thinking 上（与 reflection 采样口径同因）；经 server_effort_map 归并后
+    /// 即各厂可执行的最低档。需要实验/调优时按模型覆盖。
+    #[serde(default, alias = "compactReasoning")]
+    pub compact_reasoning: Option<String>,
 }
 
 impl Default for ContextConfig {
@@ -75,6 +82,7 @@ impl Default for ContextConfig {
             auto_compact_failure_limit: default_auto_compact_failure_limit(),
             auto_compact_threshold_ratio: default_auto_compact_threshold_ratio(),
             compact_model: None,
+            compact_reasoning: None,
         }
     }
 }

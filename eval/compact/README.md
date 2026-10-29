@@ -143,7 +143,15 @@ eval/compact/
 1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
 PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**。
 
-### 续接问答（真实大 session，44.5 万 token、真实压缩点 early≈28 万 token）
+### 续接问答（high 档思考，真实大 session）
+
+run（--reasoning high）：`quality=Llm`、550s、summary 60865 chars。
+quiz：6 题判对 3（rate 0.5）；**per_epoch：early 0.0 / mid 1.0 / recent 0.5**——
+early（最老）最差，正是「多次压缩后早期决断记忆衰减」方向的首个信号（单 case，
+多 case 收集后确认）。用量：出题 40.4 万 input/4232 thinking；答题 3.6 万 input；
+判卷 10865 output/10338 thinking。
+
+### 续接问答（off 档对照，44.5 万 token、真实压缩点 early≈28 万 token）
 
 run：`quality=Llm`、3.6 分钟、summary 49706 chars。
 quiz（出题预算 800K token、glm-5.3 出题答题、qwen3.8-max 判卷）：6 题（early/mid/recent

@@ -836,14 +836,33 @@ async fn llm_generate(
     let output = binding
         .invoker
         .invoke_text(&binding.model, &{
-            let mut request =
-                compact_invoke_request(&binding.model.model, request, binding.max_output_tokens);
+            let mut request = compact_invoke_request(
+                &binding.model.model,
+                request,
+                binding.max_output_tokens,
+                binding.reasoning,
+            );
             // 取消真相源单通道（#2146）：端口无独立取消参数。
             request.cancellation = cancel.clone();
             request
         })
         .await
         .map_err(CompactLlmError::Provider)?;
+    // token 用量（#2133）：成本可见——开思考的代价经 usage 统计，而不是关思考。
+    if let Some(usage) = output.token_usage.as_ref() {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[compact] llm 用量：model={}/{} reasoning={:?} input={:?} output={:?} thinking={:?} cache_read={:?} cache_write={:?}",
+            binding.model.provider,
+            binding.model.model,
+            binding.reasoning,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.reasoning_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        );
+    }
     if output.text.trim().is_empty() {
         return Err(CompactLlmError::InvalidSummary(format!(
                 "LLM 返回了空的 compact 结构化响应：completion_reason={} text_deltas={} non_text_deltas={} completed={}",
@@ -1519,13 +1538,10 @@ fn compact_invoke_request(
     model: &str,
     messages: Vec<Message>,
     max_output_tokens: u32,
+    reasoning: share::reasoning::ReasoningLevel,
 ) -> provider::ProviderRequestData {
     // #2146 端口收敛后 request.model 参与 InvocationScope 校验（非空），
     // 必须携带 binding 的模型 id，否则所有 compact LLM 调用必失败并静默降级。
-    provider::ProviderRequestData::new(
-        model.to_string(),
-        messages,
-        max_output_tokens,
-        share::reasoning::ReasoningLevel::Off,
-    )
+    // reasoning 来自 binding（config context.compact_reasoning，默认 High）。
+    provider::ProviderRequestData::new(model.to_string(), messages, max_output_tokens, reasoning)
 }
