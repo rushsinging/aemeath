@@ -29,9 +29,9 @@ use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
 use crate::ports::{
-    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextPortError,
-    ContextRequestData, ContextWindowData, DecisionReason, InteractionRequestId,
-    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, TokenBudget, Urgency,
+    CompactOutcome, CompactionDecisionData, ContextPortError, ContextRequestData,
+    ContextWindowData, DecisionReason, InteractionRequestId, Language as ContextLanguage,
+    SessionId, SessionRevision, SystemBlock, TokenBudget, Urgency,
 };
 use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
 
@@ -90,79 +90,6 @@ fn window_with(messages: Vec<Message>) -> ContextWindowData {
             effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         },
-    }
-}
-
-/// `ContextPort` that records compact invocations and returns a configurable
-/// outcome. Other methods are no-ops because the production compact path only
-/// touches `compact`.
-struct StubContextPort {
-    outcome: Mutex<Option<Result<CompactOutcome, ContextPortError>>>,
-    compact_calls: Mutex<Vec<CompactRequestData>>,
-}
-
-impl StubContextPort {
-    fn new(outcome: Result<CompactOutcome, ContextPortError>) -> Arc<Self> {
-        Arc::new(Self {
-            outcome: Mutex::new(Some(outcome)),
-            compact_calls: Mutex::new(Vec::new()),
-        })
-    }
-
-    fn compact_calls(&self) -> Vec<CompactRequestData> {
-        self.compact_calls.lock().unwrap().clone()
-    }
-}
-
-#[async_trait]
-#[async_trait]
-impl crate::ports::ContextWindowPort for StubContextPort {
-    async fn build_window(
-        &self,
-        _request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
-        Err(ContextPortError::Compact("stub: build_window".to_string()))
-    }
-}
-#[async_trait]
-impl context::ReminderControlPort for StubContextPort {}
-
-#[async_trait]
-impl crate::ports::ContextCompactPort for StubContextPort {
-    async fn needs_compaction(
-        &self,
-        _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
-        Err(ContextPortError::Compact(
-            "stub: needs_compaction".to_string(),
-        ))
-    }
-
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        self.compact_calls.lock().unwrap().push(request.clone());
-        self.outcome
-            .lock()
-            .unwrap()
-            .take()
-            .expect("stub outcome must be configured exactly once")
-    }
-}
-#[async_trait]
-impl crate::ports::ContextAppendPort for StubContextPort {
-    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
-        Err(ContextPortError::Compact("stub: clear_session".to_string()))
-    }
-
-    async fn append_and_persist(
-        &self,
-        _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage(
-            "stub".to_string(),
-        ))
     }
 }
 
@@ -237,7 +164,7 @@ fn build_reflection_port(harness: &CompactHarness) -> RuntimeReflection<'_> {
 /// reflection port (三者经 `material_slot` 共享 PreCompact 材料)。
 struct CompactHarness {
     adapter: ReflectionTaskAdapter,
-    stub: Arc<StubContextPort>,
+    stub: Arc<context::test_support::StubContextService>,
     runtime_context: crate::application::run::context::RuntimeContext,
     /// 记录型反思历史；注入非记录实现的构造（`with_history`）时为 None。
     reflection_history: Option<Arc<RecordingReflectionHistory>>,
@@ -287,7 +214,12 @@ impl CompactHarness {
         recording_history: Option<Arc<RecordingReflectionHistory>>,
     ) -> Self {
         let adapter = production_adapter();
-        let stub = StubContextPort::new(outcome);
+        // #2146：Context 四端口实现权归 context crate；读路径失败 + compact
+        // 结果可配置替身经其 test_support（take 一次语义一致）。
+        let stub = std::sync::Arc::new(context::test_support::StubContextService::unavailable(
+            "stub",
+        ));
+        stub.set_compact_outcome(outcome);
         let binding = pre_compact_test_binding();
         let usage_sink = Arc::new(RecordingUsageSink::default());
         let runtime_context =
@@ -607,7 +539,7 @@ async fn pre_compact_trigger_stages_material_after_compact_outcome_committed() {
         harness.persisted_triggers().is_empty(),
         "暂存阶段不得执行反思"
     );
-    assert_eq!(harness.stub.compact_calls().len(), 1);
+    assert_eq!(harness.stub.compact_requests().len(), 1);
 
     // 执行点在 engine：反思端口取出材料并以 PreCompact 执行。
     let mut reflection = build_reflection_port(&harness);
@@ -689,7 +621,7 @@ async fn pre_compact_trigger_stages_nothing_on_compact_outcome_skipped() {
         triggers.is_empty(),
         "Skipped must NOT run a PreCompact reflection: {triggers:?}"
     );
-    assert_eq!(harness.stub.compact_calls().len(), 1);
+    assert_eq!(harness.stub.compact_requests().len(), 1);
 }
 
 /// Integration: context port 的 `compact` 报错时观察者不被调用——不暂存材料，
@@ -730,7 +662,7 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
         triggers.is_empty(),
         "context port errors must NOT run a PreCompact reflection: {triggers:?}"
     );
-    assert_eq!(harness.stub.compact_calls().len(), 1);
+    assert_eq!(harness.stub.compact_requests().len(), 1);
 }
 
 /// 反思配置关闭时的取出语义：丢弃暂存材料并返回 None——材料不滞留到下一次

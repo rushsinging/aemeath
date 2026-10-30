@@ -143,3 +143,6 @@ pub fn map_legacy_result(result: crate::domain::ToolResult) -> ToolExecutionOutc
         })
     }
 }
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for ExecutionAdapter {}

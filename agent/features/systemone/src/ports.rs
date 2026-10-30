@@ -11,7 +11,7 @@ use crate::domain::{
 
 /// 评分端口：批量评分；服务不可用返回 `ScoringUnavailable`（消费点据此回退）。
 #[async_trait]
-pub trait ScoringPort: Send + Sync {
+pub trait ScoringPort: crate::sealed::Sealed + Send + Sync {
     async fn answer(
         &self,
         state: &ScoringState,

@@ -180,23 +180,95 @@ pub struct ReminderSnapshot {
     pub data: String,
 }
 
-/// reminder 来源的唯一扩展点：新增 kind 只实现本 trait 并注册，
-/// NEVER 触碰队列、注入调度或渲染分发。
-pub trait ReminderSource: Send + Sync {
-    fn kind(&self) -> ReminderKind;
-    fn policy(&self) -> ReminderPolicy;
-    /// 读当前快照；`None` 表示本轮无内容（如当前无任务），不入队。
-    ///
-    /// 携带消费型事实的 source **MUST** 在 build 只 peek 不取走，把
-    /// 事实的最终标记推迟到 [`ReminderSource::confirm_injected`]——
-    /// 快照入队后若 Run 收口（未注入），事实保留在源头，由下一个
-    /// Run / wakeup 补注入（#252：take 即标记会把完成事实静默丢失）。
-    fn build(&self) -> Option<ReminderSnapshot>;
-    /// 按语言渲染 body。
-    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String;
-    /// 注入组装确认：快照被组装进本轮 window 后调用。消费型 source
-    /// 在此标记事实已送达；默认 no-op（非消费型 source 无需实现）。
-    fn confirm_injected(&self) {}
+/// Runtime 推送的一条提醒事实（#2146 数据化接口：接口只接受本数据类型，
+/// 无 trait 多态）：kind + 策略 + 渲染载荷。`data` 为 [`InvocationReminderData`]
+/// 的 JSON 序列化——渲染模板由 Context 按 kind 内置
+/// （[`render_invocation_reminder_body`]）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReminderFactData {
+    pub kind: ReminderKind,
+    pub policy: ReminderPolicy,
+    /// 入队模式：快照替换（多数）或事件累积（后台完成类）。
+    pub enqueue: ReminderEnqueue,
+    /// 事实生命周期（失效契约）：决定它在 store 里如何存续/被清除。
+    pub lifetime: ReminderFactLifetime,
+    /// OneShot 事实的回滚标识（如后台任务 id，可有多条）：Run 收口时若仍
+    /// 未注入，凭这些键在数据源侧撤销「已交付」标记，下个 Run 重新补注入。
+    pub rollback_keys: Vec<String>,
+    /// [`InvocationReminderData`] JSON 载荷。
+    pub data: String,
+}
+
+/// 事实生命周期（失效契约）：每个 kind 必须显式声明，禁止默认「永久有效」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReminderFactLifetime {
+    /// 一次性事实（事件型，如后台完成）：不入 store，入队即消费；
+    /// Run 收口仍未注入 → 按 `rollback_key` 回滚，下个 Run 补注入。
+    OneShot,
+    /// 最新快照（如任务进度、召回预览）：驻留 store，同 kind 覆盖；
+    /// 生产者「无内容」时 MUST 显式 `remove`，不得靠不推送隐式保留旧值。
+    Snapshot,
+    /// Run 作用域事实（如 config/模型变更判定）：驻留 store，
+    /// Run 创建时清空，绝不跨 Run 残留。
+    RunScoped,
+}
+
+/// Session 级事实存储（#2146 方案 A）：事实数据跨 Run 存活，
+/// 生命周期与失效由 [`ReminderFactLifetime`] 显式声明。
+///
+/// 只有 `Snapshot` / `RunScoped` 档驻留本 store；`OneShot` 事实
+/// 由管线直接入队（不入 store）。
+#[derive(Debug, Default)]
+pub struct ReminderFactStore {
+    facts: HashMap<ReminderKind, ReminderFactData>,
+}
+
+impl ReminderFactStore {
+    /// 写入事实：`Snapshot` / `RunScoped` 覆盖旧值；`OneShot` 不入 store。
+    pub fn push(&mut self, fact: ReminderFactData) {
+        if fact.lifetime == ReminderFactLifetime::OneShot {
+            return;
+        }
+        self.facts.insert(fact.kind.clone(), fact);
+    }
+
+    /// 显式失效：生产者「无内容」时调用，清掉该 kind 的驻留事实。
+    pub fn remove(&mut self, kind: &ReminderKind) {
+        self.facts.remove(kind);
+    }
+
+    /// Run 创建时清空该 Run 允许的 `RunScoped` 事实。
+    pub fn reset_run_scoped(&mut self, kinds: &[ReminderKind]) {
+        self.facts.retain(|kind, fact| {
+            !(fact.lifetime == ReminderFactLifetime::RunScoped && kinds.contains(kind))
+        });
+    }
+
+    pub fn get(&self, kind: &ReminderKind) -> Option<&ReminderFactData> {
+        self.facts.get(kind)
+    }
+
+    /// 当前驻留的全部事实（按 kind 去重的最新值）。
+    pub fn facts(&self) -> impl Iterator<Item = &ReminderFactData> {
+        self.facts.values()
+    }
+}
+
+/// 事实入队模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReminderEnqueue {
+    /// 快照替换：同 kind 新事实替换旧快照。
+    Snapshot,
+    /// 事件累积：后台完成类事实逐条累积。
+    Event,
+}
+
+impl ReminderFactData {
+    /// 校验事实自洽：动态 refresh 不得配 SystemTail；OneShot 必须带回滚键。
+    pub fn is_valid(&self) -> bool {
+        self.policy.is_valid()
+            && !(self.lifetime == ReminderFactLifetime::OneShot && self.rollback_keys.is_empty())
+    }
 }
 
 /// 队列 entry：kind + 快照 + 内容指纹 + 序号 + 注入行为。
@@ -206,7 +278,10 @@ pub struct ReminderQueueEntry {
     pub snapshot: ReminderSnapshot,
     pub fingerprint: ReminderFingerprint,
     pub seq: u64,
-    pub inject: InjectBehavior,
+    /// 事实策略随条目流转（入队位置/优先级/去重/compact 处置都在此处）。
+    pub policy: ReminderPolicy,
+    /// OneShot 事实的回滚标识（未注入时凭此回滚，其余为空）。
+    pub rollback_keys: Vec<String>,
 }
 
 /// 内容指纹（kind + 快照内容）：dedup 与滞留重试的身份依据。
@@ -232,7 +307,7 @@ pub struct InjectionCandidate {
     pub snapshot: ReminderSnapshot,
     pub fingerprint: ReminderFingerprint,
     pub seq: u64,
-    pub inject: InjectBehavior,
+    pub policy: ReminderPolicy,
 }
 
 /// Run 级 reminder 队列：快照替换 / 事件累积 / dedup / compact 处置 / 滞留。
@@ -256,30 +331,54 @@ impl ReminderQueue {
     }
 
     /// 快照类入队：同 kind 未消费旧 entry 被最新替换。
+    #[cfg(test)]
     pub fn push_snapshot(
         &mut self,
         kind: ReminderKind,
         snapshot: ReminderSnapshot,
-        inject: InjectBehavior,
+        policy: ReminderPolicy,
+    ) {
+        self.push_snapshot_with_rollback(kind, snapshot, policy, Vec::new());
+    }
+
+    /// 带回滚标识的快照入队（`OneShot` 滞留回滚用）。
+    pub fn push_snapshot_with_rollback(
+        &mut self,
+        kind: ReminderKind,
+        snapshot: ReminderSnapshot,
+        policy: ReminderPolicy,
+        rollback_keys: Vec<String>,
     ) {
         if self.dropped_kinds.contains(&kind) {
             return;
         }
         self.entries.retain(|entry| entry.kind != kind);
-        self.append_entry(kind, snapshot, inject);
+        self.append_entry(kind, snapshot, policy, rollback_keys);
     }
 
     /// 事件类入队：同 kind entry 各自累积（各自独立注入块）。
+    #[cfg(test)]
     pub fn push_event(
         &mut self,
         kind: ReminderKind,
         snapshot: ReminderSnapshot,
-        inject: InjectBehavior,
+        policy: ReminderPolicy,
+    ) {
+        self.push_event_with_rollback(kind, snapshot, policy, Vec::new());
+    }
+
+    /// 带回滚标识的事件入队（`OneShot` 滞留回滚用）。
+    pub fn push_event_with_rollback(
+        &mut self,
+        kind: ReminderKind,
+        snapshot: ReminderSnapshot,
+        policy: ReminderPolicy,
+        rollback_keys: Vec<String>,
     ) {
         if self.dropped_kinds.contains(&kind) {
             return;
         }
-        self.append_entry(kind, snapshot, inject);
+        self.append_entry(kind, snapshot, policy, rollback_keys);
     }
 
     /// auto-compact `Committed` 后按 per-kind 处置；`Skipped` 不调用本方法。
@@ -333,7 +432,7 @@ impl ReminderQueue {
                 .last_injected
                 .get(&entry.kind)
                 .is_some_and(|previous| *previous == entry.fingerprint);
-            let skip = entry.inject.dedup == ReminderDedup::SkipIfUnchanged && unchanged;
+            let skip = entry.policy.inject.dedup == ReminderDedup::SkipIfUnchanged && unchanged;
             if skip {
                 self.last_snapshot.insert(entry.kind.clone(), entry);
             } else {
@@ -342,10 +441,11 @@ impl ReminderQueue {
         }
         retained.sort_by(|left, right| {
             right
+                .policy
                 .inject
                 .priority
                 .value()
-                .cmp(&left.inject.priority.value())
+                .cmp(&left.policy.inject.priority.value())
                 .then_with(|| left.seq.cmp(&right.seq))
         });
         self.staging = retained;
@@ -356,7 +456,7 @@ impl ReminderQueue {
                 snapshot: entry.snapshot.clone(),
                 fingerprint: entry.fingerprint.clone(),
                 seq: entry.seq,
-                inject: entry.inject,
+                policy: entry.policy.clone(),
             })
             .collect()
     }
@@ -394,7 +494,8 @@ impl ReminderQueue {
         &mut self,
         kind: ReminderKind,
         snapshot: ReminderSnapshot,
-        inject: InjectBehavior,
+        policy: ReminderPolicy,
+        rollback_keys: Vec<String>,
     ) {
         self.next_seq += 1;
         let fingerprint = ReminderFingerprint::of(&kind, &snapshot);
@@ -403,20 +504,49 @@ impl ReminderQueue {
             snapshot,
             fingerprint,
             seq: self.next_seq,
-            inject,
+            policy,
+            rollback_keys,
         };
         self.last_snapshot.insert(kind, entry.clone());
         self.entries.push(entry);
         self.sort_entries();
     }
 
+    /// 显式失效：丢弃该 kind 的全部待注入条目与历史指纹/快照
+    /// （数据源已放弃该事实，队列不得继续持有陈旧内容）。
+    pub fn discard(&mut self, kind: &ReminderKind) {
+        self.entries.retain(|entry| &entry.kind != kind);
+        self.staging.retain(|entry| &entry.kind != kind);
+        self.last_snapshot.remove(kind);
+        self.last_injected.remove(kind);
+        self.rebuild_flags.remove(kind);
+    }
+
+    /// 待注入条目（entries + staging）只读视图。
+    pub fn pending_entries(&self) -> impl Iterator<Item = &ReminderQueueEntry> {
+        self.entries.iter().chain(self.staging.iter())
+    }
+
+    /// Run 收口回滚：取走所有仍未注入的 OneShot 回滚标识（entries + staging），
+    /// 供 Runtime 撤销「已交付」标记，下个 Run 重新补注入。
+    pub fn drain_uninjected_oneshot_keys(&mut self) -> Vec<String> {
+        let mut keys: Vec<String> = Vec::new();
+        for entry in self.entries.iter().chain(self.staging.iter()) {
+            keys.extend(entry.rollback_keys.iter().cloned());
+        }
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
     fn sort_entries(&mut self) {
         self.entries.sort_by(|left, right| {
             right
+                .policy
                 .inject
                 .priority
                 .value()
-                .cmp(&left.inject.priority.value())
+                .cmp(&left.policy.inject.priority.value())
                 .then_with(|| left.seq.cmp(&right.seq))
         });
     }
@@ -575,6 +705,23 @@ pub fn render_invocation_reminder_body(
                 ),
             }
             lines.join("\n")
+        }
+        crate::domain::InvocationReminderData::WorkflowState { workflow_id, mode } => {
+            let zh = language == "zh";
+            match (mode, zh) {
+                (crate::domain::WorkflowStateModeData::Executing, true) => format!(
+                    "当前 Session 的 Active Workflow {workflow_id} 处于 Executing。执行或更新前先调用 workflow_query 获取当前 Graph、Active Node 与已有结论。"
+                ),
+                (crate::domain::WorkflowStateModeData::Replanning, true) => format!(
+                    "当前 Session 的 Active Workflow {workflow_id} 处于 Replanning。按 system prompt 中的重规划纪律处理：先 workflow_query，再 workflow_replan 或 workflow_update(fail / cancel / deactivate)。"
+                ),
+                (crate::domain::WorkflowStateModeData::Executing, false) => format!(
+                    "Active workflow {workflow_id} in this session is Executing. Call workflow_query before acting on it to read the current graph, active nodes and existing conclusions."
+                ),
+                (crate::domain::WorkflowStateModeData::Replanning, false) => format!(
+                    "Active workflow {workflow_id} in this session is Replanning. Follow the replanning discipline from the system prompt: call workflow_query first, then workflow_replan or workflow_update(fail / cancel / deactivate)."
+                ),
+            }
         }
         crate::domain::InvocationReminderData::BackgroundProcessCompleted { items } => {
             let status_text = |status: &crate::domain::BackgroundProcessCompletionStatus| match status {

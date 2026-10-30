@@ -43,6 +43,8 @@ chrono = "0.4"
 
 [dev-dependencies]
 provider = { path = "../features/provider", features = ["dev"] }
+runtime = { path = "../features/runtime", features = ["dev"] }
+project = { path = "../features/project", features = ["dev"] }
 # 测试经 test_support 消费 context port mock（AtomicBlobSessionManagement）。
 context = { path = "../features/context", features = ["dev"] }
 tools = { path = "../features/tools", features = ["test-harness"] }

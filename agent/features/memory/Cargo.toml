@@ -3,6 +3,11 @@ name = "memory"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# 测试实现面。Consumers add `memory` to `[dev-dependencies]`
+# with `features = ["dev"]`. Never enabled in production.
+dev = []
+
 [dependencies]
 async-trait.workspace = true
 chrono = { workspace = true }
@@ -19,6 +24,7 @@ utils = { path = "../../../packages/global/utils" }
 uuid = { version = "1", features = ["serde", "v7"] }
 
 [dev-dependencies]
+systemone = { path = "../systemone", features = ["dev"] }
 
 # 继承 workspace 零容忍 lint 基线（#1995）。
 [lints]

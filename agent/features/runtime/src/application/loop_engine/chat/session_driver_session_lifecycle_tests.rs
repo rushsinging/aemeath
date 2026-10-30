@@ -1731,19 +1731,21 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
 /// 装饰 production context 的 `MainContextFactory`：统计 session 落盘类端口
 /// 调用（`append_and_persist` 等持久化方法），读路径原样转发给内层。
 struct RecordingContextFactory {
-    persistence_calls: Arc<Mutex<Vec<String>>>,
+    persistence_calls:
+        Arc<Mutex<Vec<context::test_support::RecordedContextCall>>>,
 }
 
 impl RecordingContextFactory {
     /// 测试入口：包装既有 ContextPorts 为记录型（保持四端口语义）。
     fn wrap_ports(&self, inner: context::ContextPorts) -> context::ContextPorts {
-        context::ContextPorts::from_service(Arc::new(RecordingContextPort {
-            inner,
-            persistence_calls: self.persistence_calls.clone(),
-        }))
+        // #2146：Context 四端口实现权归 context crate；共享句柄装饰器。
+        context::test_support::recording_context_shared(&inner, &self.persistence_calls)
     }
 
-    fn new() -> (Arc<Self>, Arc<Mutex<Vec<String>>>) {
+    fn new() -> (
+        Arc<Self>,
+        Arc<Mutex<Vec<context::test_support::RecordedContextCall>>>,
+    ) {
         let persistence_calls = Arc::new(Mutex::new(Vec::new()));
         (
             Arc::new(Self {
@@ -1755,128 +1757,7 @@ impl RecordingContextFactory {
 }
 
 
-struct RecordingContextPort {
-    inner: context::ContextPorts,
-    persistence_calls: Arc<Mutex<Vec<String>>>,
-}
 
-impl RecordingContextPort {
-    fn record_persistence(&self, call: &'static str) {
-        self.persistence_calls.lock().unwrap().push(call.to_string());
-    }
-}
-
-
-impl context::ReminderControlPort for RecordingContextPort {
-    fn create_reminder_pipeline(&self, run_id: sdk::RunId, sources: Vec<std::sync::Arc<dyn context::ReminderSource>>) {
-        self.inner.reminders.create_reminder_pipeline(run_id, sources)
-    }
-    fn drop_reminder_pipeline(&self, run_id: &sdk::RunId) {
-        self.inner.reminders.drop_reminder_pipeline(run_id)
-    }
-    fn reminder_run_started(&self, run_id: &sdk::RunId) {
-        self.inner.reminders.reminder_run_started(run_id)
-    }
-    fn reminder_handle_event(&self, run_id: &sdk::RunId, event_source: &context::ReminderEventSource) {
-        self.record_persistence("reminder_handle_event");
-        self.inner.reminders.reminder_handle_event(run_id, event_source)
-    }
-    fn reminder_task_mutated(&self, run_id: &sdk::RunId) {
-        self.inner.reminders.reminder_task_mutated(run_id)
-    }
-    fn reminder_step_advanced(&self, run_id: &sdk::RunId, step: u64) {
-        self.inner.reminders.reminder_step_advanced(run_id, step)
-    }
-    fn reminder_user_message_received(&self, run_id: &sdk::RunId) {
-        self.inner.reminders.reminder_user_message_received(run_id)
-    }
-}
-
-#[async_trait]
-impl context::ContextWindowPort for RecordingContextPort {
-    async fn build_window(
-        &self,
-        request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
-        self.inner.window.build_window(request).await
-    }
-
-}
-
-#[async_trait]
-impl context::ContextCompactPort for RecordingContextPort {
-    async fn needs_compaction(
-        &self,
-        request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
-        self.inner.compact.needs_compaction(request).await
-    }
-
-    async fn compact(
-        &self,
-        request: &crate::ports::CompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        self.record_persistence("compact");
-        self.inner.compact.compact(request).await
-    }
-
-
-}
-
-#[async_trait]
-impl context::ContextAppendPort for RecordingContextPort {
-    async fn clear_session(
-        &self,
-        session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
-        self.record_persistence("clear_session");
-        self.inner.append.clear_session(session_id).await
-    }
-
-    async fn append_accepted_input(
-        &self,
-        append: &crate::ports::AcceptedInputAppendData,
-    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::AcceptedInputError> {
-        self.record_persistence("append_accepted_input");
-        self.inner.append.append_accepted_input(append).await
-    }
-
-    async fn advance_tool_receipt(
-        &self,
-        mutation: context::ToolReceiptMutationData,
-    ) -> Result<context::ToolReceiptMutationReceiptData, context::ToolReceiptMutationError> {
-        self.record_persistence("advance_tool_receipt");
-        self.inner.append.advance_tool_receipt(mutation).await
-    }
-
-    async fn step_receipts(
-        &self,
-        session_id: &crate::ports::SessionId,
-        run_id: &sdk::RunId,
-        step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::ports::RunStepReceiptData>, context::ToolReceiptMutationError> {
-        self.inner.append.step_receipts( session_id, run_id, step_id).await
-    }
-
-    async fn compare_and_record_skill_load(
-        &self,
-        mutation: ::tools::published::skill::SkillLoadMutation,
-    ) -> Result<
-        ::tools::published::skill::SkillLoadDecision,
-        ::tools::published::skill::SkillLoadStateError,
-    > {
-        self.record_persistence("compare_and_record_skill_load");
-        self.inner.append.compare_and_record_skill_load(mutation).await
-    }
-
-    async fn append_and_persist(
-        &self,
-        append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
-        self.record_persistence("append_and_persist");
-        self.inner.append.append_and_persist(append).await
-    }
-}
 
 /// 裁决 2：Manual Reflection Run 没有 RunStep —— ContextPort 上零落盘调用；
 /// canonical session 的 `message_count`、`updated_at` 与 run slices 在 run
@@ -1946,7 +1827,12 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
         "前置：应走真实 Run 的受理回执（后台开始），而非禁用跳过文案: {terminal_text}"
     );
 
-    let recorded = persistence_calls.lock().unwrap().clone();
+    let recorded: Vec<&str> = persistence_calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|call| call.name())
+        .collect();
     assert!(
         recorded.is_empty(),
         "Manual Reflection Run 不得调用任何 session 落盘端口: {recorded:?}"

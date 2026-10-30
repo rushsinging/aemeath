@@ -3,10 +3,9 @@ use crate::domain::{
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
-use project::{WorkspaceControl, WorkspaceData, WorkspaceReader};
-use share::session_types::{ProjectIdentityData, WorkspaceId};
+use project::{WorkspaceControl, WorkspaceReader};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
@@ -25,142 +24,9 @@ impl CancellationSignal for FakeCancellation {
     }
 }
 
-#[derive(Clone)]
-struct FakeWorkspace {
-    initial_root: PathBuf,
-    current: Arc<Mutex<PathBuf>>,
-}
-
-impl FakeWorkspace {
-    fn new(root: PathBuf) -> Self {
-        let root = root.canonicalize().unwrap_or(root);
-        Self {
-            initial_root: root.clone(),
-            current: Arc::new(Mutex::new(root)),
-        }
-    }
-
-    fn current(&self) -> PathBuf {
-        self.current.lock().expect("fake workspace lock").clone()
-    }
-
-    fn normalized(&self, path: &Path) -> PathBuf {
-        let candidate = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.current().join(path)
-        };
-        candidate.canonicalize().unwrap_or(candidate)
-    }
-}
-
-impl WorkspaceReader for FakeWorkspace {
-    fn workspace_id(&self) -> WorkspaceId {
-        WorkspaceId::new(format!("test-workspace:{}", self.initial_root.display()))
-    }
-    fn project_identity(&self) -> ProjectIdentityData {
-        ProjectIdentityData {
-            initial_cwd: self.initial_root.display().to_string(),
-            git_common_dir: None,
-        }
-    }
-    fn current_workspace_root(&self) -> PathBuf {
-        self.initial_root.clone()
-    }
-    fn current_path_base(&self) -> PathBuf {
-        self.current()
-    }
-    fn resolve(&self, rel: &Path) -> PathBuf {
-        self.normalized(rel)
-    }
-    fn resolve_file_path(
-        &self,
-        path: &Path,
-        auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        let resolved = self.normalized(path);
-        if auth.allow_outside_workspace || resolved.starts_with(&self.initial_root) {
-            Ok(resolved)
-        } else {
-            Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径 {} 超出工作区根", resolved.display()),
-            ))
-        }
-    }
-    fn resolve_search_path(
-        &self,
-        path: &Path,
-        auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<PathBuf, share::error::DomainError> {
-        let resolved = self.resolve_file_path(path, auth)?;
-        if !resolved.exists() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不存在 {}", resolved.display()),
-            ));
-        }
-        if !resolved.is_dir() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不是目录 {}", resolved.display()),
-            ));
-        }
-        Ok(resolved)
-    }
-    fn in_worktree(&self) -> bool {
-        false
-    }
-    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
-        Ok(None)
-    }
-    fn initial_cwd(&self) -> PathBuf {
-        self.initial_root.clone()
-    }
-}
-
-impl WorkspaceControl for FakeWorkspace {
-    fn change_directory(
-        &self,
-        path: PathBuf,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<(), share::error::DomainError> {
-        let resolved = self.normalized(&path);
-        if !resolved.exists() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不存在 {}", resolved.display()),
-            ));
-        }
-        if !resolved.is_dir() {
-            return Err(share::error::DomainError::invalid(
-                "tools",
-                format!("路径不是目录 {}", resolved.display()),
-            ));
-        }
-        *self.current.lock().expect("fake workspace lock") = resolved;
-        Ok(())
-    }
-    fn enter(
-        &self,
-        _path: Option<PathBuf>,
-        _branch: Option<String>,
-        _base: Option<String>,
-    ) -> Result<WorkspaceData, share::error::DomainError> {
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-    fn exit(&self) -> Result<WorkspaceData, share::error::DomainError> {
-        Err(share::error::DomainError::invalid(
-            "tools",
-            "NonGit 环境不支持 worktree 操作",
-        ))
-    }
-}
-
-fn fake_workspace_read_access(workspace: FakeWorkspace) -> WorkspaceReadAccess {
+fn fake_workspace_read_access(
+    workspace: project::test_support::FakeWorkspace,
+) -> WorkspaceReadAccess {
     fake_controls()
         .lock()
         .expect("fake workspace controls")
@@ -229,7 +95,7 @@ impl TestToolExecutionContextBuilder {
         } else {
             crate::domain::context::AuthorizationContext::STANDARD
         };
-        let workspace = FakeWorkspace::new(self.root);
+        let workspace = project::test_support::FakeWorkspace::new(self.root);
         let scope = ExecutionScope::builder(
             "test-run",
             workspace.workspace_id(),
@@ -271,4 +137,134 @@ pub fn sequential_test_tool_catalog(
         background_log_direct: false,
     };
     crate::ToolCatalogSnapshot::new("main", "standard", vec![descriptor])
+}
+
+/// 固定描述符集的 SkillCatalogPort 替身（#2146：实现权归 tools crate）。
+pub struct FixedSkillCatalog(pub Vec<crate::domain::skill_pl::SkillDescriptor>);
+
+impl crate::domain::skill_ports::SkillCatalogPort for FixedSkillCatalog {
+    fn list(
+        &self,
+        _query: crate::domain::skill_pl::SkillQuery,
+    ) -> Vec<crate::domain::skill_pl::SkillDescriptor> {
+        self.0.clone()
+    }
+}
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for FixedSkillCatalog {}
+
+/// 可变描述符集替身（共享 Mutex，模拟轮次间磁盘变化）。
+pub struct MutableSkillCatalog(
+    pub std::sync::Arc<std::sync::Mutex<Vec<crate::domain::skill_pl::SkillDescriptor>>>,
+);
+
+impl crate::domain::skill_ports::SkillCatalogPort for MutableSkillCatalog {
+    fn list(
+        &self,
+        _query: crate::domain::skill_pl::SkillQuery,
+    ) -> Vec<crate::domain::skill_pl::SkillDescriptor> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+}
+impl crate::sealed::Sealed for MutableSkillCatalog {}
+
+/// 工具执行替身（#2146：ToolExecutionPort 实现权归 tools crate）：
+/// execute 按脚本返回 outcome（不可 await；需要 sleep/取消交互的测试
+/// 用 `scripted_tool_execution_async`）。
+pub fn scripted_tool_execution(
+    script: impl Fn(
+            &crate::published::execution::ToolInvocation,
+            &crate::domain::context::ToolExecutionContext,
+        ) -> crate::published::execution::ToolExecutionOutcome
+        + Send
+        + Sync
+        + 'static,
+) -> std::sync::Arc<dyn crate::published::execution::ToolExecutionPort> {
+    std::sync::Arc::new(ScriptedToolExecution {
+        script: std::sync::Arc::new(script),
+    })
+}
+
+/// 工具执行脚本（同步形态）。
+type SyncToolScript = dyn Fn(
+        &crate::published::execution::ToolInvocation,
+        &crate::domain::context::ToolExecutionContext,
+    ) -> crate::published::execution::ToolExecutionOutcome
+    + Send
+    + Sync;
+
+struct ScriptedToolExecution {
+    script: std::sync::Arc<SyncToolScript>,
+}
+
+#[async_trait::async_trait]
+impl crate::published::execution::ToolExecutionPort for ScriptedToolExecution {
+    async fn execute(
+        &self,
+        invocation: crate::published::execution::ToolInvocation,
+        context: &crate::domain::context::ToolExecutionContext,
+    ) -> crate::published::execution::ToolExecutionOutcome {
+        (self.script)(&invocation, context)
+    }
+}
+
+/// 异步工具执行替身：脚本返回 Future（sleep / 取消交互场景）。
+pub fn scripted_tool_execution_async<F, Fut>(
+    script: F,
+) -> std::sync::Arc<dyn crate::published::execution::ToolExecutionPort>
+where
+    F: for<'a> Fn(
+            crate::published::execution::ToolInvocation,
+            &'a crate::domain::context::ToolExecutionContext,
+        ) -> Fut
+        + Send
+        + Sync
+        + 'static,
+    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+{
+    std::sync::Arc::new(AsyncScriptedToolExecution {
+        script: std::sync::Arc::new(script),
+    })
+}
+
+struct AsyncScriptedToolExecution<F> {
+    script: std::sync::Arc<F>,
+}
+
+#[async_trait::async_trait]
+impl<F, Fut> crate::published::execution::ToolExecutionPort for AsyncScriptedToolExecution<F>
+where
+    F: for<'a> Fn(
+            crate::published::execution::ToolInvocation,
+            &'a crate::domain::context::ToolExecutionContext,
+        ) -> Fut
+        + Send
+        + Sync,
+    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+{
+    async fn execute(
+        &self,
+        invocation: crate::published::execution::ToolInvocation,
+        context: &crate::domain::context::ToolExecutionContext,
+    ) -> crate::published::execution::ToolExecutionOutcome {
+        (self.script)(invocation, context).await
+    }
+}
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for ScriptedToolExecution {}
+impl<F, Fut> crate::sealed::Sealed for AsyncScriptedToolExecution<F>
+where
+    F: for<'a> Fn(
+            crate::published::execution::ToolInvocation,
+            &'a crate::domain::context::ToolExecutionContext,
+        ) -> Fut
+        + Send
+        + Sync,
+    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+{
 }

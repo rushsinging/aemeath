@@ -19,39 +19,17 @@ use crate::application::tool::execution_supervisor::{
     dispatch_started_time, SupervisedToolCall, ToolExecutionSupervisor,
 };
 use async_trait::async_trait;
-use context::{
-    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextPortError, ContextRequestData, ContextWindowData, ToolCallIdentityData,
-    ToolReceiptMutationData, ToolReceiptMutationReceiptData,
-};
+use context::ToolCallIdentityData;
 use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
 use share::ids::SessionId;
 use std::sync::{Arc, Mutex};
 use tools::published::execution::{
-    CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolInvocation,
+    CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolInvocation,
 };
 use tools::test_support::{sequential_test_tool_catalog, TestToolExecutionContextBuilder};
 
 // ── fakes ────────────────────────────────────────────────────────────
-
-/// 可控时长的假执行端口：sleep 指定时长后返回成功。
-struct SleepingToolPort {
-    sleep: Duration,
-}
-
-#[async_trait]
-impl ToolExecutionPort for SleepingToolPort {
-    async fn execute(
-        &self,
-        _invocation: ToolInvocation,
-        _context: &ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        tokio::time::sleep(self.sleep).await;
-        ToolExecutionOutcome::success_text("sleep tool finished")
-    }
-}
 
 /// 永不取消的假信号（前台 cancel 分支不在本组测试范围）。
 struct NeverCancelSignal;
@@ -66,80 +44,6 @@ impl CancellationSignal for NeverCancelSignal {
     }
     fn child_signal(&self) -> Arc<dyn CancellationSignal> {
         Arc::new(Self)
-    }
-}
-
-/// 记录 receipt 状态推进序列的假 ContextPort。
-struct RecordingContextPort {
-    states: Arc<Mutex<Vec<String>>>,
-}
-
-impl context::ReminderControlPort for RecordingContextPort {}
-
-#[async_trait]
-impl context::ContextWindowPort for RecordingContextPort {
-    async fn build_window(
-        &self,
-        _request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 build_window".into(),
-        ))
-    }
-}
-
-#[async_trait]
-impl context::ContextCompactPort for RecordingContextPort {
-    async fn needs_compaction(
-        &self,
-        _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 needs_compaction".into(),
-        ))
-    }
-    async fn compact(
-        &self,
-        _request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 compact".into(),
-        ))
-    }
-}
-
-#[async_trait]
-impl context::ContextAppendPort for RecordingContextPort {
-    async fn clear_session(
-        &self,
-        _session_id: &share::ids::SessionId,
-    ) -> Result<(), ContextPortError> {
-        Ok(())
-    }
-    async fn advance_tool_receipt(
-        &self,
-        mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, context::ToolReceiptMutationError> {
-        self.states
-            .lock()
-            .expect("receipt 状态记录锁")
-            .push(format!("{:?}", mutation.next));
-        Ok(ToolReceiptMutationReceiptData {
-            receipt: context::tool_receipt::ToolCallReceiptData {
-                identity: mutation.identity,
-                input_preview: mutation.input_preview.unwrap_or_default(),
-                state: mutation.next,
-            },
-            changed: true,
-        })
-    }
-    async fn append_and_persist(
-        &self,
-        _append: &ContextAppendData,
-    ) -> Result<context::SessionAppendReceiptData, context::ContextAppendError> {
-        Err(context::ContextAppendError::Storage(
-            "test port 不支持 append_and_persist".to_string(),
-        ))
     }
 }
 
@@ -186,29 +90,36 @@ fn supervised_call_with_identity_name(
     }
 }
 
-fn supervisor_with(sleep: Duration) -> (ToolExecutionSupervisor, Arc<Mutex<Vec<String>>>) {
-    let states = Arc::new(Mutex::new(Vec::new()));
-    let port = RecordingContextPort {
-        states: Arc::clone(&states),
-    };
+fn supervisor_with(
+    sleep: Duration,
+) -> (
+    ToolExecutionSupervisor,
+    Arc<context::test_support::StubContextService>,
+) {
+    // #2146：Context 四端口实现权归 context crate；读路径失败 + receipt
+    // 状态记录替身经其 test_support。
+    let port =
+        Arc::new(context::test_support::StubContextService::read_only_failing("test port 不支持"));
     let supervisor = ToolExecutionSupervisor::new(
-        Arc::new(SleepingToolPort { sleep }),
+        sleeping_tool_port(sleep),
         sequential_test_tool_catalog("SleepTool", 300),
-        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(port))),
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::clone(&port))),
     );
-    (supervisor, states)
+    (supervisor, port)
 }
 
 fn test_context() -> ToolExecutionContext {
     TestToolExecutionContextBuilder::new(std::env::temp_dir()).build()
 }
 
-async fn wait_for_terminal_state(states: &Arc<Mutex<Vec<String>>>, timeout: Duration) -> String {
+async fn wait_for_terminal_state(
+    states: &Arc<context::test_support::StubContextService>,
+    timeout: Duration,
+) -> String {
     let started = std::time::Instant::now();
     loop {
         let terminal = states
-            .lock()
-            .expect("receipt 状态记录锁")
+            .receipt_states()
             .iter()
             .rev()
             .find(|state| state.starts_with("Terminal("))
@@ -239,6 +150,34 @@ fn success_text(outcome: &ToolExecutionOutcome) -> String {
 
 // ── tests ────────────────────────────────────────────────────────────
 
+/// 可控时长替身（#2146：实现权归 tools crate）。
+fn sleeping_tool_port(
+    sleep: std::time::Duration,
+) -> Arc<dyn tools::published::execution::ToolExecutionPort> {
+    tools::test_support::scripted_tool_execution_async(move |_invocation, _context| async move {
+        tokio::time::sleep(sleep).await;
+        tools::published::execution::ToolExecutionOutcome::success_text("sleep tool finished")
+    })
+}
+
+/// scope 捕捉替身：断言 invocation 与 context scope 同源并记录 effective timeout。
+fn capturing_tool_port(
+    captured: Arc<std::sync::Mutex<Option<u64>>>,
+) -> Arc<dyn tools::published::execution::ToolExecutionPort> {
+    tools::test_support::scripted_tool_execution_async(move |invocation, context| {
+        let captured = Arc::clone(&captured);
+        let scope = context.scope().clone();
+        async move {
+            assert_eq!(
+                invocation.execution_scope, scope,
+                "invocation 与 context 的 scope 必须同源"
+            );
+            *captured.lock().unwrap() = scope.effective_timeout_secs();
+            tools::published::execution::ToolExecutionOutcome::success_text("captured")
+        }
+    })
+}
+
 #[tokio::test]
 async fn execute_within_threshold_completes_on_fast_path() {
     let (supervisor, states) = supervisor_with(Duration::from_millis(20));
@@ -257,7 +196,7 @@ async fn execute_within_threshold_completes_on_fast_path() {
         "阈值内完成应返回真实结果：{}",
         success_text(&outcome)
     );
-    let recorded = states.lock().expect("receipt 状态记录锁").clone();
+    let recorded = states.receipt_states();
     assert!(recorded.iter().any(|state| state == "Running"));
     assert!(recorded
         .last()
@@ -303,8 +242,7 @@ async fn execute_exceeding_threshold_returns_placeholder_and_backgrounds_receipt
     );
     assert!(
         states
-            .lock()
-            .expect("receipt 状态记录锁")
+            .receipt_states()
             .iter()
             .any(|state| state == "Backgrounded"),
         "转后台应推进 receipt 至 Backgrounded"
@@ -338,12 +276,11 @@ async fn background_process_watch_never_moves_to_background_despite_threshold() 
     );
     assert!(
         !states
-            .lock()
-            .expect("receipt 状态记录锁")
+            .receipt_states()
             .iter()
             .any(|state| state == "Backgrounded"),
         "Watch 不得推进 receipt 至 Backgrounded：{:?}",
-        states.lock().expect("receipt 状态记录锁")
+        states.receipt_states()
     );
 }
 
@@ -378,7 +315,7 @@ async fn execute_without_threshold_keeps_current_behavior() {
         .expect("无阈值配置应保持现状行为");
 
     assert!(matches!(outcome, ToolExecutionOutcome::Success(_)));
-    let recorded = states.lock().expect("receipt 状态记录锁").clone();
+    let recorded = states.receipt_states();
     assert!(
         !recorded.iter().any(|state| state == "Backgrounded"),
         "无阈值不得转后台"
@@ -606,44 +543,17 @@ async fn backgrounded_summary_uses_goal_text_not_tool_input() {
 // ── effective timeout 三档（P4）───────────────────────────────────────
 
 type CapturedTimeout = Arc<Mutex<Option<u64>>>;
-type RecordedStates = Arc<Mutex<Vec<String>>>;
+type RecordedStates = Arc<context::test_support::StubContextService>;
 
 /// 捕获 supervisor 下传的 effective timeout，并校验 invocation 与 context
-/// 的 scope 完全一致（否则 ExecutionAdapter 会拒绝执行）。
-struct CapturingToolPort {
-    captured: CapturedTimeout,
-}
-
-#[async_trait]
-impl ToolExecutionPort for CapturingToolPort {
-    async fn execute(
-        &self,
-        invocation: ToolInvocation,
-        context: &ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        assert_eq!(
-            invocation.execution_scope,
-            *context.scope(),
-            "invocation 与 context 的 scope 必须同源"
-        );
-        *self.captured.lock().unwrap() = context.scope().effective_timeout_secs();
-        ToolExecutionOutcome::success_text("captured")
-    }
-}
-
 fn supervisor_capturing_timeout() -> (ToolExecutionSupervisor, RecordedStates, CapturedTimeout) {
-    let states = Arc::new(Mutex::new(Vec::new()));
+    let states =
+        Arc::new(context::test_support::StubContextService::read_only_failing("test port 不支持"));
     let captured = Arc::new(Mutex::new(None));
     let supervisor = ToolExecutionSupervisor::new(
-        Arc::new(CapturingToolPort {
-            captured: Arc::clone(&captured),
-        }),
+        capturing_tool_port(Arc::clone(&captured)),
         sequential_test_tool_catalog("SleepTool", 300),
-        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(
-            RecordingContextPort {
-                states: Arc::clone(&states),
-            },
-        ))),
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::clone(&states))),
     );
     (supervisor, states, captured)
 }

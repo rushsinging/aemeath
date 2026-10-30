@@ -1,63 +1,6 @@
 use super::*;
-use context::SessionManagementError;
 use std::collections::VecDeque;
 use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPersist, TaskPriorityData};
-
-#[derive(Clone)]
-struct ResumeSessionManagement {
-    session: context::session::CanonicalSession,
-}
-
-#[async_trait::async_trait]
-impl context::SessionManagementPort for ResumeSessionManagement {
-    async fn load_for_project(
-        &self,
-        _id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::session::CanonicalSession, SessionManagementError> {
-        Ok(self.session.clone())
-    }
-
-    async fn list_for_project(
-        &self,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
-        Ok(Vec::new())
-    }
-
-    async fn export_for_project(
-        &self,
-        _id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
-    }
-
-    async fn import_for_project(
-        &self,
-        _bytes: &[u8],
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<sdk::SessionItemList, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
-    }
-
-    async fn update_metadata_for_project(
-        &self,
-        _id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-        _update: context::session::SessionMetadata,
-    ) -> Result<sdk::SessionItemList, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
-    }
-
-    async fn delete_for_project(
-        &self,
-        _id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
-    }
-}
 
 #[derive(Clone, Default)]
 struct ResumeRecordingSink {
@@ -223,13 +166,15 @@ async fn successful_resume_emits_session_then_same_complete_task_state_contract(
     let task_store = Arc::new(task::TaskStore::new());
     let shell = resumed_shell(
         task_store,
-        Arc::new(ResumeSessionManagement {
-            session: restored_session(
-                session_id,
-                shell_workspace_snapshot(),
-                snapshot_with_one_task(),
-            ),
-        }),
+        Arc::new(context::test_support::ScriptedSessionManagement::new(
+            |_| {
+                restored_session(
+                    session_id,
+                    shell_workspace_snapshot(),
+                    snapshot_with_one_task(),
+                )
+            },
+        )),
         noop_hook_port(),
     );
 
@@ -258,13 +203,15 @@ async fn successful_resume_without_active_batch_emits_empty_state_to_clear_old_s
     let task_store = Arc::new(task::TaskStore::new());
     let shell = resumed_shell(
         task_store,
-        Arc::new(ResumeSessionManagement {
-            session: restored_session(
-                session_id,
-                shell_workspace_snapshot(),
-                task::TaskSnapshotData::empty(),
-            ),
-        }),
+        Arc::new(context::test_support::ScriptedSessionManagement::new(
+            |_| {
+                restored_session(
+                    session_id,
+                    shell_workspace_snapshot(),
+                    task::TaskSnapshotData::empty(),
+                )
+            },
+        )),
         noop_hook_port(),
     );
 
@@ -331,13 +278,15 @@ async fn successful_resume_emits_session_start_hook_with_resumed_session_id() {
     let recording_hook = RecordingSessionStartHookPort::default();
     let shell = resumed_shell(
         task_store,
-        Arc::new(ResumeSessionManagement {
-            session: restored_session(
-                session_id,
-                shell_workspace_snapshot(),
-                task::TaskSnapshotData::empty(),
-            ),
-        }),
+        Arc::new(context::test_support::ScriptedSessionManagement::new(
+            |_| {
+                restored_session(
+                    session_id,
+                    shell_workspace_snapshot(),
+                    task::TaskSnapshotData::empty(),
+                )
+            },
+        )),
         Arc::new(recording_hook.clone()),
     );
 

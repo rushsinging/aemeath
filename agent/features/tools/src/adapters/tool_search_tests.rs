@@ -1,18 +1,10 @@
 use super::*;
 use crate::domain::types::tool_search::SearchItemKind;
 
-use crate::domain::{SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
+use crate::domain::{SkillCatalogPort, SkillDescriptor, SkillSource, SkillSourceKind};
 
-struct FakeSkills {
-    skills: Vec<SkillDescriptor>,
-}
-impl SkillCatalogPort for FakeSkills {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        self.skills.clone()
-    }
-}
 fn empty_skills() -> std::sync::Arc<dyn SkillCatalogPort> {
-    std::sync::Arc::new(FakeSkills { skills: Vec::new() })
+    std::sync::Arc::new(crate::domain::test_support::FixedSkillCatalog(Vec::new()))
 }
 fn skill_descriptor(name: &str, description: &str) -> SkillDescriptor {
     SkillDescriptor::new(
@@ -77,12 +69,10 @@ use crate::domain::{
     ToolListProvider, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
-use project::WorkspaceReader;
-use share::error::DomainError;
-use share::session_types::{ProjectIdentityData, WorkspaceId};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use share::session_types::WorkspaceId;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use systemone::{ScoringAnswer, ScoringPort, ScoringQuestion, ScoringState, UnavailableKind};
+use systemone::ScoringPort;
 
 struct TestCancellation;
 #[async_trait]
@@ -95,54 +85,6 @@ impl crate::domain::CancellationSignal for TestCancellation {
     }
     fn child_signal(&self) -> Arc<dyn crate::domain::CancellationSignal> {
         Arc::new(Self)
-    }
-}
-
-struct TestWorkspace {
-    root: std::path::PathBuf,
-}
-
-impl WorkspaceReader for TestWorkspace {
-    fn current_workspace_root(&self) -> std::path::PathBuf {
-        self.root.clone()
-    }
-    fn workspace_id(&self) -> WorkspaceId {
-        WorkspaceId::new("tool-search-test")
-    }
-    fn project_identity(&self) -> ProjectIdentityData {
-        ProjectIdentityData {
-            initial_cwd: self.root.display().to_string(),
-            git_common_dir: None,
-        }
-    }
-    fn current_path_base(&self) -> std::path::PathBuf {
-        self.root.clone()
-    }
-    fn resolve(&self, path: &std::path::Path) -> std::path::PathBuf {
-        self.root.join(path)
-    }
-    fn resolve_file_path(
-        &self,
-        path: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<std::path::PathBuf, DomainError> {
-        Ok(self.resolve(path))
-    }
-    fn resolve_search_path(
-        &self,
-        path: &std::path::Path,
-        _auth: share::tools_vocab::AuthorizationContext,
-    ) -> Result<std::path::PathBuf, DomainError> {
-        Ok(self.resolve(path))
-    }
-    fn in_worktree(&self) -> bool {
-        false
-    }
-    fn current_branch(&self) -> Result<Option<String>, DomainError> {
-        Ok(None)
-    }
-    fn initial_cwd(&self) -> std::path::PathBuf {
-        self.root.clone()
     }
 }
 
@@ -165,46 +107,46 @@ impl ToolListProvider for FakeCatalog {
     }
 }
 
-/// 可编程评分 mock：预设每候选概率表（criteria key = 候选序号）或强制失败。
-struct FakeScoring {
+/// #2146：ScoringPort 实现权归 systemone crate；可编程替身经其脚本端口。
+fn fake_scoring(
     probabilities: Option<Vec<(String, f64)>>,
     fail: bool,
-    calls: AtomicUsize,
-}
-
-#[async_trait]
-impl ScoringPort for FakeScoring {
-    async fn answer(
-        &self,
-        _state: &ScoringState,
-        questions: &[ScoringQuestion],
-    ) -> Result<Vec<ScoringAnswer>, systemone::ScoringUnavailable> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+) -> (
+    std::sync::Arc<dyn systemone::ScoringPort>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls2 = std::sync::Arc::clone(&calls);
+    let port = systemone::test_support::scripted_scoring(move |_state, questions| {
+        use std::sync::atomic::Ordering;
+        calls2.fetch_add(1, Ordering::SeqCst);
         assert_eq!(questions.len(), 1, "ToolSearch 单题调用");
-        if self.fail {
+        if fail {
             return Err(systemone::ScoringUnavailable::new(
-                UnavailableKind::Timeout,
+                systemone::UnavailableKind::Timeout,
                 "test forced failure",
             ));
         }
-        let probabilities = self.probabilities.clone().expect("测试未配置概率");
+        let probabilities = probabilities.clone().expect("测试未配置概率");
         let choice = probabilities
             .iter()
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(key, _)| key.clone())
             .unwrap_or_default();
-        Ok(vec![ScoringAnswer::Choice {
+        Ok(vec![systemone::ScoringAnswer::choice(
             choice,
             probabilities,
-            confidence: 0.9,
-            calibration: systemone::CalibrationLevel::Raw,
-        }])
-    }
+            0.9,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("答案构造")])
+    });
+    (port, calls)
 }
 
 fn search_context(
     catalog: Arc<FakeCatalog>,
-    scoring: Option<Arc<FakeScoring>>,
+    scoring: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
 ) -> ToolExecutionContext {
     let scope = ExecutionScope::builder(
         "tool-search-test-run",
@@ -214,9 +156,9 @@ fn search_context(
     .build();
     let ports = ToolExecutionPorts::new(
         Arc::new(TestCancellation),
-        WorkspaceReadAccess::new(Arc::new(TestWorkspace {
-            root: std::path::PathBuf::from("/tmp"),
-        })),
+        WorkspaceReadAccess::new(Arc::new(project::test_support::FakeWorkspace::new(
+            std::env::temp_dir(),
+        ))),
         Arc::new(MutexReadSet(Arc::new(std::sync::Mutex::new(
             Default::default(),
         )))),
@@ -245,16 +187,15 @@ async fn low_confidence_query_triggers_scoring_rerank() {
     let catalog = Arc::new(FakeCatalog {
         tools: semantic_catalog(),
     });
-    let scoring = Arc::new(FakeScoring {
-        probabilities: Some(vec![
+    let (scoring, calls) = fake_scoring(
+        Some(vec![
             ("0".to_string(), 0.1),  // Bash
             ("1".to_string(), 0.7),  // Archify
             ("2".to_string(), 0.2),  // WebSearch
             ("3".to_string(), 0.05), // Makefile
         ]),
-        fail: false,
-        calls: AtomicUsize::new(0),
-    });
+        false,
+    );
     let ctx = search_context(catalog, Some(scoring.clone()));
     let tool = ToolSearchTool::new(empty_skills());
     let result = tool
@@ -267,11 +208,7 @@ async fn low_confidence_query_triggers_scoring_rerank() {
         vec!["Archify", "WebSearch", "Bash", "Makefile"],
         "按概率序"
     );
-    assert_eq!(
-        scoring.calls.load(Ordering::SeqCst),
-        1,
-        "零命中必须触发评分"
-    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "零命中必须触发评分");
 }
 
 #[tokio::test]
@@ -280,22 +217,14 @@ async fn confident_lexical_hit_skips_scoring() {
     let catalog = Arc::new(FakeCatalog {
         tools: semantic_catalog(),
     });
-    let scoring = Arc::new(FakeScoring {
-        probabilities: Some(vec![("0".to_string(), 1.0)]),
-        fail: false,
-        calls: AtomicUsize::new(0),
-    });
+    let (scoring, calls) = fake_scoring(Some(vec![("0".to_string(), 1.0)]), false);
     let ctx = search_context(catalog, Some(scoring.clone()));
     let tool = ToolSearchTool::new(empty_skills());
     let result = tool.call(serde_json::json!({"query": "bash"}), &ctx).await;
     let output = result.data.expect("应成功");
     assert_eq!(output.tools.len(), 1);
     assert_eq!(output.tools[0].name, "Bash");
-    assert_eq!(
-        scoring.calls.load(Ordering::SeqCst),
-        0,
-        "高置信短路不触发评分"
-    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "高置信短路不触发评分");
 }
 
 #[tokio::test]
@@ -304,11 +233,7 @@ async fn scoring_failure_falls_back_to_lexical_order() {
     let catalog = Arc::new(FakeCatalog {
         tools: semantic_catalog(),
     });
-    let scoring = Arc::new(FakeScoring {
-        probabilities: None,
-        fail: true,
-        calls: AtomicUsize::new(0),
-    });
+    let (scoring, calls) = fake_scoring(None, true);
     let ctx = search_context(catalog, Some(scoring.clone()));
     let tool = ToolSearchTool::new(empty_skills());
     // "commands"：Bash 与 Makefile desc contains（50 分，低置信双命中）。
@@ -319,7 +244,7 @@ async fn scoring_failure_falls_back_to_lexical_order() {
     assert_eq!(output.tools.len(), 2, "降级回退词法命中集");
     assert_eq!(output.tools[0].name, "Bash", "同分保持原相对序");
     assert_eq!(output.tools[1].name, "Makefile");
-    assert_eq!(scoring.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -342,9 +267,9 @@ async fn no_catalog_returns_empty_for_nonempty_query_without_skills() {
     // 生产回归：未注入 catalog 时非空 query 不得误命中。
     let ports = crate::domain::ToolExecutionPorts::new(
         Arc::new(TestCancellation),
-        crate::domain::WorkspaceReadAccess::new(Arc::new(TestWorkspace {
-            root: std::path::PathBuf::from("/tmp"),
-        })),
+        crate::domain::WorkspaceReadAccess::new(Arc::new(
+            project::test_support::FakeWorkspace::new(std::env::temp_dir()),
+        )),
         Arc::new(crate::domain::MutexReadSet(Arc::new(
             std::sync::Mutex::new(Default::default()),
         ))),
@@ -375,18 +300,16 @@ async fn lexical_recall_without_scoring_hits_tools_and_skills() {
             make_tool("WebFetch", "Fetch a URL and return content"),
         ],
     });
-    let skills = Arc::new(FakeSkills {
-        skills: vec![
-            skill_descriptor(
-                "cmux-browser",
-                "Automate cmux webview browser surfaces with snapshots",
-            ),
-            skill_descriptor(
-                "agent-browser",
-                "Browser automation CLI for websites and web apps；浏览器自动化",
-            ),
-        ],
-    });
+    let skills = Arc::new(crate::domain::test_support::FixedSkillCatalog(vec![
+        skill_descriptor(
+            "cmux-browser",
+            "Automate cmux webview browser surfaces with snapshots",
+        ),
+        skill_descriptor(
+            "agent-browser",
+            "Browser automation CLI for websites and web apps；浏览器自动化",
+        ),
+    ]));
     let ctx = search_context(catalog, None);
     let tool = ToolSearchTool::new(skills);
 

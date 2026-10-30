@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use super::skill_pl::{LoadedSkill, SkillDescriptor, SkillError, SkillLoadQuery, SkillQuery};
 
 /// 返回当前可见 Skill 的廉价元数据。
-pub trait SkillCatalogPort: Send + Sync {
+pub trait SkillCatalogPort: crate::sealed::Sealed + Send + Sync {
     fn list(&self, query: SkillQuery) -> Vec<SkillDescriptor>;
 }
 

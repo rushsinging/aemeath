@@ -12,7 +12,7 @@ use crate::domain::session::{
 /// Composition supplies one implementation to both the runtime session-switch
 /// coordinator and Runtime. Consumers never select Storage adapters or inspect blob protocol files.
 #[async_trait]
-pub trait SessionManagementPort: Send + Sync {
+pub trait SessionManagementPort: crate::sealed::Sealed + Send + Sync {
     /// Loads only a session whose persisted workspace has the current stable
     /// project identity. Git worktrees match by common-dir, non-git by root.
     async fn load_for_project(

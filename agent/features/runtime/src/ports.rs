@@ -24,6 +24,8 @@ pub mod session_query;
 pub mod tool_result_blob;
 pub mod usage_sink;
 
+#[cfg(test)]
+pub use context_port::ContextPorts;
 pub use context_port::{
     AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
     CompactTrigger, ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData,
@@ -34,13 +36,7 @@ pub use context_port::{
 pub use context_port::{
     CompactionDecisionData, DecisionReason, SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
 };
-#[cfg(test)]
-pub use context_port::{
-    ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
-};
 pub use policy_port::Policy;
-#[cfg(test)]
-pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
     LlmInvokePort, ModelInfo, ProviderRequestData, StopReason, TokenUsageData,

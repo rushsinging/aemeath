@@ -419,3 +419,6 @@ async fn answer_without_context_source_keeps_null_association_and_succeeds() {
         assert!(event[field].is_null(), "{field} 缺省应 null");
     }
 }
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for StubScoringPort {}

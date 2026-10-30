@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::reminder_pipeline::ReminderPipeline;
-use crate::domain::reminder::{ReminderEventSource, ReminderSource};
+use crate::domain::reminder::{ReminderEventSource, ReminderFactData, ReminderKind};
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
     CompactionDecisionData, ContextAppendData, ContextAppendError, ContextMessage,
@@ -17,6 +17,7 @@ use crate::ports::{
     ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
     ContextWindowPort, ReminderControlPort, SessionRepository,
 };
+use crate::LOG_TARGET;
 
 pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
@@ -28,9 +29,16 @@ pub(crate) struct ContextApplicationService {
     frozen_injection: std::sync::Arc<std::sync::Mutex<Option<FrozenInjection>>>,
     /// compact 成功后置位：下一轮 build window 重新检索并替换冻结内容。
     injection_refresh_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Run-scoped reminder 管线：Run 启动创建、结束销毁（07-reminder-pipeline.md）。
-    reminder_pipelines:
-        std::sync::Arc<std::sync::Mutex<HashMap<crate::domain::RunId, ReminderPipeline>>>,
+    /// Reminder 会话状态（#2146 方案 A）：session 级事实 store（数据）+ Run 级
+    /// 调度管线（关联同一把锁，避免双锁顺序问题）。
+    reminder_state: std::sync::Arc<std::sync::Mutex<ReminderSessionState>>,
+}
+
+/// Reminder 会话状态：事实数据跨 Run 驻留，调度管线随 Run 创建/销毁。
+#[derive(Default)]
+struct ReminderSessionState {
+    store: crate::domain::reminder::ReminderFactStore,
+    pipelines: HashMap<crate::domain::RunId, ReminderPipeline>,
 }
 
 /// 注入冻结状态。绑定 `session_id`：resume 切换到新 Session 视为该 Session
@@ -55,7 +63,9 @@ impl ContextApplicationService {
             injection_refresh_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
-            reminder_pipelines: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            reminder_state: std::sync::Arc::new(std::sync::Mutex::new(
+                ReminderSessionState::default(),
+            )),
         }
     }
 
@@ -96,9 +106,10 @@ impl ContextApplicationService {
     /// compact 改写了对话历史，冻结的注入内容随之过期。
     /// 取走本 Run 待落盘的注入 reminder 消息（无管线返回空）。
     fn take_pending_reminder_messages(&self, run_id: &RunId) -> Vec<ContextMessage> {
-        self.reminder_pipelines
+        self.reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
+            .expect("reminder state lock poisoned")
+            .pipelines
             .get_mut(run_id)
             .map(|pipeline| pipeline.take_pending_persist_messages())
             .unwrap_or_default()
@@ -111,13 +122,13 @@ impl ContextApplicationService {
 
     /// compact `Committed` 后的 reminder 处置（run_id 来自 CompactRequestData）。
     fn reminder_compact_committed(&self, run_id: &RunId) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.compact_committed();
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        if let Some(pipeline) = pipelines.get_mut(run_id) {
+            pipeline.compact_committed(store);
         }
     }
 
@@ -127,12 +138,14 @@ impl ContextApplicationService {
         request: &ContextRequestData,
     ) -> crate::application::reminder_pipeline::ReminderWindowInjection {
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let mut pipelines = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned");
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
         match pipelines.get_mut(&request.run_id) {
             Some(pipeline) => pipeline.inject_into_window(
+                store,
                 request.language.as_str(),
                 &now,
                 crate::domain::REMINDER_INJECTION_TOKEN_BUDGET,
@@ -513,77 +526,148 @@ impl ContextAppendPort for ContextApplicationService {
 }
 
 impl ReminderControlPort for ContextApplicationService {
-    /// Reminder 管线句柄：Run 启动创建（同 RunId 重复创建替换旧管线）。
-    fn create_reminder_pipeline(&self, run_id: RunId, sources: Vec<Arc<dyn ReminderSource>>) {
-        self.reminder_pipelines
+    /// Reminder 管线句柄：Run 启动创建（同 RunId 重复创建替换旧管线），
+    /// 并清空该 Run 允许的 `RunScoped` 事实（每 Run 重新判定）。
+    fn create_reminder_pipeline(&self, run_id: RunId, allowed: Vec<ReminderKind>) {
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .insert(run_id, ReminderPipeline::new(sources));
+            .expect("reminder state lock poisoned");
+        state.store.reset_run_scoped(&allowed);
+        state
+            .pipelines
+            .insert(run_id, ReminderPipeline::new(allowed));
     }
 
-    /// Reminder 管线句柄：Run 结束销毁。
-    fn drop_reminder_pipeline(&self, run_id: &RunId) {
-        self.reminder_pipelines
+    /// Runtime 推送一条提醒事实（#2146 数据化接口 + 方案 A 生命周期）：
+    /// `OneShot` 直接入队（消费型）；`Snapshot` / `RunScoped` 写入 session
+    /// 级 store，由时机方法在对应 refresh 触发时入队。
+    fn push_reminder_fact(&self, run_id: &RunId, fact: ReminderFactData) {
+        if !fact.is_valid() {
+            log::warn!(
+                target: LOG_TARGET,
+                "reminder_fact_rejected reason=invalid_fact kind={}",
+                fact.kind.as_str(),
+            );
+            return;
+        }
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        let Some(pipeline) = pipelines.get_mut(run_id) else {
+            log::warn!(
+                target: LOG_TARGET,
+                "reminder_fact_rejected reason=no_pipeline kind={}",
+                fact.kind.as_str(),
+            );
+            return;
+        };
+        if !pipeline.allows(&fact.kind) {
+            log::warn!(
+                target: LOG_TARGET,
+                "reminder_fact_rejected reason=kind_not_allowed kind={}",
+                fact.kind.as_str(),
+            );
+            return;
+        }
+        match fact.lifetime {
+            crate::domain::reminder::ReminderFactLifetime::OneShot => pipeline.push_oneshot(fact),
+            _ => store.push(fact),
+        }
+    }
+
+    /// 显式失效：生产者「无内容」时清除该 kind 的驻留事实
+    /// （不得靠不推送隐式保留旧值）。
+    fn remove_reminder_fact(&self, kind: &ReminderKind) {
+        let mut state = self
+            .reminder_state
+            .lock()
+            .expect("reminder state lock poisoned");
+        state.store.remove(kind);
+        // 队列里尚未注入的陈旧条目一并失效（否则失效后仍可能被注入）。
+        for pipeline in state.pipelines.values_mut() {
+            pipeline.discard_pending(kind);
+        }
+    }
+
+    /// Run 收口前查询：仍未注入的 OneShot 回滚标识（供宿主撤销交付标记）。
+    fn drain_uninjected_oneshot_keys(&self, run_id: &RunId) -> Vec<String> {
+        self.reminder_state
+            .lock()
+            .expect("reminder state lock poisoned")
+            .pipelines
+            .get_mut(run_id)
+            .map(ReminderPipeline::drain_uninjected_oneshot_keys)
+            .unwrap_or_default()
+    }
+
+    /// Reminder 管线句柄：Run 结束销毁（事实数据留在 store，跨 Run 存活）。
+    fn drop_reminder_pipeline(&self, run_id: &RunId) {
+        self.reminder_state
+            .lock()
+            .expect("reminder state lock poisoned")
+            .pipelines
             .remove(run_id);
     }
 
-    /// Run 启动事件：OnRunStart 类 source 入队。
+    /// Run 启动事件：OnRunStart 类事实入队。
     fn reminder_run_started(&self, run_id: &RunId) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.run_started();
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        if let Some(pipeline) = pipelines.get_mut(run_id) {
+            pipeline.run_started(store);
         }
     }
 
-    /// Runtime 推送 reminder 事件：OnEvent(source) 匹配的 source 入队。
+    /// Runtime 推送 reminder 事件：OnEvent(source) 匹配的事实入队。
     fn reminder_handle_event(&self, run_id: &RunId, event_source: &ReminderEventSource) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.handle_event(event_source);
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        if let Some(pipeline) = pipelines.get_mut(run_id) {
+            pipeline.handle_event(store, event_source);
         }
     }
 
-    /// task store 变更事件：OnTaskMutation 类 source 入队。
+    /// task store 变更事件：OnTaskMutation 类事实入队。
     fn reminder_task_mutated(&self, run_id: &RunId) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.task_mutated();
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        if let Some(pipeline) = pipelines.get_mut(run_id) {
+            pipeline.task_mutated(store);
         }
     }
 
-    /// step 边界事件：OnStepInterval(n) 在步数为 n 的倍数时重建入队。
+    /// step 边界事件：OnStepInterval(n) 在步数为 n 的倍数时入队。
     fn reminder_step_advanced(&self, run_id: &RunId, step: u64) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.step_advanced(step);
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        if let Some(pipeline) = pipelines.get_mut(run_id) {
+            pipeline.step_advanced(store, step);
         }
     }
+
     fn reminder_user_message_received(&self, run_id: &RunId) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
+        let mut state = self
+            .reminder_state
             .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.user_message_received();
+            .expect("reminder state lock poisoned");
+        let ReminderSessionState { store, pipelines } = &mut *state;
+        if let Some(pipeline) = pipelines.get_mut(run_id) {
+            pipeline.user_message_received(store);
         }
     }
 }
@@ -609,3 +693,6 @@ pub(crate) fn render_user_input_timestamp_prefix(
     *first_text = format!("{prefix}{first_text}");
     Some(rendered)
 }
+
+// #2146 密封解锁（生产聚合服务）。
+impl crate::sealed::Sealed for ContextApplicationService {}

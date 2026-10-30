@@ -163,7 +163,21 @@ struct ProviderBinding {
 }
 ```
 
-Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 Provider Published Language，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`construction_symbols` 白名单锁定）。
+Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 Provider Published Language
+
+### 2.2 PL trait 实现权登记表（#2146 治理）
+
+全仓 pub trait 按三族治理（97 个盘点）：
+
+| 族类 | 机制 | 守卫 |
+|---|---|---|
+| capability(pure) | **Sealed trait 编译期强制**（`pub(crate) mod sealed` + 超 trait 绑定；实现权物理归属定义 crate） | `pattern.pl.trait-implementation-registry` 双保险 |
+| injected-host / comp-bridge | 宿主（或 composition）实现合法，登记 `allowed_impl_crates` | 同上，按登记表校验 |
+| fake-pending（capability 有存量消费方 fake） | 66 处 fake 按登记 crate 锁死（新增未登记即违规）；收敛到定义方 test_support 后转 sealed | 同上 |
+
+登记表唯一真相源：`.agents/architecture-guard-registry.json` 的
+`pattern.pl.trait-implementation-registry`（55 条）。新增 PL trait MUST
+登记（能力端口同时加 Sealed），未登记 trait 不校验——登记即锁。，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`construction_symbols` 白名单锁定）。
 
 > **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。#1142 仍延期，**NEVER** 冒充已完成。
 

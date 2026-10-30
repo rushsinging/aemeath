@@ -81,6 +81,11 @@ impl ContextCoordinator {
     }
 
     /// Reminder 事件触发转发（#252：后台进程完成 → OnEvent source 重建）。
+    /// Runtime 推送一条提醒事实（#2146 数据化接口，经 Context port 转发）。
+    pub(crate) fn push_reminder_fact(&self, run_id: &sdk::RunId, fact: context::ReminderFactData) {
+        self.ports.reminders.push_reminder_fact(run_id, fact);
+    }
+
     pub(crate) fn reminder_handle_event(
         &self,
         run_id: &sdk::RunId,
@@ -139,9 +144,7 @@ impl ContextCoordinator {
         task_snapshot: Option<task::CompactTaskSnapshotData>,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
-            Some(std::sync::Arc::new(
-                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
-            ));
+            Some(crate::application::loop_engine::compaction::compact_progress_adapter(progress));
         self.ports
             .compact
             .compact(&CompactRequestData {
@@ -166,9 +169,7 @@ impl ContextCoordinator {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
-            Some(std::sync::Arc::new(
-                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
-            ));
+            Some(crate::application::loop_engine::compaction::compact_progress_adapter(progress));
         self.ports
             .compact
             .compact(&CompactRequestData {

@@ -216,6 +216,15 @@ fn peek_keeps_items_until_injection_confirmed() {
         supervisor.peek_unnotified_terminal_items().is_empty(),
         "注入确认后不再重复注入"
     );
+
+    // #2146 方案 A 收口回滚：Run 收口时事实仍未注入 → 撤销交付标记，
+    // 下个 Run 重新 peek 补注入（#252 不得静默丢失）。
+    supervisor.mark_unnotified(&[task_id.as_str().to_string()]);
+    assert_eq!(
+        supervisor.peek_unnotified_terminal_items().len(),
+        1,
+        "回滚后事实重新可见"
+    );
 }
 
 #[test]

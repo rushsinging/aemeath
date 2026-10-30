@@ -4,9 +4,8 @@
 //! `MainSessionWiring` 协调器已迁 runtime（`SessionSwitchCoordinator`），
 //! 本模块只保留与 wiring 无关的 port mock。
 
-use std::sync::Arc;
-
 pub use crate::adapters::AtomicBlobSessionManagement;
+use std::sync::Arc;
 
 use crate::domain::session::CanonicalSession;
 use crate::ports::SessionManagementPort;
@@ -97,3 +96,96 @@ impl SessionManagementPort for UnavailableSessionManagement {
         ))
     }
 }
+
+/// 会话管理替身（#2146 实现权归 context crate）：load 按脚本产出，
+/// update_metadata 记录并按脚本回执；其余通道恒 Err(unused)。
+pub struct ScriptedSessionManagement {
+    load: Box<dyn Fn(&str) -> CanonicalSession + Send + Sync>,
+    update_result: Box<dyn Fn() -> sdk::SessionItemList + Send + Sync>,
+    updates: std::sync::Mutex<Vec<crate::domain::session::SessionMetadata>>,
+}
+
+impl ScriptedSessionManagement {
+    pub fn new(load: impl Fn(&str) -> CanonicalSession + Send + Sync + 'static) -> Self {
+        Self {
+            load: Box::new(load),
+            update_result: Box::new(|| sdk::SessionItemList {
+                id: "session-1".to_string(),
+                title: None,
+                project: None,
+                model: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                message_count: 0,
+                preview: None,
+                summary: String::new(),
+            }),
+            updates: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    pub fn updates(&self) -> Vec<crate::domain::session::SessionMetadata> {
+        self.updates.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl SessionManagementPort for ScriptedSessionManagement {
+    async fn load_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<CanonicalSession, crate::domain::session::SessionManagementError> {
+        Ok((self.load)(id))
+    }
+    async fn list_for_project(
+        &self,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<Vec<sdk::SessionItemList>, crate::domain::session::SessionManagementError> {
+        Ok(Vec::new())
+    }
+    async fn export_for_project(
+        &self,
+        _id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<Vec<u8>, crate::domain::session::SessionManagementError> {
+        Err(crate::domain::session::SessionManagementError::Storage(
+            "unused".to_owned(),
+        ))
+    }
+    async fn import_for_project(
+        &self,
+        _bytes: &[u8],
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<sdk::SessionItemList, crate::domain::session::SessionManagementError> {
+        Err(crate::domain::session::SessionManagementError::Storage(
+            "unused".to_owned(),
+        ))
+    }
+    async fn update_metadata_for_project(
+        &self,
+        _id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+        update: crate::domain::session::SessionMetadata,
+    ) -> Result<sdk::SessionItemList, crate::domain::session::SessionManagementError> {
+        self.updates.lock().unwrap().push(update);
+        Ok((self.update_result)())
+    }
+    async fn delete_for_project(
+        &self,
+        _id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<(), crate::domain::session::SessionManagementError> {
+        Err(crate::domain::session::SessionManagementError::Storage(
+            "unused".to_owned(),
+        ))
+    }
+}
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for UnavailableSessionManagement {}
+impl crate::sealed::Sealed for ScriptedSessionManagement {}
+
+pub use super::context_test_support::RecordedContextCall;
+pub use super::context_test_support::{
+    recording_context_over, recording_context_shared, StubContextService,
+};

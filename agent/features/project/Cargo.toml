@@ -3,6 +3,11 @@ name = "project"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# 测试实现面。dev：跨 crate 测试；test-harness：tools 生产依赖链所需。
+dev = []
+test-harness = []
+
 [dependencies]
 share = { path = "../../shared" }
 utils = { path = "../../../packages/global/utils" }

@@ -656,62 +656,66 @@ fn render_user_input_timestamp_prefixes_only_first_text_block() {
 // Reminder 统一管线（07-reminder-pipeline.md）：build_window 集成
 // ---------------------------------------------------------------------------
 
-struct PipelineTestSource {
+/// #2146 数据化：构造事实（载荷用 GuidanceSourcesChanged，渲染含路径文本）。
+fn guidance_fact(
     kind: crate::domain::reminder::ReminderKind,
+    refresh: crate::domain::reminder::RefreshTrigger,
     placement: crate::domain::reminder::ReminderPlacement,
-    body: String,
-}
-
-impl crate::domain::reminder::ReminderSource for PipelineTestSource {
-    fn kind(&self) -> crate::domain::reminder::ReminderKind {
-        self.kind.clone()
-    }
-
-    fn policy(&self) -> crate::domain::reminder::ReminderPolicy {
-        crate::domain::reminder::ReminderPolicy {
-            refresh: crate::domain::reminder::RefreshTrigger::OnRunStart,
-            placement: self.placement,
+    body: &str,
+) -> crate::domain::reminder::ReminderFactData {
+    crate::domain::reminder::ReminderFactData {
+        kind,
+        policy: crate::domain::reminder::ReminderPolicy {
+            refresh,
+            placement,
             inject: crate::domain::reminder::InjectBehavior {
                 dedup: crate::domain::reminder::ReminderDedup::SkipIfUnchanged,
                 priority: crate::domain::reminder::ReminderPriority::task_state(),
             },
             compact: crate::domain::reminder::CompactBehavior::Reinstate,
-        }
-    }
-
-    fn build(&self) -> Option<crate::domain::reminder::ReminderSnapshot> {
-        Some(crate::domain::reminder::ReminderSnapshot {
-            data: self.body.clone(),
-        })
-    }
-
-    fn render(
-        &self,
-        _snapshot: &crate::domain::reminder::ReminderSnapshot,
-        language: &str,
-    ) -> String {
-        format!("[{language}] {}", self.body)
+        },
+        enqueue: crate::domain::reminder::ReminderEnqueue::Snapshot,
+        lifetime: crate::domain::reminder::ReminderFactLifetime::Snapshot,
+        rollback_keys: Vec::new(),
+        data: serde_json::to_string(
+            &crate::domain::InvocationReminderData::GuidanceSourcesChanged {
+                paths: vec![body.to_string()],
+            },
+        )
+        .expect("载荷序列化"),
     }
 }
 
 #[tokio::test]
 async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
-    let tail_source = Arc::new(PipelineTestSource {
-        kind: crate::domain::reminder::ReminderKind::task_progress(),
-        placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
-        body: "total=2 completed=1".to_string(),
-    });
-    let system_source = Arc::new(PipelineTestSource {
-        kind: crate::domain::reminder::ReminderKind::new("model_guidance_mismatch"),
-        placement: crate::domain::reminder::ReminderPlacement::SystemTail,
-        body: "session=a run=b".to_string(),
-    });
+    let tail_kind = crate::domain::reminder::ReminderKind::task_progress();
+    let system_kind = crate::domain::reminder::ReminderKind::new("model_guidance_mismatch");
     let service = service(vec![], 1);
     let run_id = request(None).run_id;
     crate::ports::ReminderControlPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
-        vec![tail_source, system_source],
+        vec![tail_kind.clone(), system_kind.clone()],
+    );
+    crate::ports::ReminderControlPort::push_reminder_fact(
+        &service,
+        &run_id,
+        guidance_fact(
+            tail_kind,
+            crate::domain::reminder::RefreshTrigger::OnRunStart,
+            crate::domain::reminder::ReminderPlacement::TailUserMessage,
+            "total=2 completed=1",
+        ),
+    );
+    crate::ports::ReminderControlPort::push_reminder_fact(
+        &service,
+        &run_id,
+        guidance_fact(
+            system_kind,
+            crate::domain::reminder::RefreshTrigger::OnRunStart,
+            crate::domain::reminder::ReminderPlacement::SystemTail,
+            "session=a run=b",
+        ),
     );
     crate::ports::ReminderControlPort::reminder_run_started(&service, &run_id);
 
@@ -732,7 +736,7 @@ async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
         })
         .find(|text| text.contains("kind=\"task-progress\""))
         .expect("尾部 user message 含 reminder 块");
-    assert!(tail_user.contains("[zh] total=2 completed=1"));
+    assert!(tail_user.contains("total=2 completed=1"));
 
     let reminder_block = window
         .system_blocks
@@ -775,52 +779,26 @@ fn window_text(window: &crate::domain::ContextWindowData) -> String {
 }
 
 /// `OnUserMessage` 触发的测试 source。
-struct UserMessageTestSource {
-    body: String,
-}
-
-impl crate::domain::reminder::ReminderSource for UserMessageTestSource {
-    fn kind(&self) -> crate::domain::reminder::ReminderKind {
-        crate::domain::reminder::ReminderKind::memory_recall()
-    }
-
-    fn policy(&self) -> crate::domain::reminder::ReminderPolicy {
-        crate::domain::reminder::ReminderPolicy {
-            refresh: crate::domain::reminder::RefreshTrigger::OnUserMessage,
-            placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
-            inject: crate::domain::reminder::InjectBehavior {
-                dedup: crate::domain::reminder::ReminderDedup::SkipIfUnchanged,
-                priority: crate::domain::reminder::ReminderPriority::memory_recall(),
-            },
-            compact: crate::domain::reminder::CompactBehavior::Rebuild,
-        }
-    }
-
-    fn build(&self) -> Option<crate::domain::reminder::ReminderSnapshot> {
-        Some(crate::domain::reminder::ReminderSnapshot {
-            data: self.body.clone(),
-        })
-    }
-
-    fn render(
-        &self,
-        snapshot: &crate::domain::reminder::ReminderSnapshot,
-        _language: &str,
-    ) -> String {
-        snapshot.data.clone()
-    }
-}
 
 #[tokio::test]
 async fn reminder_user_message_received_enqueues_snapshot_into_window() {
     let service = service(vec![], 1);
     let run_id = request(None).run_id;
+    let recall_kind = crate::domain::reminder::ReminderKind::memory_recall();
     crate::ports::ReminderControlPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
-        vec![Arc::new(UserMessageTestSource {
-            body: "召回的记忆内容".to_string(),
-        })],
+        vec![recall_kind.clone()],
+    );
+    crate::ports::ReminderControlPort::push_reminder_fact(
+        &service,
+        &run_id,
+        guidance_fact(
+            recall_kind,
+            crate::domain::reminder::RefreshTrigger::OnUserMessage,
+            crate::domain::reminder::ReminderPlacement::TailUserMessage,
+            "召回的记忆内容",
+        ),
     );
 
     let before = service
@@ -849,11 +827,7 @@ async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
     // #1848：注入轮的 reminder 在 step 收口随 append_and_persist 提交——
     // 插入提交消息头部（canonical 顺序 u(已落) → R → a/tool），
     // 使下一请求 [.., u, R, a, ..] 前缀逐 token 稳定（cache 命中）。
-    let tail_source = Arc::new(PipelineTestSource {
-        kind: crate::domain::reminder::ReminderKind::task_progress(),
-        placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
-        body: "total=2 completed=1".to_string(),
-    });
+    let tail_kind = crate::domain::reminder::ReminderKind::task_progress();
     let baseline = Arc::new(BaselineSession {
         revision: SessionRevision::new(1),
         messages: ContextMessages::from_committed_steps(Vec::new(), Vec::new()),
@@ -871,7 +845,17 @@ async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
     crate::ports::ReminderControlPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
-        vec![tail_source],
+        vec![tail_kind.clone()],
+    );
+    crate::ports::ReminderControlPort::push_reminder_fact(
+        &service,
+        &run_id,
+        guidance_fact(
+            tail_kind,
+            crate::domain::reminder::RefreshTrigger::OnRunStart,
+            crate::domain::reminder::ReminderPlacement::TailUserMessage,
+            "total=2 completed=1",
+        ),
     );
     crate::ports::ReminderControlPort::reminder_run_started(&service, &run_id);
     let window = service

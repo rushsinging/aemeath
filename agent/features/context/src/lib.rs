@@ -14,6 +14,11 @@
 //! 集成测试 20 文件（9782 行）搬 src/integration_tests/。
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
+/// 实现密封基建（#2146 实现权治理）。
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
 /// Context Management crate — 对话历史容器、上下文压缩、token 预算、提示组装、记忆注入。
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
@@ -37,8 +42,8 @@ pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_s
 pub use adapters::{MainContextFactory, NoOpCanonicalSessionWriter};
 pub use domain::reminder::{
     render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
-    ReminderDedup, ReminderEventSource, ReminderKind, ReminderPlacement, ReminderPolicy,
-    ReminderPriority, ReminderSnapshot, ReminderSource,
+    ReminderDedup, ReminderEnqueue, ReminderEventSource, ReminderFactData, ReminderFactLifetime,
+    ReminderKind, ReminderPlacement, ReminderPolicy, ReminderPriority, ReminderSnapshot,
 };
 pub use domain::session::{
     DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionManagementError,
@@ -87,6 +92,7 @@ pub use domain::{
     SessionAppendReceiptData, TaskProgressReminderData, TaskProgressReminderItemData,
     TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    WorkflowStateModeData,
 };
 pub use ports::{
     ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,

@@ -221,7 +221,7 @@ impl std::fmt::Display for WorkspaceRestoreError {
 impl std::error::Error for WorkspaceRestoreError {}
 
 /// 读当前 workspace 位置（所有 tool 可用）。
-pub trait WorkspaceReader: Send + Sync {
+pub trait WorkspaceReader: crate::sealed::Sealed + Send + Sync {
     fn workspace_id(&self) -> WorkspaceId;
     fn project_identity(&self) -> ProjectIdentityData;
     fn current_workspace_root(&self) -> PathBuf;
@@ -253,7 +253,7 @@ pub trait WorkspaceReader: Send + Sync {
 }
 
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
-pub trait WorkspaceControl: Send + Sync {
+pub trait WorkspaceControl: crate::sealed::Sealed + Send + Sync {
     /// 变更 path_base（bash cd 回报）。非 `allow_outside_workspace` 授权时限制在
     /// workspace root 内；授权越界时 path_base 跟随、workspace_root 不变。
     fn change_directory(
@@ -271,7 +271,7 @@ pub trait WorkspaceControl: Send + Sync {
 }
 
 /// session 边界持久化。
-pub trait WorkspaceWriter: Send + Sync {
+pub trait WorkspaceWriter: crate::sealed::Sealed + Send + Sync {
     fn snapshot(&self) -> PersistedWorkspaceContext;
     fn prepare_restore(
         &self,

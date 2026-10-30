@@ -9,38 +9,6 @@ use crate::application::run::context::{RunUsageTracker, RuntimeContext};
 use crate::application::run::execution_state::RunExecutionState;
 use crate::ports::CompactOutcome;
 
-/// 把 Runtime 的 [`CompactProgressView`]（SDK 视图 stage）适配为 Context 的
-/// `CompactProgressFn`（domain stage + usize chunk 计数），#1500 全链路接线。
-pub(crate) struct CompactProgressAdapter(pub(crate) std::sync::Arc<dyn CompactProgressView>);
-
-impl context::compact::CompactProgressFn for CompactProgressAdapter {
-    fn emit(
-        &self,
-        stage: context::compact::CompactStageData,
-        work: context::compact::CompactWorkData,
-    ) {
-        let view_stage = match stage {
-            context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,
-            context::compact::CompactStageData::Generating => sdk::CompactStageView::Generating,
-            context::compact::CompactStageData::Mapping => sdk::CompactStageView::Mapping,
-            context::compact::CompactStageData::Reducing => sdk::CompactStageView::Reducing,
-            context::compact::CompactStageData::Refreshing => sdk::CompactStageView::Refreshing,
-            context::compact::CompactStageData::Finalizing => sdk::CompactStageView::Finalizing,
-        };
-        let view_work = match work {
-            context::compact::CompactWorkData::Indeterminate => sdk::CompactWorkView::Indeterminate,
-            context::compact::CompactWorkData::Determinate { completed, total } => {
-                let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
-                else {
-                    return;
-                };
-                sdk::CompactWorkView::Determinate { completed, total }
-            }
-        };
-        self.0.emit(view_stage, view_work);
-    }
-}
-
 #[async_trait]
 pub(crate) trait CompactionObserver: Send {
     async fn on_compacted(
@@ -148,4 +116,38 @@ impl CompactionCoordinator {
         apply_automatic_compact_outcome(&outcome, &self.usage, execution.context_window_mut());
         observer.on_compacted(&outcome, &discarded_messages).await
     }
+}
+
+/// 把 Runtime 的 [`CompactProgressView`]（SDK 视图 stage）适配为 Context 的
+/// `CompactProgressFn` 闭包（#2146：实现权归 context blanket，适配经闭包）。
+pub(crate) fn compact_progress_adapter(
+    view: std::sync::Arc<dyn CompactProgressView>,
+) -> std::sync::Arc<dyn context::compact::CompactProgressFn> {
+    std::sync::Arc::new(
+        move |stage: context::compact::CompactStageData,
+              work: context::compact::CompactWorkData| {
+            let view_stage = match stage {
+                context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,
+                context::compact::CompactStageData::Generating => sdk::CompactStageView::Generating,
+                context::compact::CompactStageData::Mapping => sdk::CompactStageView::Mapping,
+                context::compact::CompactStageData::Reducing => sdk::CompactStageView::Reducing,
+                context::compact::CompactStageData::Refreshing => sdk::CompactStageView::Refreshing,
+                context::compact::CompactStageData::Finalizing => sdk::CompactStageView::Finalizing,
+            };
+            let view_work = match work {
+                context::compact::CompactWorkData::Indeterminate => {
+                    sdk::CompactWorkView::Indeterminate
+                }
+                context::compact::CompactWorkData::Determinate { completed, total } => {
+                    let (Ok(completed), Ok(total)) =
+                        (u32::try_from(completed), u32::try_from(total))
+                    else {
+                        return;
+                    };
+                    sdk::CompactWorkView::Determinate { completed, total }
+                }
+            };
+            view.emit(view_stage, view_work);
+        },
+    )
 }

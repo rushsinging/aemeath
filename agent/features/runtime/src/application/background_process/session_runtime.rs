@@ -236,6 +236,15 @@ impl BackgroundProcessRuntime {
         }
         match self.notify_route() {
             BackgroundNotifyRoute::Reminder(run_id) => {
+                // #2146 数据化：先推送后台完成事实（peek 即标记已通知），
+                // 再触发 OnEvent 时机——管线条目入队后由滞留/重注入保障送达。
+                let source =
+                    crate::application::loop_engine::chat::reminder_sources::BackgroundProcessReminderSource::new(
+                        Arc::clone(&self.supervisor),
+                    );
+                if let Some(fact) = source.fact() {
+                    context.push_reminder_fact(&run_id, fact);
+                }
                 context.reminder_handle_event(
                     &run_id,
                     &context::ReminderEventSource::background_process(),
