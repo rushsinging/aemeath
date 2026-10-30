@@ -168,7 +168,7 @@ fn cli_accepts_systemone_serve_nested_command() {
 }
 
 #[test]
-fn rsi_run_uses_max_runs_and_keeps_sessions_alias() {
+fn rsi_run_uses_max_runs_and_rejects_sessions_alias() {
     let cli = Cli::try_parse_from(["aemeath", "rsi", "run", "--max-runs", "7"]).unwrap();
     assert!(matches!(
         cli.command,
@@ -180,16 +180,11 @@ fn rsi_run_uses_max_runs_and_keeps_sessions_alias() {
         })
     ));
 
-    let legacy = Cli::try_parse_from(["aemeath", "rsi", "run", "--max-sessions", "3"]).unwrap();
-    assert!(matches!(
-        legacy.command,
-        Some(Commands::Rsi {
-            command: RsiCommands::Run {
-                max_runs: Some(3),
-                ..
-            }
-        })
-    ));
+    let legacy = Cli::try_parse_from(["aemeath", "rsi", "run", "--max-sessions", "3"]);
+    assert!(
+        legacy.is_err(),
+        "`--max-sessions` 语义误导，已移除；NEVER 作为 alias 保留"
+    );
 }
 
 #[test]

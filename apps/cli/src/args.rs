@@ -390,7 +390,7 @@ pub enum RsiCommands {
         #[arg(long)]
         dry_run: bool,
         /// 覆盖 evidence_max_runs_per_cycle（仅本次；单位是 run）
-        #[arg(long, alias = "max-sessions")]
+        #[arg(long)]
         max_runs: Option<usize>,
         /// 覆盖 evidence_initial_window_days（仅本次；仅无 checkpoint 时生效）
         #[arg(long)]

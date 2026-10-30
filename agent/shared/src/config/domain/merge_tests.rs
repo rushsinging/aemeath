@@ -593,7 +593,7 @@ fn harness_rsi_defaults() {
     assert!(config.harness.rsi.enabled);
     assert_eq!(config.harness.rsi.interval_secs, 1800);
     assert_eq!(config.harness.rsi.chunk_max_components, 8);
-    assert_eq!(config.harness.rsi.evidence_max_runs_per_cycle, 20);
+    assert_eq!(config.harness.rsi.evidence_max_runs_per_cycle, 100);
     assert_eq!(config.harness.rsi.evidence_block_runs, 5);
 }
 
