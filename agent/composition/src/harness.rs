@@ -270,14 +270,14 @@ pub fn wire_lesson_store() -> Arc<LessonStore> {
 /// `aemeath rsi run`：一次性执行单轮改进周期后退出。
 /// rsi run 参数覆盖（#2050，仅本次生效）。
 pub struct RsiRunOverrides {
-    pub max_sessions: Option<usize>,
+    pub max_runs: Option<usize>,
     pub window_days: Option<u64>,
 }
 
 pub async fn run_rsi_run_once() -> RsiRunExit {
     run_rsi_run_inner(
         &RsiRunOverrides {
-            max_sessions: None,
+            max_runs: None,
             window_days: None,
         },
         false,
@@ -337,8 +337,8 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
         }
     };
     let mut rsi_config = config.harness.rsi.clone();
-    if let Some(max_sessions) = overrides.max_sessions {
-        rsi_config.evidence_max_sessions_per_cycle = max_sessions;
+    if let Some(max_runs) = overrides.max_runs {
+        rsi_config.evidence_max_runs_per_cycle = max_runs;
     }
     if let Some(window_days) = overrides.window_days {
         rsi_config.evidence_initial_window_days = window_days;

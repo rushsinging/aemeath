@@ -111,8 +111,8 @@ impl RsiTask for HarnessRsiCycleTask {
         // 块成功（周期 Ok——作废也是明确处理结论）才推进游标。
         let params = crate::domain::stream::StreamPlanParams {
             initial_window_days: self.config.evidence_initial_window_days,
-            max_runs_per_cycle: self.config.evidence_max_sessions_per_cycle.max(1),
-            block_run_limit: self.config.evidence_block_sessions.max(1),
+            max_runs_per_cycle: self.config.evidence_max_runs_per_cycle.max(1),
+            block_run_limit: self.config.evidence_block_runs.max(1),
             component_tree_fingerprint: String::new(),
         };
         let blocks = self.stream_port.plan(&params);

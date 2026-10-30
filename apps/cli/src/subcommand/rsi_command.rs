@@ -19,7 +19,7 @@ pub(crate) async fn run_rsi_serve_command() {
 /// rsi run 参数面（#2050）。
 pub(crate) struct RsiRunOptions {
     pub dry_run: bool,
-    pub max_sessions: Option<usize>,
+    pub max_runs: Option<usize>,
     pub window_days: Option<u64>,
     pub json: bool,
 }
@@ -31,7 +31,7 @@ fn render_rsi_json_summary(summary: &str) -> String {
 
 pub(crate) async fn run_rsi_run_command(options: RsiRunOptions) {
     let overrides = composition::harness::RsiRunOverrides {
-        max_sessions: options.max_sessions,
+        max_runs: options.max_runs,
         window_days: options.window_days,
     };
     let result = if options.dry_run {

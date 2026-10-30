@@ -389,9 +389,9 @@ pub enum RsiCommands {
         /// 预览落 ~/.agents/harness/dry-run-preview.md（覆盖写）
         #[arg(long)]
         dry_run: bool,
-        /// 覆盖 evidence_max_sessions_per_cycle（仅本次）
-        #[arg(long)]
-        max_sessions: Option<usize>,
+        /// 覆盖 evidence_max_runs_per_cycle（仅本次；单位是 run）
+        #[arg(long, alias = "max-sessions")]
+        max_runs: Option<usize>,
         /// 覆盖 evidence_initial_window_days（仅本次；仅无 checkpoint 时生效）
         #[arg(long)]
         window_days: Option<u64>,
