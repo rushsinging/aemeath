@@ -334,7 +334,7 @@ pub fn build_block_prompt(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let evidence_block = render_evidence_block(evidence);
+    let evidence_block = render_route_evidence_block(evidence);
     let mut components_json = Vec::with_capacity(chunk.len());
     for (id, content) in chunk {
         components_json.push(serde_json::json!({
@@ -356,11 +356,11 @@ pub fn build_block_prompt(
 {lessons_block}
 
 任务：基于执行证据判断组件是否存在值得改进的问题（缺失、冗余、错误、
-空壳占位、重复失败未覆盖的规则）。空壳占位（TODO、无实际内容的正文）
-视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 在 signal_ids
-中结构化列出它回应的证据信号 id（如 repeated_failure:Bash:…）；无法对应
-任何信号的编辑是投机，NEVER 提出。证据与组件现状都不足时选择
-no_change——那是一个正当答案，比牵强的编辑更好。
+  空壳占位、重复失败未覆盖的规则）。空壳占位（TODO、无实际内容的正文）
+  视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 在 evidence_refs
+  中结构化列出它回应的短证据编号（如 E0）；无法对应任何证据的编辑是投机，
+  NEVER 提出。证据与组件现状都不足时选择 no_change——那是一个正当答案，
+  比牵强的编辑更好。
 
 写规则的质量标准（每次落笔先自检）：
 - **可执行**：每条规则必须写清「什么条件下」+「必须/禁止做什么」，
@@ -389,12 +389,12 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 - **结论质量**：空泛建议、无证据断言、不复述关键约束就动手。
 
 编辑契约：
-- 提案只携带要变更的组件（未提及的组件自动保持原样）
-- signal_ids 必须非空，且每个 id 都来自上方证据块；未知引用会作废整份提案
-- 任一条目校验失败会作废整份提案
+  - 提案只携带要变更的组件（未提及的组件自动保持原样）
+  - evidence_refs 必须非空，且每个 ref 都来自上方证据块（E0/E1…）；未知引用会作废整份提案
+  - 任一条目校验失败会作废整份提案
 
-只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","reason":"<提案依据，一句话>","signal_ids":["<证据块中的 signal id>"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+  只输出一个 JSON 对象，格式二选一：
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -420,6 +420,97 @@ pub fn parse_block_proposal(response_text: &str) -> Result<BlockProposal, Harnes
             format!("提案应答解析失败：{error}"),
         )),
         None => Err(HarnessError::invalid(ERROR_DOMAIN, "提案应答 JSON 流为空")),
+    }
+}
+
+/// 兼容旧 `signal_ids` 与新 `evidence_refs` 的解析 DTO；runtime 对外统一输出
+/// 完整 `signal_ids`，lesson/事件 NEVER 持久化短 ref。
+#[derive(Debug, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+enum RawBlockProposal {
+    Propose {
+        reason: String,
+        #[serde(default)]
+        evidence_refs: Vec<String>,
+        #[serde(default)]
+        signal_ids: Vec<String>,
+        change_set: ChangeSet,
+    },
+    NoChange {
+        reason: String,
+    },
+}
+
+/// 解析短 evidence ref 协议：`E0/E1` 由本块证据顺序映射为完整 signal id。
+pub fn parse_block_proposal_with_refs(
+    response_text: &str,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Result<BlockProposal, HarnessError> {
+    let trimmed = response_text.trim();
+    let payload_start = trimmed
+        .find('{')
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "提案应答不含 JSON 对象"))?;
+    let json_source = trimmed
+        .get(payload_start..)
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "提案应答载荷切分越界"))?;
+    let mut stream =
+        serde_json::Deserializer::from_str(json_source).into_iter::<RawBlockProposal>();
+    let raw = match stream.next() {
+        Some(Ok(proposal)) => proposal,
+        Some(Err(error)) => {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("提案应答解析失败：{error}"),
+            ));
+        }
+        None => return Err(HarnessError::invalid(ERROR_DOMAIN, "提案应答 JSON 流为空")),
+    };
+    match raw {
+        RawBlockProposal::NoChange { reason } => Ok(BlockProposal::NoChange { reason }),
+        RawBlockProposal::Propose {
+            reason,
+            evidence_refs,
+            signal_ids,
+            change_set,
+        } => {
+            if !evidence_refs.is_empty() && !signal_ids.is_empty() {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    "提案禁止同时输出 evidence_refs 与 signal_ids",
+                ));
+            }
+            let signal_ids = if evidence_refs.is_empty() {
+                signal_ids
+            } else {
+                let facts = crate::domain::routing::route_evidence_facts(evidence);
+                let mut resolved = Vec::with_capacity(evidence_refs.len());
+                for evidence_ref in evidence_refs {
+                    let signal = facts
+                        .iter()
+                        .find(|fact| fact.evidence_ref == evidence_ref)
+                        .map(|fact| fact.signal.signal_id.clone())
+                        .ok_or_else(|| {
+                            HarnessError::invalid(
+                                ERROR_DOMAIN,
+                                format!("提案引用了不存在的 evidence ref：{evidence_ref}"),
+                            )
+                        })?;
+                    if resolved.contains(&signal) {
+                        return Err(HarnessError::invalid(
+                            ERROR_DOMAIN,
+                            format!("提案 evidence_refs 解析后重复引用：{evidence_ref}"),
+                        ));
+                    }
+                    resolved.push(signal);
+                }
+                resolved
+            };
+            Ok(BlockProposal::Propose {
+                reason,
+                signal_ids,
+                change_set,
+            })
+        }
     }
 }
 
@@ -498,6 +589,54 @@ async fn complete_with_usage_event(
     result
 }
 
+/// 记录宿主路由决策：候选、确定性选择与 unresolved 均进入事件流。
+fn record_route_decisions(
+    chunk: &[(ComponentId, ComponentContent)],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+    block_index: usize,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) {
+    let Some(recorder) = recorder else {
+        return;
+    };
+    let candidates: Vec<ComponentId> = chunk.iter().map(|(id, _)| id.clone()).collect();
+    let context = crate::domain::routing::RouteContext::default();
+    for signal in &evidence.signals {
+        match crate::domain::routing::route_signal(signal, &candidates, &context) {
+            crate::domain::routing::RouteDecision::Exact { component, reason } => {
+                recorder.record(&crate::domain::events::RsiCycleEvent::RouteCandidates {
+                    block_index,
+                    signal_id: signal.signal_id.clone(),
+                    candidates: vec![component.to_string()],
+                    reason: reason.clone(),
+                });
+                recorder.record(&crate::domain::events::RsiCycleEvent::RouteSelected {
+                    block_index,
+                    signal_id: signal.signal_id.clone(),
+                    component: component.to_string(),
+                    stage: "router".to_string(),
+                    reason,
+                });
+            }
+            crate::domain::routing::RouteDecision::Choose { candidates, reason } => {
+                recorder.record(&crate::domain::events::RsiCycleEvent::RouteCandidates {
+                    block_index,
+                    signal_id: signal.signal_id.clone(),
+                    candidates: candidates.into_iter().map(|id| id.to_string()).collect(),
+                    reason,
+                });
+            }
+            crate::domain::routing::RouteDecision::Unresolved { reason } => {
+                recorder.record(&crate::domain::events::RsiCycleEvent::RouteUnresolved {
+                    block_index,
+                    signal_id: signal.signal_id.clone(),
+                    reason,
+                });
+            }
+        }
+    }
+}
+
 /// 单块成功采纳后的材料（每个 edit 共享本次提案的证据绑定）。
 struct AcceptedBlock {
     edits: Vec<AppliedEdit>,
@@ -524,6 +663,8 @@ async fn run_block(
 ) -> (Option<AcceptedBlock>, &'static str) {
     // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
     // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
+    // 路由事件先于模型调用：候选集由宿主生成，模型 NEVER 引入路由外组件。
+    record_route_decisions(chunk, evidence, block_index, recorder);
     let prompt = build_block_prompt(chunk, lessons, evidence);
     let completion =
         match complete_with_usage_event(llm, &prompt, "block", block_index, recorder).await {
@@ -531,7 +672,7 @@ async fn run_block(
             Err(_) => return (None, "作废（LLM 调用失败）"),
         };
     let response = completion.text;
-    let proposal = match parse_block_proposal(&response) {
+    let proposal = match parse_block_proposal_with_refs(&response, evidence) {
         Ok(proposal) => {
             if let Some(recorder) = recorder {
                 let (reason, edits) = match &proposal {
@@ -577,6 +718,46 @@ async fn run_block(
             return (None, "作废（证据引用无效）");
         }
     };
+    if let crate::domain::improvement::BlockProposal::Propose {
+        signal_ids,
+        change_set,
+        ..
+    } = &proposal
+    {
+        if let Err(error) = crate::domain::routing::validate_change_set_routes(
+            change_set,
+            evidence,
+            chunk,
+            &crate::domain::routing::RouteContext::default(),
+        ) {
+            let components: Vec<String> = change_set
+                .edits
+                .iter()
+                .map(|edit| match edit {
+                    crate::domain::changeset::ComponentEdit::Upsert { id, .. }
+                    | crate::domain::changeset::ComponentEdit::Delete { id } => id.to_string(),
+                })
+                .collect();
+            if let Some(recorder) = recorder {
+                recorder.record(
+                    &crate::domain::events::RsiCycleEvent::ComponentRouteRejected {
+                        block_index,
+                        component: components.join(","),
+                        signal_ids: signal_ids.clone(),
+                        message: error.message().chars().take(120).collect(),
+                    },
+                );
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "routes".to_string(),
+                    message: error.message().chars().take(120).collect(),
+                });
+            }
+            log::warn!(target: crate::LOG_TARGET,
+                "提案组件路由校验失败：{}", error.message());
+            return (None, "作废（组件路由无效）");
+        }
+    }
     match proposal {
         BlockProposal::NoChange { .. } => (None, "无变更"),
         BlockProposal::Propose {
@@ -1127,6 +1308,31 @@ fn render_evidence_block_with_strength(
                 signal.summary,
                 strength,
                 signal
+                    .excerpt
+                    .as_deref()
+                    .map(|excerpt| format!(" | 摘录: {excerpt}"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 渲染短证据块：模型只引用 E0/E1；完整 signal id 由 runtime 映射。
+fn render_route_evidence_block(evidence: &crate::domain::evidence::EvidenceBundle) -> String {
+    let facts = crate::domain::routing::route_evidence_facts(evidence);
+    if facts.is_empty() {
+        return "（近期无执行证据）".to_string();
+    }
+    facts
+        .iter()
+        .map(|fact| {
+            format!(
+                "- [{}] {} | {}{}",
+                fact.evidence_ref,
+                fact.signal.kind.as_str(),
+                fact.signal.summary,
+                fact.signal
                     .excerpt
                     .as_deref()
                     .map(|excerpt| format!(" | 摘录: {excerpt}"))

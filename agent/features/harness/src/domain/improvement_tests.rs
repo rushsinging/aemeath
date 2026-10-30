@@ -3,8 +3,8 @@
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::errors::HarnessError;
 use crate::domain::improvement::{
-    build_block_prompt, chunk_materials, parse_block_proposal, run_improvement_cycle,
-    BlockProposal, ImprovementMaterials, RsiLlmPort,
+    build_block_prompt, chunk_materials, parse_block_proposal, parse_block_proposal_with_refs,
+    run_improvement_cycle, BlockProposal, ImprovementMaterials, RsiLlmPort,
 };
 use crate::domain::test_support::FakeRegistry;
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use share::config::RsiConfig;
 
 fn id(name: &str) -> ComponentId {
     ComponentId {
-        kind: ComponentKind::Skill,
+        kind: ComponentKind::ToolGuidance,
         name: ComponentName::new(name),
     }
 }
@@ -115,7 +115,7 @@ fn materials_chunked_by_configured_size() {
 #[test]
 fn block_proposal_envelope_parses() {
     let propose = parse_block_proposal(
-        r#"{"decision":"propose","reason":"依据","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        r#"{"decision":"propose","reason":"依据","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
     )
     .expect("propose 必须可解析");
     match propose {
@@ -133,6 +133,29 @@ fn block_proposal_envelope_parses() {
     assert!(parse_block_proposal("我觉得不需要改").is_err());
 }
 
+/// 短 evidence ref：模型输出 E0/E1，runtime 解析回完整 signal id。
+#[test]
+fn block_proposal_short_evidence_refs_resolve_to_signal_ids() {
+    let propose = parse_block_proposal_with_refs(
+        r#"{"decision":"propose","reason":"依据","evidence_refs":["E0"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        &evidence_with_signal(),
+    )
+    .expect("短引用必须可解析");
+    match propose {
+        BlockProposal::Propose { signal_ids, .. } => assert_eq!(
+            signal_ids,
+            vec!["repeated_failure:Bash:cargo build failed".to_string()]
+        ),
+        other => panic!("预期 propose：{other:?}"),
+    }
+
+    let unknown = parse_block_proposal_with_refs(
+        r#"{"decision":"propose","reason":"依据","evidence_refs":["E9"],"change_set":{"edits":[]}}"#,
+        &evidence_with_signal(),
+    );
+    assert!(unknown.is_err(), "未知 evidence ref MUST 拒绝");
+}
+
 /// prompt 含组件材料与编辑契约要点。
 #[test]
 fn block_prompt_carries_materials_and_contract() {
@@ -145,7 +168,7 @@ fn block_prompt_carries_materials_and_contract() {
     assert!(prompt.contains("alpha"));
     assert!(prompt.contains("正文内容"));
     assert!(prompt.contains("no_change"));
-    assert!(prompt.contains("signal_ids"));
+    assert!(prompt.contains("evidence_refs"));
     assert!(prompt.contains("未提及的组件自动保持原样"));
 }
 
@@ -160,7 +183,7 @@ async fn cycle_adopts_and_summarizes_per_block() {
     ]);
     // 单阶段（#2078 修订）：每块一次提案调用
     let llm = ScriptedLlm::new(vec![
-        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
         r#"{"decision":"no_change","reason":"证据不足"}"#.to_string(),
     ]);
 
@@ -223,6 +246,78 @@ async fn cycle_adopts_and_summarizes_per_block() {
     );
 }
 
+/// 路由门禁：合法 Bash signal 不允许落到无关 skill；NEVER 因 signal id 合法而放行。
+#[tokio::test]
+async fn builtin_tool_signal_cannot_route_to_unrelated_skill() {
+    let target = ComponentId {
+        kind: ComponentKind::Skill,
+        name: ComponentName::new("alpha"),
+    };
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"propose","reason":"误路由","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let events_dir = tempfile::tempdir().expect("tempdir");
+    let recorder = crate::domain::events::RsiEventRecorder::new(events_dir.path());
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(4),
+        evidence_with_signal(),
+        false,
+        &mut Vec::new(),
+        Some(&recorder),
+        None,
+    )
+    .await
+    .expect("周期必须成功");
+    assert!(
+        outcome.summary.contains("作废 1"),
+        "路由外组件 MUST 作废：{}",
+        outcome.summary
+    );
+    assert!(lesson_store.load_active().expect("lessons").is_empty());
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some("old".to_string())
+    );
+
+    let event_path = events_dir
+        .path()
+        .read_dir()
+        .expect("事件目录")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+        .expect("事件文件");
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(event_path)
+        .expect("读取事件")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("事件 JSON"))
+        .collect();
+    let rejected = events
+        .iter()
+        .find(|event| event["event"] == "component_route_rejected")
+        .expect("路由拒绝事件");
+    assert_eq!(rejected["component"], "skill/alpha");
+    assert_eq!(
+        rejected["signal_ids"][0],
+        "repeated_failure:Bash:cargo build failed"
+    );
+    assert!(events
+        .iter()
+        .any(|event| event["event"] == "route_unresolved"));
+}
+
 /// 块级幂等：一块解析失败（坏 JSON）只作废该块，其余块照常采纳。
 #[tokio::test]
 async fn malformed_block_discarded_without_blocking_others() {
@@ -233,7 +328,7 @@ async fn malformed_block_discarded_without_blocking_others() {
     ]);
     let llm = ScriptedLlm::new(vec![
         "这不是 JSON".to_string(),
-        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
 
     let lesson_store = crate::domain::lesson::LessonStore::new(
@@ -294,7 +389,7 @@ async fn empty_registry_yields_empty_cycle() {
 
 // ---- #2048 evidence 材料注入 ----
 
-/// prompt 含 evidence 块（signal id 可引用）与引用约束；空证据兜底。
+/// prompt 含 evidence 短引用块（E0/E1）与引用约束；空证据兜底。
 #[test]
 fn block_prompt_carries_evidence_block_and_reference_rule() {
     use crate::domain::evidence::{
@@ -316,9 +411,13 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
     ];
     let evidence = aggregate_evidence(&events);
     let prompt = build_block_prompt(&chunk, &[], &evidence);
-    assert!(prompt.contains("repeated_failure:Bash:"));
+    assert!(prompt.contains("[E0]"), "短 evidence ref 必须进入 prompt");
     assert!(
-        prompt.contains("MUST 在 signal_ids"),
+        !prompt.contains("repeated_failure:Bash:"),
+        "prompt NEVER 要求模型复制完整 signal id"
+    );
+    assert!(
+        prompt.contains("MUST 在 evidence_refs"),
         "引用约束必须在 prompt"
     );
 
@@ -348,8 +447,8 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
         sessions_covered: 1,
     };
     let both_prompt = build_block_prompt(&chunk, &[], &bundle_with_both);
-    let failure_pos = both_prompt.find("repeated_failure:Bash:x").unwrap();
-    let outcome_pos = both_prompt.find("run_outcome:aggregate").unwrap();
+    let failure_pos = both_prompt.find("失败").unwrap();
+    let outcome_pos = both_prompt.find("终态").unwrap();
     assert!(failure_pos < outcome_pos, "repeated_failure 渲染在前");
 }
 
@@ -358,7 +457,7 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
 async fn unknown_signal_reference_discards_whole_proposal() {
     let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
     let llm = ScriptedLlm::new(vec![
-        r#"{"decision":"propose","reason":"引用不存在信号","signal_ids":["repeated_failure:Grep:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"引用不存在信号","signal_ids":["repeated_failure:Grep:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
     let lesson_store = crate::domain::lesson::LessonStore::new(
         tempfile::tempdir()
@@ -732,7 +831,7 @@ async fn compose_correction_preserves_adoption_evidence() {
         Some(source_ref("step-1")),
     );
     let llm = ScriptedLlm::new(vec![
-        r#"{"decision":"propose","reason":"合并后精炼","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"合并后精炼","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
     let lesson_store = crate::domain::lesson::LessonStore::new(
         tempfile::tempdir()
@@ -773,7 +872,7 @@ async fn compose_correction_preserves_adoption_evidence() {
 async fn compose_rejects_unadopted_component_and_unknown_signal() {
     for response in [
         r#"{"decision":"propose","reason":"越界","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"beta"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
-        r#"{"decision":"propose","reason":"未知信号","signal_ids":["repeated_failure:Edit:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        r#"{"decision":"propose","reason":"未知信号","signal_ids":["repeated_failure:Edit:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
     ] {
         let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
         let proposal = adoption_record(

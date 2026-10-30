@@ -25,6 +25,35 @@ pub enum RsiCycleEvent {
         sessions_runs: Vec<String>,
         signals: Vec<String>,
     },
+    RouteCandidates {
+        block_index: usize,
+        signal_id: String,
+        candidates: Vec<String>,
+        reason: String,
+    },
+    RouteSelected {
+        block_index: usize,
+        signal_id: String,
+        component: String,
+        stage: String,
+        reason: String,
+    },
+    RouteUnresolved {
+        block_index: usize,
+        signal_id: String,
+        reason: String,
+    },
+    ComponentRouteRejected {
+        block_index: usize,
+        component: String,
+        signal_ids: Vec<String>,
+        message: String,
+    },
+    ExecutionTargetFixed {
+        block_index: usize,
+        component: String,
+        signal_ids: Vec<String>,
+    },
     LlmCall {
         stage: String,
         block_index: usize,

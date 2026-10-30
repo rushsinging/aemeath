@@ -16,7 +16,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 fn component_id(name: &str) -> ComponentId {
     ComponentId {
-        kind: ComponentKind::Skill,
+        kind: ComponentKind::ToolGuidance,
         name: ComponentName::new(name),
     }
 }
@@ -131,7 +131,7 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
     ]);
 
     let llm = PromptRecordingLlm::new(vec![
-        r#"{"decision":"propose","reason":"编辑前必须先读取文件内容并确认上下文","signal_ids":["repeated_failure:Edit:dry-run"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"virtual-final-body"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"编辑前必须先读取文件内容并确认上下文","signal_ids":["repeated_failure:Edit:dry-run"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"virtual-final-body"}}]}}"#.to_string(),
         r#"{"decision":"no_change","reason":"上下文不同"}"#.to_string(),
     ]);
     let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
@@ -377,7 +377,7 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
     ]);
 
     let llm = PromptRecordingLlm::new(vec![
-        r#"{"decision":"propose","reason":"编辑前必须先读取文件内容并确认上下文","signal_ids":["repeated_failure:Edit:new-signal"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"编辑前必须先读取文件内容并确认上下文","signal_ids":["repeated_failure:Edit:new-signal"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
         r#"{"decision":"no_change","reason":"上下文不同"}"#.to_string(),
     ]);
     let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(

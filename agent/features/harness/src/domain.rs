@@ -26,6 +26,9 @@ mod lesson_tests;
 pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
+pub mod routing;
+#[cfg(test)]
+mod routing_tests;
 pub mod stream;
 pub mod stream_port;
 #[cfg(test)]

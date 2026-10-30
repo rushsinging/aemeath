@@ -60,3 +60,10 @@ pub const EVENT_RETENTION_DAYS: u64 = 30;
 
 /// lesson 过期阈值：距上次判定超过该秒数且未被引用 → 退役（#2092）。
 pub const LESSON_STALE_AFTER_SECS: u64 = 30 * 24 * 3600;
+
+/// 可参与组件路由的 signal kind 集合。
+pub(crate) const ROUTABLE_SIGNAL_KINDS: [crate::domain::evidence::SignalKind; 3] = [
+    crate::domain::evidence::SignalKind::RepeatedFailure,
+    crate::domain::evidence::SignalKind::RetryPattern,
+    crate::domain::evidence::SignalKind::OversizedResult,
+];
