@@ -74,11 +74,20 @@ impl<'a> ProgressLineBuffer<'a> {
     }
 }
 
+/// 捕获结果：`capped = true` 表示命中 [`MAX_CAPTURE_BYTES`] 硬顶，
+/// 调用方 **MUST** 在给 LLM 的文本里显式标注（NEVER 静默截断）。
+#[derive(Default)]
+pub(super) struct CapturedOutput {
+    pub(super) bytes: Vec<u8>,
+    pub(super) capped: bool,
+}
+
 pub(super) async fn read_stdout(
     mut stdout_pipe: Option<ChildStdout>,
     progress_tx: Option<Arc<dyn ProgressSink>>,
-) -> Vec<u8> {
+) -> CapturedOutput {
     let mut buf = Vec::new();
+    let mut capped = false;
     let mut progress_buffer = ProgressLineBuffer::new(CWD_MARKER);
 
     if let Some(ref mut pipe) = stdout_pipe {
@@ -87,10 +96,13 @@ pub(super) async fn read_stdout(
             match tokio::io::AsyncReadExt::read(pipe, &mut tmp).await {
                 Ok(0) => break,
                 Ok(bytes_read) => {
-                    if buf.len() + bytes_read <= MAX_CAPTURE_BYTES {
-                        buf.extend_from_slice(&tmp[..bytes_read]); // allow unsafe_text_op: Vec slice (bytes)
+                    let room = MAX_CAPTURE_BYTES.saturating_sub(buf.len());
+                    let take = room.min(bytes_read);
+                    buf.extend_from_slice(&tmp[..take]); // allow unsafe_text_op: Vec slice (bytes)
+                    if take < bytes_read {
+                        capped = true;
                     }
-                    // If over limit, keep reading (to drain the pipe) but don't store.
+                    // 超限后继续读完（排空管道）但不再存储。
                     if let Some(progress_sink) = &progress_tx {
                         let text = String::from_utf8_lossy(&tmp[..bytes_read]); // allow unsafe_text_op: Vec slice (bytes)
                         for event_text in progress_buffer.push(&text) {
@@ -107,28 +119,32 @@ pub(super) async fn read_stdout(
             progress_sink.emit_tool_stream(ToolProgressEvent { text: event_text });
         }
     }
-    buf
+    CapturedOutput { bytes: buf, capped }
 }
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]
 mod tests;
 
-pub(super) async fn read_stderr(mut stderr_pipe: Option<ChildStderr>) -> Vec<u8> {
+pub(super) async fn read_stderr(mut stderr_pipe: Option<ChildStderr>) -> CapturedOutput {
     let mut buf = Vec::new();
+    let mut capped = false;
     if let Some(ref mut pipe) = stderr_pipe {
         let mut tmp = [0u8; 8192];
         loop {
             match tokio::io::AsyncReadExt::read(pipe, &mut tmp).await {
                 Ok(0) => break,
                 Ok(bytes_read) => {
-                    if buf.len() + bytes_read <= MAX_CAPTURE_BYTES {
-                        buf.extend_from_slice(&tmp[..bytes_read]); // allow unsafe_text_op: Vec slice (bytes)
+                    let room = MAX_CAPTURE_BYTES.saturating_sub(buf.len());
+                    let take = room.min(bytes_read);
+                    buf.extend_from_slice(&tmp[..take]); // allow unsafe_text_op: Vec slice (bytes)
+                    if take < bytes_read {
+                        capped = true;
                     }
                 }
                 Err(_) => break,
             }
         }
     }
-    buf
+    CapturedOutput { bytes: buf, capped }
 }

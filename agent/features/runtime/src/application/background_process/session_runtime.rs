@@ -389,14 +389,18 @@ impl tools::BackgroundProcessAccess for BackgroundProcessRuntime {
         max_bytes: usize,
     ) -> Option<tools::types::background_processes::BackgroundProcessLogData> {
         let parsed = share::ids::BackgroundProcessId::parse(task_id).ok()?;
-        let (text, cursor, total_written) = self
+        let is_tail = cursor.is_none();
+        let read = self
             .supervisor()
             .read_task_log(&parsed, cursor, max_bytes)?;
         Some(
             tools::types::background_processes::BackgroundProcessLogData {
-                text,
-                cursor,
-                total_written,
+                text: read.text,
+                cursor: read.cursor,
+                total_written: read.total_written,
+                start_offset: read.start_offset,
+                is_tail,
+                log_file: read.log_file.map(|path| path.display().to_string()),
             },
         )
     }

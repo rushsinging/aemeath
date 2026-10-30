@@ -7,6 +7,7 @@ mod stream;
 #[cfg(test)]
 mod tests;
 use self::constants::CWD_MARKER;
+use self::constants::MAX_CAPTURE_BYTES;
 use self::constants::READER_DRAIN_TIMEOUT_MS;
 use crate::domain::shell_safety::{check_command_safety, check_shell_injection};
 use crate::domain::types::bash::{BashInput, BashResult};
@@ -27,7 +28,7 @@ use tokio::process::Command;
 use project::WorkspaceControl;
 use std::sync::Arc;
 
-type ReaderTask = tokio::task::JoinHandle<Vec<u8>>;
+type ReaderTask = tokio::task::JoinHandle<stream::CapturedOutput>;
 
 /// 进程树被终止后管道写端关闭，reader 读到 EOF 自然返回——已读内容保留。
 /// 带保护超时兜底：后台进程持有管道写端等极端场景下放弃等待并丢弃输出，
@@ -35,7 +36,7 @@ type ReaderTask = tokio::task::JoinHandle<Vec<u8>>;
 async fn drain_reader_tasks(
     stdout_handle: ReaderTask,
     stderr_handle: ReaderTask,
-) -> (Vec<u8>, Vec<u8>) {
+) -> (stream::CapturedOutput, stream::CapturedOutput) {
     let stdout_abort = stdout_handle.abort_handle();
     let stderr_abort = stderr_handle.abort_handle();
     match tokio::time::timeout(Duration::from_millis(READER_DRAIN_TIMEOUT_MS), async {
@@ -53,7 +54,10 @@ async fn drain_reader_tasks(
             );
             stdout_abort.abort();
             stderr_abort.abort();
-            (Vec::new(), Vec::new())
+            (
+                stream::CapturedOutput::default(),
+                stream::CapturedOutput::default(),
+            )
         }
     }
 }
@@ -77,6 +81,44 @@ fn partial_output_text(
     } else {
         format!("{}\n{tail_marker}", parts.join("\n"))
     }
+}
+
+/// 输出被源头窗口/硬顶裁剪时追加可见说明（**NEVER** 静默截断）。
+///
+/// - 直绑日志（#1890）：前台文本只回放日志尾部窗口，文件是全量真相，必须给出路径；
+/// - 管道捕获：命中 [`MAX_CAPTURE_BYTES`] 时说明上限与规避方式。
+fn append_capture_notice(
+    text: String,
+    capture_capped: bool,
+    direct_log_path: &Option<std::path::PathBuf>,
+) -> String {
+    match capture_notice(capture_capped, direct_log_path) {
+        Some(notice) => format!("{text}\n{notice}"),
+        None => text,
+    }
+}
+
+fn capture_notice(
+    capture_capped: bool,
+    direct_log_path: &Option<std::path::PathBuf>,
+) -> Option<String> {
+    let window = u64::try_from(MAX_CAPTURE_BYTES).unwrap_or(u64::MAX);
+    if let Some(path) = direct_log_path {
+        let size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        if size > window {
+            return Some(format!(
+                "[output window] only the last {window} bytes of {size} are shown; full log file: {} (complete and not truncated — read that file directly)",
+                path.display()
+            ));
+        }
+        return None;
+    }
+    capture_capped.then(|| {
+        format!(
+            "[output truncated at {} MB by the aemeath capture limit — redirect to a file to keep the full output]",
+            MAX_CAPTURE_BYTES / (1024 * 1024)
+        )
+    })
 }
 
 pub struct BashTool {
@@ -270,14 +312,19 @@ impl TypedTool for BashTool {
                 let (stdout_bytes, stderr_bytes) =
                     drain_reader_tasks(stdout_handle, stderr_handle).await;
                 let stdout =
-                    split_stdout_and_cwd(&direct_or_pipe_stdout(&direct_log_path, &stdout_bytes).await)
+                    split_stdout_and_cwd(&direct_or_pipe_stdout(&direct_log_path, &stdout_bytes.bytes).await)
                         .0;
-                let stderr = String::from_utf8_lossy(&stderr_bytes);
+                let stderr = String::from_utf8_lossy(&stderr_bytes.bytes);
                 let result = partial_output_text(
                     &stdout,
                     &stderr,
                     "[Command cancelled by user — partial output above]",
                     "Command cancelled by user",
+                );
+                let result = append_capture_notice(
+                    result,
+                    stdout_bytes.capped || stderr_bytes.capped,
+                    &direct_log_path,
                 );
                 let mut tool_result = TypedToolResult::error(result);
                 tool_result.data = Some(BashResult {
@@ -311,9 +358,9 @@ impl TypedTool for BashTool {
                         let (stdout_bytes, stderr_bytes) =
                             drain_reader_tasks(stdout_handle, stderr_handle).await;
                         let stdout =
-                            split_stdout_and_cwd(&direct_or_pipe_stdout(&direct_log_path, &stdout_bytes).await)
+                            split_stdout_and_cwd(&direct_or_pipe_stdout(&direct_log_path, &stdout_bytes.bytes).await)
                                 .0;
-                        let stderr = String::from_utf8_lossy(&stderr_bytes);
+                        let stderr = String::from_utf8_lossy(&stderr_bytes.bytes);
                         let result = partial_output_text(
                             &stdout,
                             &stderr,
@@ -321,6 +368,11 @@ impl TypedTool for BashTool {
                                 "[Command timed out after {timeout_secs}s — partial output above]"
                             ),
                             &format!("command timed out after {timeout_secs}s"),
+                        );
+                        let result = append_capture_notice(
+                            result,
+                            stdout_bytes.capped || stderr_bytes.capped,
+                            &direct_log_path,
                         );
                         let mut tool_result = TypedToolResult::error(result);
                         tool_result.data = Some(BashResult {
@@ -343,10 +395,11 @@ impl TypedTool for BashTool {
 
         let stdout = stdout_handle.await.unwrap_or_default();
         let stderr = stderr_handle.await.unwrap_or_default();
+        let capture_capped = stdout.capped || stderr.capped;
 
         match wait_result {
             Ok(status) => {
-                let stdout = direct_or_pipe_stdout(&direct_log_path, &stdout).await;
+                let stdout = direct_or_pipe_stdout(&direct_log_path, &stdout.bytes).await;
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 // `cd` 改变了 path_base 时通知 workspace 并记录新值，回传给 LLM（#414）。
                 // 授权决议直贯：AllowAll 下 cd 出工作区时 path_base 跟随、workspace_root 不变。
@@ -359,7 +412,7 @@ impl TypedTool for BashTool {
                         return TypedToolResult::error(e.to_string());
                     }
                 }
-                let stderr = String::from_utf8_lossy(&stderr);
+                let stderr = String::from_utf8_lossy(&stderr.bytes);
                 let (exit_code, failure_detail) = exit_status_description(&status);
 
                 // 被信号终止时记 warn 日志，方便诊断 OOM kill / 外部 kill 等
@@ -437,6 +490,7 @@ impl TypedTool for BashTool {
                 } else {
                     format!("{}\n[cwd: {}]", display, current_cwd.display())
                 };
+                let output = append_capture_notice(output, capture_capped, &direct_log_path);
                 if status.success() {
                     TypedToolResult::success(output, bash_result)
                 } else {
@@ -447,9 +501,9 @@ impl TypedTool for BashTool {
             }
             Err(e) => {
                 // [DIAG] wait 失败时记 warn 日志，便于 #286 诊断
-                // stdout/stderr 在此分支仍是 Vec<u8>，先用 lossy 转成字符串
-                let stdout_lossy = String::from_utf8_lossy(&stdout);
-                let stderr_lossy = String::from_utf8_lossy(&stderr);
+                // stdout/stderr 在此分支仍是字节，先用 lossy 转成字符串
+                let stdout_lossy = String::from_utf8_lossy(&stdout.bytes);
+                let stderr_lossy = String::from_utf8_lossy(&stderr.bytes);
                 log::warn!(
                     target: crate::LOG_TARGET,
                     "wait_result failed: error={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
@@ -458,8 +512,8 @@ impl TypedTool for BashTool {
                     child_pid,
                     path_base,
                     start.elapsed().as_millis(),
-                    stdout.len(),
-                    stderr.len(),
+                    stdout.bytes.len(),
+                    stderr.bytes.len(),
                     preview(&stdout_lossy),
                     preview(&stderr_lossy),
                 );

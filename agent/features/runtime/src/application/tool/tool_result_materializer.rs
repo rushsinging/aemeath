@@ -352,10 +352,16 @@ fn bounded_tool_result_text(
         .collect();
     let omitted = omitted_chars(character_count, policy);
     let location = locator
-        .map(|value| format!("Full output saved to: {value}"))
-        .unwrap_or_else(|| "Full output unavailable because persistence failed.".to_string());
+        .map(|value| {
+            format!(
+                "Full output ({character_count} chars) is saved at: {value}\nThe saved file is COMPLETE and NOT truncated — read it directly; the head/tail below are only a preview."
+            )
+        })
+        .unwrap_or_else(|| {
+            "Full output could NOT be persisted and is unavailable — the head/tail below are all you get.".to_string()
+        });
     format!(
-        "<persisted-output>\nOutput too large. {location}\n\n--- head ({} chars) ---\n{}\n\n[... {} chars omitted ...]\n\n--- tail ({} chars) ---\n{}\n</persisted-output>",
+        "<persisted-output>\nPreview only. {location}\n\n--- head ({} chars) ---\n{}\n\n[... {} chars omitted from THIS PREVIEW ONLY ...]\n\n--- tail ({} chars) ---\n{}\n</persisted-output>",
         head.chars().count(),
         head,
         omitted,
