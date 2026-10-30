@@ -29,12 +29,17 @@ aemeath eval compact run \
 aemeath eval compact export --only-compacted --min-compacted-tokens 100000 \
     --limit 3 --output-dir /tmp/cases-big
 
-# 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，判卷=独立 --judge
-aemeath eval compact quiz \
-    --cases /tmp/compact-cases --summaries /tmp/compact-run \
-    --model "Zhipu Coding Plan/glm-5.3" \
-    --judge "Bailian Token Plan/qwen3.8-max" \
-    --limit 1 --output eval/compact/results/quiz.json
+# 续接问答（P3，两步式）：先出题落盘（题库固定），再多档/多摘要复用同一题库
+aemeath eval compact quiz generate \
+    --cases /tmp/compact-cases --model "Volcengine/deepseek-v4.1-flash" \
+    --reasoning max --limit 1 --output /tmp/quiz-questions.json
+
+aemeath eval compact quiz answer \
+    --cases /tmp/compact-cases --questions /tmp/quiz-questions.json \
+    --summaries /tmp/run-low \
+    --model "Volcengine/deepseek-v4.1-flash" \
+    --judge "OmniRoute/gpt-6.1-sol" --reasoning max \
+    --limit 1 --output /tmp/answer-low.json
 
 # 真实摘要质量（must_keep 召回 + 压缩率，用已落盘摘要，不重跑压缩）
 aemeath eval compact recall \
@@ -143,7 +148,42 @@ eval/compact/
 1.5s 假完成），本仓已顺手修复（放宽该校验，归并表为权威）。修复前 glm 行为
 PartialMapFallback ×5、召回 0.349（虚高）——**degraded 行的召回不可比**。
 
-### 续接问答（high 档思考，真实大 session）
+### 已归档评测记录
+
+`results/quiz_01a182e6_report.md`：真实会话 01a182e6（814K token）的三档 compact ×
+60 题续接问答完整记录（含三轮题库反转的方法学教训与复现命令）；原始数据
+`results/quiz_01a182e6_{questions,compact-low,compact-high,compact-max}_tier60.json`。
+
+结论：**默认档保持 low**（low 83% / high 90% / max 88%，high 成本 1.45×、max 2.7×）。
+
+### 出题标准决定结论（两次反转的教训，必读）
+
+| 题库 | early 正确率（low/high/max） | 看起来的结论 |
+|---|---|---|
+| 19 题（含环境读取类：路径/函数签名/分支名） | 0.57 / 0.71 / 0.86 | "档位提升显著，默认应 max" |
+| 60 题（只考语义决策类：decision/tradeoff/constraint/objective/root_cause） | 0.90 / 0.95 / 0.85 | "三档都够用，无差异，默认 low" |
+
+**环境读取类事实（文件路径、行号、分支名、commit、函数签名、命令输出）本就该被
+摘要抽象掉**，拿它出题等于测「摘要能否无损存盘」，会系统性放大档位差异。
+当前出题 prompt 已明确禁止该类题目，只允许语义决策类。
+
+### 二维矩阵（19 题旧题库，仅作方法学对照，结论已被 60 题推翻）
+
+| compact 档 | 压缩耗时 | ms/1K | summary | 答题 low | 答题 max | early（两种答题档） |
+|---|---|---|---|---|---|---|
+| low | 150s | 184.8 | 130587 | 13/19 | 14/19 | **0.57 / 0.57** |
+| high | 217s | 266.5 | 135876 | 15/19 | 16/19 | **0.71 / 0.71** |
+| max | 405s | 496.7 | 150748 | 17/19 | 16/19 | **0.86 / 0.86** |
+
+结论（与 6 题样本相反，样本量是关键）：
+
+1. **档位提升显著提升质量**：low 68% → high 79% → max 89%（+21pp），代价 2.7× 耗时；
+2. **early 段完全由 compact 档决定**（答题档 low/max 下 0.57/0.71/0.86 逐档一致）——
+   早期信息保留差异来自摘要质量，不是答题能力；early 正确率可直接作档位质量核心指标；
+3. mid 段恒 1.0；recent 段 ±1~2 题抖动属小样本噪声；
+4. 该结论基于含环境读取类的题库，**已被 60 题语义题库推翻**：三档均 90%+、无显著差异，默认档定为 **low**。
+
+### 续接问答（high 档思考，真实大 session，一步式历史记录）
 
 run（--reasoning high）：`quality=Llm`、550s、summary 60865 chars。
 quiz：6 题判对 3（rate 0.5）；**per_epoch：early 0.0 / mid 1.0 / recent 0.5**——

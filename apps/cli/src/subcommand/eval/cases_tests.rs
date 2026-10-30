@@ -38,7 +38,7 @@ fn ranks_higher_frequency_first_and_applies_limit() {
         "stp_ghi789",
     ]);
     assert_eq!(
-        rank_identifiers(&input, 2),
+        rank_identifiers(&input, 2, 1),
         vec!["run_abc123", "mem_def456"]
     );
 }
@@ -46,5 +46,31 @@ fn ranks_higher_frequency_first_and_applies_limit() {
 #[test]
 fn ties_are_broken_alphabetically_for_stability() {
     let input = texts(&["beta.rs alpha.rs"]);
-    assert_eq!(rank_identifiers(&input, 10), vec!["alpha.rs", "beta.rs"]);
+    assert_eq!(rank_identifiers(&input, 10, 1), vec!["alpha.rs", "beta.rs"]);
+}
+
+#[test]
+fn rank_identifiers_keeps_only_frequent_items() {
+    // 出现 3 次保留，出现 1-2 次被过滤（一次性路径噪声）。
+    let input = texts(&[
+        "run_abc123 run_abc123 run_abc123",
+        "mem_def456 mem_def456",
+        "stp_ghi789",
+    ]);
+    assert_eq!(rank_identifiers(&input, 1000, 3), vec!["run_abc123"]);
+}
+
+#[test]
+fn rank_identifiers_falls_back_to_top_n_when_no_frequent_items() {
+    let input = texts(&["run_abc123 mem_def456"]);
+    assert_eq!(
+        rank_identifiers(&input, 10, 3),
+        vec!["mem_def456", "run_abc123"]
+    );
+}
+
+#[test]
+fn rank_identifiers_respects_limit_after_frequency_filter() {
+    let input = texts(&["run_a1b2c3 run_a1b2c3 run_a1b2c3 run_d4e5f6 run_d4e5f6 run_d4e5f6"]);
+    assert_eq!(rank_identifiers(&input, 1, 3), vec!["run_a1b2c3"]);
 }

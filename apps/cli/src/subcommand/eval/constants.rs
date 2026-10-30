@@ -56,6 +56,9 @@ pub(crate) static PATH_PATTERN: Lazy<Regex> = Lazy::new(|| {
     .expect("path regex")
 });
 
+/// must_keep 默认最低出现次数（#2133）：只出现一次的路径多为一次性噪声。
+pub(crate) const MIN_MUST_KEEP_FREQUENCY: usize = 3;
+
 /// 评测脚本自身的高频路径，不代表上下文事实。
 pub(crate) const NOISE_PREFIXES: [&str; 3] = ["eval/compact/", "results/", "datasets/"];
 
@@ -94,8 +97,15 @@ pub(crate) const QUIZ_SOURCE_TOKEN_BUDGET: usize = 800_000;
 /// 续接问答（P3）：答题者可见的 summary + tail 预算（估算 token）。
 pub(crate) const ANSWER_SOURCE_TOKEN_BUDGET: usize = 200_000;
 
-/// 续接问答（P3）：单 case 出题数（early/mid/recent 三段各 2 题）。
-pub(crate) const QUIZ_QUESTION_COUNT: usize = 6;
+/// 续接问答（P3）：题数按 early 规模浮动——每个该 token 数出 1 题
+/// （814K early → 达到上限 60 题）。
+pub(crate) const QUIZ_TOKENS_PER_QUESTION: usize = 5_000;
+
+/// 续接问答（P3）：题数下限。
+pub(crate) const QUIZ_MIN_QUESTIONS: usize = 10;
+
+/// 续接问答（P3）：题数上限（三段各 20 题）。
+pub(crate) const QUIZ_MAX_QUESTIONS: usize = 60;
 
 /// 读取类工具：路径集合差分用于衡量「压缩后重复读取」。
 pub(crate) const TOOL_READ_NAMES: [&str; 3] = ["Read", "Grep", "Glob"];

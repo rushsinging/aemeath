@@ -31,3 +31,12 @@ fn truncate_by_tokens_respects_cjk_weight() {
 fn truncate_by_tokens_keeps_short_text_intact() {
     assert_eq!(truncate_by_tokens("短文本", 60_000), "短文本");
 }
+
+#[test]
+fn question_count_floats_with_early_size() {
+    // 每 5K token 一题，clamp [10, 60]
+    assert_eq!(question_count_for(20_000), 10);
+    assert_eq!(question_count_for(100_000), 20);
+    assert_eq!(question_count_for(814_000), 60);
+    assert_eq!(question_count_for(2_000_000), 60);
+}

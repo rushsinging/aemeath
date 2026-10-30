@@ -522,6 +522,8 @@ pub struct CompactLlmBinding {
     pub compact_context_window: Option<usize>,
     /// compact 调用的推理档位（#2133：语义任务默认开思考，成本经 usage 统计）。
     pub reasoning: share::reasoning::ReasoningLevel,
+    /// map 阶段并发上限（配置 `context.compact_concurrency`，默认 5，上限 10）。
+    pub max_concurrency: usize,
 }
 
 #[derive(Clone)]

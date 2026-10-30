@@ -43,19 +43,23 @@ async fn run_compact(command: CompactEvalCommands) {
             limit,
             min_steps,
             max_must_keep,
+            min_must_keep_frequency,
             max_tokens,
             only_compacted,
             min_compacted_tokens,
-        } => cases::run(
-            root.unwrap_or_else(default_session_root),
+            session,
+        } => cases::run(cases::ExportOptions {
+            root: root.unwrap_or_else(default_session_root),
             output_dir,
             limit,
             min_steps,
             max_must_keep,
+            min_must_keep_frequency,
             max_tokens,
             only_compacted,
             min_compacted_tokens,
-        ),
+            session,
+        }),
         CompactEvalCommands::Score {
             cases,
             summaries,
@@ -73,15 +77,39 @@ async fn run_compact(command: CompactEvalCommands) {
             model,
             reasoning,
         } => run::run(cases, output_dir, limit, model, reasoning).await,
-        CompactEvalCommands::Quiz {
-            cases,
-            summaries,
-            model,
-            judge,
-            reasoning,
-            limit,
-            output,
-        } => quiz::run(cases, summaries, model, judge, reasoning, limit, output).await,
+        CompactEvalCommands::Quiz { command } => match command {
+            crate::args::QuizCommands::Generate {
+                cases,
+                model,
+                reasoning,
+                limit,
+                output,
+            } => quiz::generate(cases, model, reasoning, limit, output).await,
+            crate::args::QuizCommands::Answer {
+                cases,
+                questions,
+                summaries,
+                model,
+                judge,
+                reasoning,
+                judge_reasoning,
+                limit,
+                output,
+            } => {
+                quiz::answer(
+                    cases,
+                    questions,
+                    summaries,
+                    model,
+                    judge,
+                    reasoning,
+                    judge_reasoning,
+                    limit,
+                    output,
+                )
+                .await
+            }
+        },
         CompactEvalCommands::Recall {
             root,
             limit,

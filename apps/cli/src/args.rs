@@ -163,6 +163,72 @@ pub enum EvalCommands {
     },
 }
 
+/// `aemeath eval compact quiz` 子命令集（两步式）。
+#[derive(Subcommand)]
+pub enum QuizCommands {
+    /// 出题：答题模型读 early 历史，产出题库文件（后续多档复用）
+    Generate {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// 出题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 出题推理档位（缺省 low，跟随全局默认）
+        #[arg(long, default_value = "low")]
+        reasoning: String,
+
+        /// 最多为多少个 case 出题
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 题库输出路径（JSON）
+        #[arg(long)]
+        output: PathBuf,
+    },
+
+    /// 答题+判卷：用固定题库，多档位可复用保证可比
+    Answer {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// generate 产出的题库文件
+        #[arg(long)]
+        questions: PathBuf,
+
+        /// 压缩输出目录（<case_id>.summary.txt；可含 run_summary.json 取 tail 条数）
+        #[arg(long)]
+        summaries: PathBuf,
+
+        /// 答题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 独立判卷模型 selection（评测时显式指定，不设默认）
+        #[arg(long)]
+        judge: String,
+
+        /// 答题推理档位（缺省 low，跟随全局默认）
+        #[arg(long, default_value = "low")]
+        reasoning: String,
+
+        /// 判卷推理档位（缺省跟随 --reasoning；判卷质量优先时可单独抬高）
+        #[arg(long)]
+        judge_reasoning: Option<String>,
+
+        /// 最多评多少个 case
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 报告输出路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
 /// `aemeath eval compact` 子命令集。
 #[derive(Subcommand)]
 pub enum CompactEvalCommands {
@@ -200,8 +266,12 @@ pub enum CompactEvalCommands {
         min_steps: usize,
 
         /// 每个 case 的 must_keep 上限（按出现频次取前 N）
-        #[arg(long, default_value_t = 200)]
+        #[arg(long, default_value_t = 1000)]
         max_must_keep: usize,
+
+        /// must_keep 最低出现次数（默认 3；只出现一次的路径多为噪声，不计入）
+        #[arg(long, default_value_t = 3)]
+        min_must_keep_frequency: usize,
 
         /// 跳过估算 token 超过该值的会话（超出压缩窗口的巨型历史不适合评测）
         #[arg(long, default_value_t = 3_000_000)]
@@ -214,6 +284,10 @@ pub enum CompactEvalCommands {
         /// 只导出被压缩历史（early）估算 token 不低于该值的会话
         #[arg(long, default_value_t = 100_000)]
         min_compacted_tokens: u64,
+
+        /// 只导出指定会话（dataset 目录名 stem，如 01a182e6-0323-...）
+        #[arg(long)]
+        session: Option<String>,
     },
 
     /// 生产实际反馈指标（重问率/重复读取/错误率/中断/不满信号/成本）
@@ -251,41 +325,15 @@ pub enum CompactEvalCommands {
         model: Option<String>,
 
         /// 压缩调用的推理档位（off/minimal/low/medium/high/xhigh/max）；
-        /// 缺省跟随 context.compact_reasoning（未配置=max）
+        /// 缺省跟随 context.compact_reasoning（未配置=low）
         #[arg(long)]
         reasoning: Option<String>,
     },
 
-    /// 续接问答（P3）：出题=答题模型读 early 历史，答题=只看 summary+tail，
-    /// 判卷=独立 --judge 模型（无默认值，未指定拒绝运行）
+    /// 续接问答（P3，两步式）：generate 出题落盘 → answer 多档复用同一题库
     Quiz {
-        /// export 产生的 case 目录
-        #[arg(long)]
-        cases: PathBuf,
-
-        /// run 产生的 summary 目录（<case_id>.summary.txt）
-        #[arg(long)]
-        summaries: PathBuf,
-
-        /// 出题与答题模型 selection
-        #[arg(long)]
-        model: String,
-
-        /// 独立判卷模型 selection（评测时显式指定，不设默认）
-        #[arg(long)]
-        judge: String,
-
-        /// 出题/答题/判卷的推理档位；缺省 max（语义任务开满思考，成本经 usage 统计）
-        #[arg(long, default_value = "max")]
-        reasoning: String,
-
-        /// 最多评多少个 case
-        #[arg(long, default_value_t = 1)]
-        limit: usize,
-
-        /// 输出 JSON 路径（缺省打印到 stdout）
-        #[arg(long)]
-        output: Option<PathBuf>,
+        #[command(subcommand)]
+        command: QuizCommands,
     },
 
     /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）
@@ -299,7 +347,7 @@ pub enum CompactEvalCommands {
         limit: usize,
 
         /// 每个 session 的 must_keep 上限（按出现频次取前 N）
-        #[arg(long, default_value_t = 200)]
+        #[arg(long, default_value_t = 1000)]
         max_must_keep: usize,
 
         /// 输出 JSON 路径（缺省打印到 stdout）

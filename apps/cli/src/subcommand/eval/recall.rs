@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use super::cases::rank_identifiers;
+use super::constants::MIN_MUST_KEEP_FREQUENCY;
 use super::dataset::{estimate_tokens, iter_datasets, load_session, message_text, SessionSnapshot};
 use super::score::must_keep_recall;
 use super::telemetry::write_or_print;
@@ -74,7 +75,7 @@ pub(crate) fn evaluate(
     let early_chars = early_texts.join("\n");
     let early_tokens = estimate_tokens(&early_chars);
     let summary_tokens = estimate_tokens(summary);
-    let must_keep = rank_identifiers(&early_texts, max_must_keep);
+    let must_keep = rank_identifiers(&early_texts, max_must_keep, MIN_MUST_KEEP_FREQUENCY);
     let (recall, missed) = must_keep_recall(&must_keep, summary);
 
     SessionRecall {

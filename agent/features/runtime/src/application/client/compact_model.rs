@@ -224,8 +224,13 @@ impl CompactModelResolver {
     pub fn to_llm_binding(&self) -> Option<context::CompactLlmBinding> {
         match self.resolve() {
             Ok(target) => {
-                let reasoning = self.config.committed_snapshot().context_compact_reasoning();
-                Some(project_to_llm_binding(&target, reasoning))
+                let snapshot = self.config.committed_snapshot();
+                Some(project_to_llm_binding(
+                    &target,
+                    snapshot.context_compact_reasoning(),
+                    snapshot.context_compact_max_output_tokens(),
+                    snapshot.context_compact_concurrency(),
+                ))
             }
             Err(error) => {
                 log::warn!(
@@ -250,15 +255,20 @@ impl CompactModelResolver {
         Ok(project_to_llm_binding(
             &target,
             snapshot.context_compact_reasoning(),
+            snapshot.context_compact_max_output_tokens(),
+            snapshot.context_compact_concurrency(),
         ))
     }
 }
 
 /// `CompactModelTarget` → `CompactLlmBinding` 唯一投影（与生产同构造）。
-/// reasoning 来自 `context.compact_reasoning`（默认 High：语义任务开思考）。
+/// `reasoning` 来自 `context.compact_reasoning`（默认 Max）；
+/// `compact_output_budget` 来自 `context.compact_max_output_tokens`（默认 64K）。
 fn project_to_llm_binding(
     target: &CompactModelTarget,
     reasoning: share::reasoning::ReasoningLevel,
+    compact_output_budget: u32,
+    max_concurrency: usize,
 ) -> context::CompactLlmBinding {
     let binding = target.binding();
     let window = target.context_window().or_else(|| {
@@ -275,10 +285,12 @@ fn project_to_llm_binding(
     context::CompactLlmBinding {
         invoker: std::sync::Arc::clone(&binding.provider),
         model: binding.model.clone(),
-        max_output_tokens: crate::application::constants::COMPACT_MAX_OUTPUT_TOKENS
-            .min(binding.max_tokens.max(1)),
+        // 预算来自 context.compact_max_output_tokens（默认 64K），仍受模型
+        // max_tokens 上限约束（模型配置 20000 时实际生效 20000）。
+        max_output_tokens: compact_output_budget.min(binding.max_tokens.max(1)),
         compact_context_window: window,
         reasoning,
+        max_concurrency,
     }
 }
 
