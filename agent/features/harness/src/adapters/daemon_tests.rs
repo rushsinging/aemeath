@@ -283,7 +283,10 @@ async fn trigger_runs_cycle_and_writes_component_file() {
                     registry,
                     Arc::new(JsonLlm),
                     lesson_store,
-                    share::config::RsiConfig::default(),
+                    share::config::RsiConfig {
+                        execution_mode: share::config::RsiExecutionMode::SinglePhase,
+                        ..Default::default()
+                    },
                 )
                 .with_evidence_stream(Box::new(stream)),
             ),

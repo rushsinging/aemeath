@@ -2,13 +2,13 @@
 
 > 本文是 RSI 改进质量的第一真相源：**提示词文本即产品质量**。改动任一 prompt MUST 同步本文，并在 PR 中附 e2e 证据（真实模型输出片段）。
 >
-> 代码位置：`agent/features/harness/src/domain/improvement.rs`（`build_block_prompt` / `run_compose_phase` / `render_evidence_block`）。
+> 代码位置：`agent/features/harness/src/domain/improvement.rs`（`build_block_prompt` / `run_two_phase_cycle` / `run_compose_phase` / `render_route_evidence_block`）。
 
 ## 0. 必读：四个不能破坏的点
 
 > 改这份契约前先读这四条——它们每一个都对应真实故障，破坏后 RSI 会静默产出劣质改动（没有报错，只有质量下降）。
 
-1. **`MUST 引用 signal id` 门禁（§2.2）**——这是「证据驱动」的全部意义。去掉它，模型会写通用套话，组件被无依据的编辑反复重写。
+1. **`MUST 引用 evidence_refs` 门禁（§2.2）**——这是「证据驱动」的全部意义。模型只引用 E0/E1 短编号，runtime 必须映射完整 signal id；去掉它会回到无依据编辑或长 signal 抄错。
 2. **`no_change` 是正当答案（§2.2/§3.2）**——任何暗示「必须产出编辑」的措辞都会诱发凑数提案。真实故障：模型曾为空壳写空泛规则。
 3. **两阶段分工不可合并（§1）**——改进块看「局部证据」，Compose 看「周期终态」。混为一谈会失去块间矛盾仲裁能力。
 4. **改动 MUST 走 §7 验收**——prompt 改动不是文档修改，是真模型行为变更：至少一次真模型 e2e + `proposal_rejected` 为空 + dry-run 报告可读。
@@ -22,7 +22,7 @@
 | **改进块**（Block） | `build_block_prompt` | 每数据源块 1 次 | 看证据 + 组件现状 + 历史经验 → 提案编辑 |
 | **周期汇总**（Compose） | `run_compose_phase` 内联 | 每周期 1 次（有采纳时） | 看本周期全部采纳 + 组件终态 → 仲裁矛盾/合并/精炼 |
 
-两阶段共用同一应答信封（`BlockProposal`）与同一落盘链路（校验 → 整份作废 → 原子写 → lesson 回写 → 事件流）。
+> 当前默认执行模式为 **two_phase**：宿主先生成受限候选，诊断选择固定组件，执行只写正文。`single_phase` 保留为兼容回退路径，并同样接受路由门禁校验。两条路径共用落盘链路（校验 → 整份作废 → 原子写 → lesson 回写 → 事件流）。
 
 ## 2. 改进块提示词
 

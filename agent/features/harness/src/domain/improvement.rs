@@ -1365,6 +1365,10 @@ pub async fn run_two_phase_cycle(
                         reason,
                     });
                 }
+                preview_lines.push(format!(
+                    "  [route] {} → {}（唯一候选）",
+                    fact.signal.signal_id, component
+                ));
                 route_plans.push(TwoPhaseRoutePlan {
                     fact,
                     candidates: vec![component],
@@ -1379,6 +1383,15 @@ pub async fn run_two_phase_cycle(
                         reason,
                     });
                 }
+                preview_lines.push(format!(
+                    "  [route] {} → candidates: {}",
+                    fact.signal.signal_id,
+                    candidates
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
                 route_plans.push(TwoPhaseRoutePlan { fact, candidates });
             }
             crate::domain::routing::RouteDecision::Unresolved { reason } => {
@@ -1386,9 +1399,13 @@ pub async fn run_two_phase_cycle(
                     recorder.record(&crate::domain::events::RsiCycleEvent::RouteUnresolved {
                         block_index: 0,
                         signal_id: fact.signal.signal_id.clone(),
-                        reason,
+                        reason: reason.clone(),
                     });
                 }
+                preview_lines.push(format!(
+                    "  [route] {} → unresolved（{}）",
+                    fact.signal.signal_id, reason
+                ));
             }
         }
     }
@@ -1540,6 +1557,10 @@ pub async fn run_two_phase_cycle(
                 reason: issue.route_reason.clone(),
             });
         }
+        preview_lines.push(format!(
+            "  [route] {} → {}（diagnosis）",
+            plan.fact.signal.signal_id, component
+        ));
         diagnosed_issues.push(DiagnosedIssue {
             component: component.to_string(),
             target_signal: plan.fact.signal.signal_id.clone(),
@@ -1596,6 +1617,10 @@ pub async fn run_two_phase_cycle(
                 },
             );
         }
+        preview_lines.push(format!(
+            "  [execution] fixed component {component_id} ← {}",
+            signal_ids.join(", ")
+        ));
         let issue_block = issues
             .iter()
             .enumerate()

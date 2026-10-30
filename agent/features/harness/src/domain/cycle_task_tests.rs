@@ -139,6 +139,7 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
         llm.clone(),
         lesson_store,
         RsiConfig {
+            execution_mode: share::config::RsiExecutionMode::SinglePhase,
             chunk_max_components: 4,
             ..RsiConfig::default()
         },
@@ -259,6 +260,7 @@ async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
         llm.clone(),
         lesson_store,
         RsiConfig {
+            execution_mode: share::config::RsiExecutionMode::SinglePhase,
             chunk_max_components: 4,
             ..RsiConfig::default()
         },
@@ -366,6 +368,12 @@ async fn two_phase_cycle_uses_router_and_fixed_execution() {
         "执行 prompt 必须固定组件：{}",
         prompts[1]
     );
+    assert!(
+        outcome.summary.contains("[route]")
+            && outcome.summary.contains("[execution] fixed component"),
+        "L5 输出必须展示路由与固定执行：{}",
+        outcome.summary
+    );
 }
 
 /// 完整周期：Compose 必须使用采纳前 Active lesson 快照，避免历史经验
@@ -447,6 +455,7 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
         llm.clone(),
         lesson_store,
         RsiConfig {
+            execution_mode: share::config::RsiExecutionMode::SinglePhase,
             chunk_max_components: 4,
             ..RsiConfig::default()
         },

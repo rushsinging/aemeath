@@ -26,13 +26,13 @@ pub(crate) fn default_evidence_block_runs() -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RsiExecutionMode {
-    /// 单阶段：证据 → 一次提案 → 落盘（v1 行为，默认保持兼容）。
-    #[default]
+    /// 单阶段：证据 → 一次提案 → 落盘（v1 兼容路径，带路由止血校验）。
     SinglePhase,
     /// 诊断优先：每块 1 次诊断只产出 issue，跨块汇总，执行派发由后续
     /// 强度门禁（#2092）决定——本模式当前**不落盘**。
     DiagnoseOnly,
     /// 两阶段：宿主路由候选 → 诊断选择固定组件 → 执行只写该组件正文。
+    #[default]
     TwoPhase,
 }
 
