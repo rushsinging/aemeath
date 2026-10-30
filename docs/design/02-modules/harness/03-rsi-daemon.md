@@ -66,6 +66,8 @@ enum RsiControlAck {
 | `chunk_max_components` | 待废弃 | v1 按组件分块的遗留参数，语义降级为「单块内组件面体积兜底」（主分块单位是数据源块，04 分片 §2A.5） |
 | `execution_mode` | `two_phase` | 改进执行模式：`two_phase`（默认：宿主路由候选 → 诊断选择固定组件 → 执行只写正文）/ `single_phase`（一次提案即落盘，v1 兼容路径，带路由止血校验）/ `diagnose_only`（仅诊断，不落盘） |
 
+**内建 prose 组件 bootstrap**：`guardrails/default` 与 `tool-guidance/default` 是宿主 canonical 职责面，不属于 RSI 动态创建的任意组件。正式 `rsi run` / `rsi serve` 装配时若文件缺失，宿主原子创建最小骨架（`# Guardrails\n` / `# Tool Guidance\n`），幂等且 NEVER 覆盖用户文件；`rsi run --dry-run` 只在虚拟 registry 中列出缺失骨架并参与路由/执行预览，NEVER 写盘。`rsi history` / `rsi rollback` 保持只读装配，不触发创建。
+
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 
 ### 两种执行模式

@@ -26,3 +26,4 @@
 7. **职责边界（2026-10-22 拍板）**：harness daemon 保持单一职责（纯组件治理），reflect NEVER 进入 harness 进程（保持主进程 detached 现状，PreCompact 保留）；执行模式两档——`aemeath rsi run`（一次性）与 `aemeath rsi serve`（后台定时），TaskKind 插拔面保留、当前仅 HarnessRsi。
 8. **提示词即产品**（2026-10-25）：改进块与 Compose 两处 prompt 是 RSI 质量的第一真相源，全文与设计理由见 [06-prompts.md](06-prompts.md)；改动任一 prompt MUST 同步该分片并附真模型 e2e 证据。
 11. **signal → 组件受限路由**（2026-10-30）：宿主先生成候选组件，诊断只能在候选 index 内选择，执行阶段固定组件且 NEVER 输出 component id/action；Skill 证据按来源上下文精确匹配，未知归属 unresolved，NEVER 兜底写入全局组件。模型只复制 E0/E1 短证据编号，完整 signal id 由 runtime 映射并持久化。
+12. **canonical prose bootstrap**（2026-10-31）：`guardrails/default` 与 `tool-guidance/default` 是宿主内建职责面；正式 RSI 装配缺失时自动创建最小骨架且 NEVER 覆盖用户文件，dry-run 仅虚拟可见并零写盘。RSI 仍不可动态创建任意组件。

@@ -42,6 +42,7 @@
   - 通道 A：system prompt stable 段尾（prompt caching 友好、每 run 必见；代价：修改使缓存失效）
   - 通道 B：user-context 消息（与 AGENTS.md 同通道；改动不破缓存）
 - 注入内容：跨工具使用技巧 prose（工具选择、超时策略、分段读取、大结果处理）——RSI 证据最丰富（工具误用/重试信号）的槽位。
+- **canonical bootstrap**：c2/c4 是宿主内建职责面。正式 RSI 装配缺失文件时由宿主原子创建最小骨架（标题一行），幂等且 NEVER 覆盖用户内容；dry-run 仅虚拟列出骨架，NEVER 写盘。
 
 ### c6 config
 - `aemeath.json` 进 watch 面；变更走 run 边界生效 + Remind 通知（复用既有 reload 策略）。

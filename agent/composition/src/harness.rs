@@ -5,6 +5,7 @@
 
 use harness::adapters::daemon_serve::{run_rsi_daemon, RsiDaemonEndpoints};
 use harness::domain::task::TaskRegistry;
+use harness::ComponentRegistry;
 use std::path::Path;
 
 /// `aemeath rsi serve` 的退出结果。
@@ -40,7 +41,7 @@ pub async fn run_rsi_serve(on_ready: impl FnOnce(&Path)) -> RsiServeExit {
             }
         }
     };
-    let registry = match wire_component_registry(&config) {
+    let registry = match wire_bootstrapped_component_registry(&config) {
         Ok(registry) => registry,
         Err(error) => {
             return RsiServeExit::Failure {
@@ -234,50 +235,166 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
     Ok(Arc::new(ProductionRsiLlm { client, model }))
 }
 
-/// 装配组件 registry：全局 guardrails/tool_guidance（FS）+ scripts 目录
-/// 扫描，经组合 registry 合并为单一视图。组件面按接入进度扩展
-///（skills 目录扫描随 #2018）。
-pub fn wire_component_registry(
-    config: &share::config::Config,
-) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
+#[cfg(test)]
+#[path = "harness_tests.rs"]
+mod harness_tests;
+
+/// 内建 prose 组件的装配模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComponentBootstrapMode {
+    /// 历史查询/回滚等只读命令：不创建、不虚拟缺失组件。
+    None,
+    /// `rsi run --dry-run`：缺失内建职责面只在 registry 中虚拟可见。
+    DryRun,
+    /// 正式 RSI 运行/daemon：缺失内建职责面落盘最小骨架。
+    Formal,
+}
+
+fn builtin_prose_component_paths_under(
+    agents_dir: &Path,
+) -> HashMap<harness::ComponentId, std::path::PathBuf> {
     let mut component_paths = HashMap::new();
     component_paths.insert(
         harness::ComponentId {
             kind: harness::ComponentKind::Guardrails,
             name: harness::ComponentName::new("default"),
         },
-        share::config::paths::global_guardrails_path(),
+        agents_dir.join("guardrails.md"),
     );
     component_paths.insert(
         harness::ComponentId {
             kind: harness::ComponentKind::ToolGuidance,
             name: harness::ComponentName::new("default"),
         },
-        share::config::paths::global_tool_guidance_path(),
+        agents_dir.join("tool_guidance.md"),
     );
-    // overlay（c1）：全局 AGENTS.md（#2019 registry 化；项目链注入侧不变）
     component_paths.insert(
         harness::ComponentId {
             kind: harness::ComponentKind::SystemPromptOverlay,
             name: harness::ComponentName::new("global"),
         },
-        share::config::paths::global_agents_md_path(),
+        agents_dir.join("AGENTS.md"),
     );
-    let prose_registry: Box<dyn harness::ComponentRegistry + Send> =
-        Box::new(harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths));
-    let skills_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
-        harness::adapters::skills_registry::SkillsDirectoryRegistry::new(
-            share::config::paths::global_skills_dir(),
+    component_paths
+}
+
+fn builtin_prose_bootstrap_defaults() -> HashMap<harness::ComponentId, harness::ComponentContent> {
+    let mut defaults = HashMap::new();
+    defaults.insert(
+        harness::ComponentId {
+            kind: harness::ComponentKind::Guardrails,
+            name: harness::ComponentName::new("default"),
+        },
+        harness::ComponentContent {
+            frontmatter: None,
+            body: "# Guardrails\n".to_string(),
+        },
+    );
+    defaults.insert(
+        harness::ComponentId {
+            kind: harness::ComponentKind::ToolGuidance,
+            name: harness::ComponentName::new("default"),
+        },
+        harness::ComponentContent {
+            frontmatter: None,
+            body: "# Tool Guidance\n".to_string(),
+        },
+    );
+    defaults
+}
+
+/// 正式装配前补齐内建 prose 职责面：只创建缺失骨架，NEVER 覆盖用户文件。
+fn ensure_builtin_prose_components_at(
+    agents_dir: &Path,
+) -> Result<Vec<harness::ComponentId>, HarnessError> {
+    let component_paths = builtin_prose_component_paths_under(agents_dir);
+    let defaults = builtin_prose_bootstrap_defaults();
+    let mut ids: Vec<_> = defaults.keys().cloned().collect();
+    ids.sort();
+    let mut missing = Vec::new();
+    for id in ids {
+        let Some(content) = defaults.get(&id) else {
+            continue;
+        };
+        let Some(path) = component_paths.get(&id) else {
+            continue;
+        };
+        if !path.exists() {
+            missing.push((id, content.clone()));
+        }
+    }
+    let mut registry =
+        harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths);
+    let mut created = Vec::new();
+    for (id, content) in missing {
+        registry.write(&id, &content)?;
+        log::info!(target: crate::LOG_TARGET, "内建 prose 组件缺失，已创建最小骨架：{id}");
+        created.push(id);
+    }
+    Ok(created)
+}
+
+fn wire_component_registry_under(
+    agents_dir: &Path,
+    mode: ComponentBootstrapMode,
+) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
+    if mode == ComponentBootstrapMode::Formal {
+        ensure_builtin_prose_components_at(agents_dir)?;
+    }
+    let component_paths = builtin_prose_component_paths_under(agents_dir);
+    let prose_registry: Box<dyn harness::ComponentRegistry + Send> = match mode {
+        ComponentBootstrapMode::DryRun => Box::new(
+            harness::adapters::filesystem::FilesystemComponentRegistry::with_bootstrap_defaults(
+                component_paths,
+                builtin_prose_bootstrap_defaults(),
+            ),
         ),
+        ComponentBootstrapMode::None | ComponentBootstrapMode::Formal => Box::new(
+            harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths),
+        ),
+    };
+    let skills_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
+        harness::adapters::skills_registry::SkillsDirectoryRegistry::new(agents_dir.join("skills")),
     );
     // c8 plugins 不进 RSI 可编辑面（2026-10-24 拍板：客户端/UI 相关，
     // 暂停 RSI 自动编辑；seam 执行面（run 边界 reload）保持不变）。
-    let _ = config;
     let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
         prose_registry,
         skills_registry,
     ]);
     Ok(Arc::new(tokio::sync::Mutex::new(Box::new(composite))))
+}
+
+/// 装配组件 registry：全局 guardrails/tool_guidance（FS）+ scripts 目录
+/// 扫描，经组合 registry 合并为单一视图。组件面按接入进度扩展
+///（skills 目录扫描随 #2018）。
+pub fn wire_component_registry(
+    _config: &share::config::Config,
+) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
+    wire_component_registry_under(
+        &share::config::paths::global_agents_dir(),
+        ComponentBootstrapMode::None,
+    )
+}
+
+/// 正式 RSI 运行/daemon 装配：缺失的内建 prose 职责面先落盘最小骨架。
+pub fn wire_bootstrapped_component_registry(
+    _config: &share::config::Config,
+) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
+    wire_component_registry_under(
+        &share::config::paths::global_agents_dir(),
+        ComponentBootstrapMode::Formal,
+    )
+}
+
+/// dry-run 装配：缺失的内建职责面只虚拟可见，NEVER 写盘。
+pub fn wire_dry_run_component_registry(
+    _config: &share::config::Config,
+) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
+    wire_component_registry_under(
+        &share::config::paths::global_agents_dir(),
+        ComponentBootstrapMode::DryRun,
+    )
 }
 
 /// 经验库路径（`{agents_dir}/harness/library.jsonl`，独立于 memory corpus）。
@@ -347,7 +464,12 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
             }
         }
     };
-    let registry = match wire_component_registry(&config) {
+    let registry_result = if dry_run {
+        wire_dry_run_component_registry(&config)
+    } else {
+        wire_bootstrapped_component_registry(&config)
+    };
+    let registry = match registry_result {
         Ok(registry) => registry,
         Err(error) => {
             return RsiRunExit::Failure {
