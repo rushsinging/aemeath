@@ -28,10 +28,10 @@ pub fn background_process_status(lang: &str) -> &'static str {
 pub fn background_process_logs(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"读取后台进程日志：运行中与完成后皆可查。缺省读尾部；携带上次返回的 cursor 只读增量（增量游标，多次读取幂等、不破坏后续通知）。优先等待完成通知；不要为等完成而对同一 id 反复调用。"#
+            r#"读取后台进程日志：运行中与完成后皆可查。缺省读尾部窗口（只含最后 max_bytes 字节，结果首行标注字节区间，前面未包含的字节数会被写明）；携带上次返回的 cursor 只读增量，cursor=0 从头读（增量游标，多次读取幂等、不破坏后续通知）。结果同时给出全量日志文件路径——需要完整日志时直接读该文件，不要反复调用本工具。优先等待完成通知。"#
         }
         _ => {
-            r#"Read a background process's log: works while running and after completion. Omit cursor for the tail; pass the previously returned cursor to read only new output (incremental cursor; reads are idempotent and never interfere with completion notifications). Prefer the completion notification; do not repeatedly call this tool on the same id just to wait for completion."#
+            r#"Read a background process's log: works while running and after completion. Omit cursor for a tail window (only the last max_bytes bytes; the result header states the byte range and how many earlier bytes are excluded). Pass the previously returned cursor to read only new output, or cursor=0 to read from the beginning (incremental cursor; reads are idempotent and never interfere with completion notifications). The result also gives the full log file path — read that file directly when you need the complete log instead of calling this tool repeatedly. Prefer the completion notification."#
         }
     }
 }

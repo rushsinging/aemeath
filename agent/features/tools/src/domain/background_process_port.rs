@@ -144,6 +144,8 @@ fn watch_result(
         outcome,
         detail,
         log_tail: String::new(),
+        log_start_offset: 0,
+        log_file: None,
     }
 }
 
@@ -435,6 +437,9 @@ mod tests {
                 text,
                 cursor: end as u64,
                 total_written: size,
+                start_offset: start as u64,
+                is_tail: cursor.is_none(),
+                log_file: None,
             })
         }
 

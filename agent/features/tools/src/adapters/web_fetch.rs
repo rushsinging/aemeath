@@ -260,21 +260,12 @@ impl TypedTool for WebFetchTool {
                         }
                     };
 
-                    // Truncate very large responses safely
-                    let max_chars = 50_000;
-                    let (content, truncated) = if extracted.markdown.len() > max_chars {
-                        let truncated =
-                            share::string_idx::slice_head(&extracted.markdown, max_chars);
-                        let truncated_content = format!(
-                            "{}...\n\n[truncated, showing first {} chars of {} total]",
-                            truncated,
-                            truncated.chars().count(),
-                            extracted.markdown.chars().count()
-                        );
-                        (truncated_content, true)
-                    } else {
-                        (extracted.markdown.clone(), false)
-                    };
+                    // 全文交给通用 materializer 兜底（落盘 + head/tail 预览）：
+                    // 工具层**NEVER**设源头字符硬顶——源头截断会让全文不可读回，
+                    // 违背 `specs/3.5-tools.md`「对环境工具不设硬顶」原则。
+                    // `truncated` 字段保留为兼容位，恒 false。
+                    let content = extracted.markdown.clone();
+                    let truncated = false;
 
                     TypedToolResult::success(
                         content.clone(),

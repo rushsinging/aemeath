@@ -29,11 +29,11 @@ async fn drain_reader_tasks_times_out_and_aborts_stuck_readers() {
     // 模拟管道永不 EOF（后台进程持有写端）：reader 永远 pending。
     let stdout_handle = tokio::spawn(async move {
         let _marker = stdout_marker;
-        std::future::pending::<Vec<u8>>().await
+        std::future::pending::<stream::CapturedOutput>().await
     });
     let stderr_handle = tokio::spawn(async move {
         let _marker = stderr_marker;
-        std::future::pending::<Vec<u8>>().await
+        std::future::pending::<stream::CapturedOutput>().await
     });
     tokio::task::yield_now().await;
 
@@ -41,8 +41,9 @@ async fn drain_reader_tasks_times_out_and_aborts_stuck_readers() {
     // abort 是协作式的：让出执行权使被终止任务实际运行到 drop。
     tokio::task::yield_now().await;
 
-    assert!(stdout_bytes.is_empty());
-    assert!(stderr_bytes.is_empty());
+    assert!(stdout_bytes.bytes.is_empty());
+    assert!(stderr_bytes.bytes.is_empty());
+    assert!(!stdout_bytes.capped && !stderr_bytes.capped);
     assert!(stdout_dropped.load(Ordering::SeqCst));
     assert!(stderr_dropped.load(Ordering::SeqCst));
 }
@@ -968,4 +969,26 @@ async fn bash_direct_log_writes_stderr_to_same_file_interleaved() {
         file_content.contains("1\n"),
         "stderr（1>&2）同文件直写（交错混排）：{file_content:?}"
     );
+}
+
+/// 裁剪必须可见：管道硬顶与直绑日志尾窗都要在文本里说明。
+#[test]
+fn capture_notice_marks_pipe_cap_and_direct_log_window() {
+    let notice = capture_notice(true, &None).expect("命中硬顶必须有提示");
+    assert!(notice.contains("capture limit"), "{notice}");
+    assert!(capture_notice(false, &None).is_none());
+
+    let base = std::env::temp_dir().join(format!("aemeath-bash-notice-{}", std::process::id()));
+    std::fs::create_dir_all(&base).unwrap();
+    let log = base.join("bg.log");
+    let file = std::fs::File::create(&log).unwrap();
+    file.set_len(u64::try_from(MAX_CAPTURE_BYTES).unwrap() + 1)
+        .unwrap();
+    drop(file);
+
+    let notice = capture_notice(false, &Some(log.clone())).expect("直绑超窗必须有提示");
+    assert!(notice.contains("full log file"), "{notice}");
+    assert!(notice.contains(&log.display().to_string()), "{notice}");
+
+    let _ = std::fs::remove_dir_all(&base);
 }

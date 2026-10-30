@@ -79,6 +79,15 @@ pub struct BackgroundProcessLogData {
     pub cursor: u64,
     /// 累计写入字节（游标总坐标）。
     pub total_written: u64,
+    /// 本次窗口起始字节偏移（= 前面未被包含的字节数）。
+    #[serde(default)]
+    pub start_offset: u64,
+    /// true = 缺省游标下的尾部窗口；`start_offset > 0` 表示前面仍有未包含内容。
+    #[serde(default)]
+    pub is_tail: bool,
+    /// 任务日志文件路径（全量真相源；回退终态文本时为 None）。
+    #[serde(default)]
+    pub log_file: Option<String>,
 }
 
 /// `BackgroundProcessLogs` result.
@@ -136,6 +145,12 @@ pub struct BackgroundProcessWatchResult {
     /// 给 LLM / TUI 的日志尾部（字符预算内）；缺省空串兼容旧快照。
     #[serde(default)]
     pub log_tail: String,
+    /// 尾窗起始字节（> 0 表示前面仍有未包含内容）。
+    #[serde(default)]
+    pub log_start_offset: u64,
+    /// 任务日志文件路径（全量真相源；无文件时 None）。
+    #[serde(default)]
+    pub log_file: Option<String>,
 }
 
 /// 解析 Watch 实际等待秒数（入参 = 统一字段 `timeout`）。
@@ -233,6 +248,8 @@ mod tests {
             outcome: BackgroundProcessWatchOutcome::StillRunning,
             detail: sample_detail("backgrounded"),
             log_tail: "tail-line\n".to_string(),
+            log_start_offset: 0,
+            log_file: None,
         };
         let json = serde_json::to_value(&result).expect("serialize");
         assert_eq!(json["outcome"], "still_running");

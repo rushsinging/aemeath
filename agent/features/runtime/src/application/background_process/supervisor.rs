@@ -26,6 +26,19 @@ struct SupervisedBackgroundProcess {
     child_cancellation: tokio_util::sync::CancellationToken,
 }
 
+/// 任务日志读取结果（`Supervisor::read_task_log` 返回值）。
+///
+/// `start_offset` 让调用方自述窗口区间：缺省游标 = 尾部窗口时
+/// `start_offset > 0` 表示前面仍有未包含字节，必须显式告知读方
+/// （NEVER 让读方靠「开头是半截内容」自行推断）。
+pub(crate) struct TaskLogRead {
+    pub(crate) text: String,
+    pub(crate) cursor: u64,
+    pub(crate) total_written: u64,
+    pub(crate) start_offset: u64,
+    pub(crate) log_file: Option<std::path::PathBuf>,
+}
+
 /// stop 请求结果（真实终态由执行体收口）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StopRequestOutcome {
@@ -250,27 +263,39 @@ impl BackgroundProcessSupervisor {
     ///   天然续读）；
     /// - 无文件（非直绑且未终态落盘 / 旧快照）→ 回退终态文本。
     ///
-    /// 返回 `(文本, 读后游标, 累计写入)`；多次读取幂等（非消耗性）。
+    /// 返回 [`TaskLogRead`]（含窗口起点与日志文件路径）；多次读取幂等（非消耗性）。
     pub(crate) fn read_task_log(
         &self,
         task_id: &BackgroundProcessId,
         cursor: Option<u64>,
         max_bytes: usize,
-    ) -> Option<(String, u64, u64)> {
+    ) -> Option<TaskLogRead> {
         let tasks = self.tasks.lock().expect("后台进程表锁中毒");
         let task = tasks.get(task_id)?;
         if let Some(log_path) = task.record.log_file.clone() {
             drop(tasks);
-            let log = TaskLogFile::from_path(log_path);
+            let log = TaskLogFile::from_path(log_path.clone());
             let size = log.size_bytes();
             let start = cursor.unwrap_or(size.saturating_sub(max_bytes as u64));
             let segment = log.read_range(start, max_bytes).ok()?;
             let text = String::from_utf8_lossy(&segment.bytes).into_owned();
-            return Some((text, segment.next_cursor, size));
+            return Some(TaskLogRead {
+                text,
+                cursor: segment.next_cursor,
+                total_written: size,
+                start_offset: start,
+                log_file: Some(log_path),
+            });
         }
         let terminal_text = task.terminal_output.clone().unwrap_or_default();
         let total = terminal_text.len() as u64;
-        Some((terminal_text, total, total))
+        Some(TaskLogRead {
+            text: terminal_text,
+            cursor: total,
+            total_written: total,
+            start_offset: 0,
+            log_file: None,
+        })
     }
 
     /// 转后台：推进任务状态并固化 deadline 快照。

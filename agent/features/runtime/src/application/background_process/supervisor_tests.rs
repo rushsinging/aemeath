@@ -71,9 +71,11 @@ fn finish_records_terminal_kind_and_output() {
         Some(BackgroundProcessTerminalKind::Success)
     );
     // 无文件任务回退终态文本（#1890）。
-    let (text, cursor, total) = supervisor.read_task_log(&task_id, None, 1024).unwrap();
-    assert_eq!(text, "3 passed");
-    assert_eq!(cursor, total);
+    let read = supervisor.read_task_log(&task_id, None, 1024).unwrap();
+    assert_eq!(read.text, "3 passed");
+    assert_eq!(read.cursor, read.total_written);
+    assert_eq!(read.start_offset, 0);
+    assert!(read.log_file.is_none());
 }
 
 #[test]
@@ -148,11 +150,18 @@ fn direct_log_read_task_log_uses_file_as_source_of_truth() {
     );
 
     // 尾部视图 + 增量游标：文件真相源，多次读取幂等。
-    let (text, cursor, total) = supervisor.read_task_log(&process_id, None, 1024).unwrap();
+    let read = supervisor.read_task_log(&process_id, None, 1024).unwrap();
+    let (text, cursor, total) = (read.text, read.cursor, read.total_written);
     assert_eq!(text, "first-line\n");
     assert_eq!(cursor, total);
+    assert_eq!(read.start_offset, 0);
+    assert_eq!(
+        read.log_file.as_deref(),
+        Some(log.path()),
+        "直绑任务必须回传日志文件路径"
+    );
     let again = supervisor.read_task_log(&process_id, None, 1024).unwrap();
-    assert_eq!(again.0, text);
+    assert_eq!(again.text, text);
 
     // 文件增长（子进程直写）→ 游标增量读出新段。
     let mut append = std::fs::OpenOptions::new()
@@ -160,12 +169,13 @@ fn direct_log_read_task_log_uses_file_as_source_of_truth() {
         .open(log.path())
         .unwrap();
     append.write_all(b"second-line\n").unwrap();
-    let (delta, next, total2) = supervisor
+    let delta = supervisor
         .read_task_log(&process_id, Some(cursor), 1024)
         .unwrap();
-    assert_eq!(delta, "second-line\n");
-    assert_eq!(next, total2);
-    assert!(total2 > total);
+    assert_eq!(delta.text, "second-line\n");
+    assert_eq!(delta.cursor, delta.total_written);
+    assert_eq!(delta.start_offset, cursor);
+    assert!(delta.total_written > total);
 
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -356,12 +366,13 @@ fn read_task_log_returns_tail_then_incremental_delta() {
     );
 
     // 尾部读取（无游标）：最近字节 + 读后游标。
-    let (text, cursor, _total) = supervisor
+    let tail = supervisor
         .read_task_log(&task_id, None, 4096)
         .expect("日志读取成功");
-    assert!(text.contains("line-1"));
-    assert!(text.contains("line-2"));
-    assert!(cursor > 0, "游标应推进到已读位置");
+    assert!(tail.text.contains("line-1"));
+    assert!(tail.text.contains("line-2"));
+    assert!(tail.cursor > 0, "游标应推进到已读位置");
+    let cursor = tail.cursor;
 
     // 增量读取（携带游标）：只返回新增字节（子进程直写文件）。
     let mut append = std::fs::OpenOptions::new()
@@ -369,17 +380,18 @@ fn read_task_log_returns_tail_then_incremental_delta() {
         .open(log.path())
         .unwrap();
     append.write_all(b"line-3\n").unwrap();
-    let (delta, next_cursor, _) = supervisor
+    let delta = supervisor
         .read_task_log(&task_id, Some(cursor), 4096)
         .expect("增量读取成功");
-    assert_eq!(delta, "line-3\n", "增量只含新字节");
-    assert!(next_cursor > cursor);
+    assert_eq!(delta.text, "line-3\n", "增量只含新字节");
+    assert!(delta.cursor > cursor);
+    let next_cursor = delta.cursor;
 
     // 游标追平后读取：空增量。
-    let (empty, _, _) = supervisor
+    let empty = supervisor
         .read_task_log(&task_id, Some(next_cursor), 4096)
         .expect("游标追平后读取成功");
-    assert!(empty.is_empty());
+    assert!(empty.text.is_empty());
 
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -396,10 +408,10 @@ fn read_task_log_falls_back_to_terminal_output_when_no_stream() {
         )
         .unwrap();
 
-    let (text, _cursor, _) = supervisor
+    let read = supervisor
         .read_task_log(&task_id, None, 4096)
         .expect("终态文本兜底");
-    assert_eq!(text, "final output");
+    assert_eq!(read.text, "final output");
 }
 
 #[test]
