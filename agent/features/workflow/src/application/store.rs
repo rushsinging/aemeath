@@ -138,3 +138,32 @@ impl InMemoryWorkflowStore {
             .count()
     }
 }
+
+impl crate::ports::WorkflowStateProbe for InMemoryWorkflowStore {
+    fn active_state(&self) -> Option<crate::ports::WorkflowStateHint> {
+        let workflows = self.workflows.lock().expect("store lock");
+        workflows.iter().find_map(|(id, aggregate)| {
+            let aggregate = aggregate.lock().expect("aggregate lock");
+            if aggregate.status() != WorkflowStatus::Active {
+                return None;
+            }
+            Some(crate::ports::WorkflowStateHint {
+                workflow_id: id.clone(),
+                active_mode: aggregate.active_mode()?,
+            })
+        })
+    }
+}
+
+impl crate::ports::WorkflowSessionReset for InMemoryWorkflowStore {
+    fn reset_session(&self, session_id: &str) -> Result<(), crate::ports::PersistenceError> {
+        // 先清索引（磁盘可见性），再清内存表；两步都成功才算 reset 完成。
+        if let Some((bound_session, persistence)) = &self.persistence {
+            if bound_session == session_id {
+                persistence.clear_index(session_id)?;
+            }
+        }
+        self.workflows.lock().expect("store lock").clear();
+        Ok(())
+    }
+}

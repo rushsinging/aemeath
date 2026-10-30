@@ -12,6 +12,7 @@ systemone-embedded = ["systemone/embedded"]
 systemone-daemon = ["systemone/daemon"]
 
 [dependencies]
+serde.workspace = true
 runtime = { path = "../features/runtime" }
 config = { path = "../features/config" }
 tools = { path = "../features/tools" }

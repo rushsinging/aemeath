@@ -65,6 +65,24 @@ pub struct ContextConfig {
         deserialize_with = "deserialize_compact_model"
     )]
     pub compact_model: Option<String>,
+    /// Compact 调用的推理档位（off/minimal/low/medium/high/xhigh/max）。
+    ///
+    /// 未配置默认 `Low`：实测（60 题语义决策类题库）三档续接正确率均 90%+
+    /// 且无显著差异，成本差 2.7×；需要更深细节时用 `--reasoning max`。
+    #[serde(default, alias = "compactReasoning")]
+    pub compact_reasoning: Option<String>,
+    /// Compact 调用的输出预算（token）。
+    ///
+    /// 默认 65536：max 档思考会吃掉大量 budget，16K 预算会让正文为空
+    /// （生产实测 22 块降 10 块）。实际生效值仍受模型 `max_tokens` 上限约束
+    /// ——配置该值后请同步确认模型配置的 max_tokens 足够大。
+    #[serde(default, alias = "compactMaxOutputTokens")]
+    pub compact_max_output_tokens: Option<u32>,
+    /// Compact map 阶段并发上限（1..=10，默认 5）。
+    ///
+    /// 块数多时并发越高墙钟越短，但要受 provider 速率限制约束。
+    #[serde(default, alias = "compactConcurrency")]
+    pub compact_concurrency: Option<usize>,
 }
 
 impl Default for ContextConfig {
@@ -75,6 +93,9 @@ impl Default for ContextConfig {
             auto_compact_failure_limit: default_auto_compact_failure_limit(),
             auto_compact_threshold_ratio: default_auto_compact_threshold_ratio(),
             compact_model: None,
+            compact_reasoning: None,
+            compact_max_output_tokens: None,
+            compact_concurrency: None,
         }
     }
 }

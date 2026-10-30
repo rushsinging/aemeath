@@ -210,6 +210,8 @@ fn test_llm_binding(
         },
         max_output_tokens: 1024,
         compact_context_window: None,
+        reasoning: share::reasoning::ReasoningLevel::Off,
+        max_concurrency: 5,
     })
 }
 

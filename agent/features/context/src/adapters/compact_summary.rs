@@ -4,9 +4,10 @@
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
 use super::constants::{
-    COMPACT_PROMPT, COMPACT_REFRESH_PROMPT, FALLBACK_PREVIOUS_SUMMARY_CAP,
-    FALLBACK_TEXT_BLOCK_MAX_BYTES, FALLBACK_TOOL_RESULT_MAX_BYTES, MAIN_USER_OBJECTIVE_MAX_CHARS,
-    MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS, REFRESH_BUDGET_RATIO,
+    COMPACT_PROMPT, COMPACT_PROVIDER_RETRY_LIMIT, COMPACT_REFRESH_PROMPT,
+    FALLBACK_PREVIOUS_SUMMARY_CAP, FALLBACK_TEXT_BLOCK_MAX_BYTES, FALLBACK_TOOL_RESULT_MAX_BYTES,
+    MAIN_USER_OBJECTIVE_MAX_CHARS, MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS,
+    REFRESH_BUDGET_RATIO,
 };
 use crate::domain::compact::llm_error::CompactLlmError;
 use crate::domain::compact::{
@@ -833,16 +834,55 @@ async fn llm_generate(
     request: Vec<Message>,
     cancel: &CancellationToken,
 ) -> Result<provider::LlmTextOutputData, CompactLlmError> {
-    let output = binding
-        .invoker
-        .invoke_text(&binding.model, &{
-            let mut request = compact_invoke_request(request, binding.max_output_tokens);
-            // 取消真相源单通道（#2146）：端口无独立取消参数。
-            request.cancellation = cancel.clone();
-            request
-        })
-        .await
-        .map_err(CompactLlmError::Provider)?;
+    // retryable 错误（限流/上游抖动）指数退避重试；非 retryable 直接上抛，
+    // 由块级降级负责兜底（#2133）。
+    let mut attempt = 0u32;
+    let output = loop {
+        attempt += 1;
+        let mut wire_request = compact_invoke_request(
+            &binding.model.model,
+            request.clone(),
+            binding.max_output_tokens,
+            binding.reasoning,
+        );
+        // 取消真相源单通道（#2146）：端口无独立取消参数。
+        wire_request.cancellation = cancel.clone();
+        match binding
+            .invoker
+            .invoke_text(&binding.model, &wire_request)
+            .await
+        {
+            Ok(output) => break output,
+            Err(error) if error.retryable && attempt <= COMPACT_PROVIDER_RETRY_LIMIT => {
+                let delay = error
+                    .retry_after
+                    .unwrap_or_else(|| std::time::Duration::from_millis(500 * u64::from(attempt)));
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] llm 调用可重试失败 attempt={attempt}/{} delay_ms={} error={error}",
+                    COMPACT_PROVIDER_RETRY_LIMIT,
+                    delay.as_millis(),
+                );
+                tokio::time::sleep(delay).await;
+            }
+            Err(error) => return Err(CompactLlmError::Provider(error)),
+        }
+    };
+    // token 用量（#2133）：成本可见——开思考的代价经 usage 统计，而不是关思考。
+    if let Some(usage) = output.token_usage.as_ref() {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[compact] llm 用量：model={}/{} reasoning={:?} input={:?} output={:?} thinking={:?} cache_read={:?} cache_write={:?}",
+            binding.model.provider,
+            binding.model.model,
+            binding.reasoning,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.reasoning_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        );
+    }
     if output.text.trim().is_empty() {
         return Err(CompactLlmError::InvalidSummary(format!(
                 "LLM 返回了空的 compact 结构化响应：completion_reason={} text_deltas={} non_text_deltas={} completed={}",
@@ -1021,10 +1061,11 @@ async fn llm_extract_facts_or_local_fallback(
         Err(error @ CompactLlmError::InvalidSummary(_)) => {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+                "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} detail={:?} input_messages={} input_tokens={}",
                 chunk_index + 1,
                 total_chunks,
                 error.kind_label(),
+                compact_failure_detail(&error),
                 messages.len(),
                 crate::domain::token_budget::estimate_messages_tokens(messages),
             );
@@ -1035,6 +1076,21 @@ async fn llm_extract_facts_or_local_fallback(
         }
         Err(error) => Err(error),
     }
+}
+
+/// 降级原因详情（诊断用）：完整错误文本，按字符截断到 400 字符。
+///
+/// 只记 `kind_label` 会把 `ProviderError` 的内部原因（HTTP 状态、请求校验
+/// 失败文案、取消等）整条丢掉，事后无法定位降级根因。此处截断后随日志输出；
+/// 质量载荷里的 `failure` 标签保持简短不变（用户可见语义不扩散）。
+fn compact_failure_detail(error: &CompactLlmError) -> String {
+    const DETAIL_MAX_CHARS: usize = 400;
+    let text = error.to_string();
+    if text.chars().count() <= DETAIL_MAX_CHARS {
+        return text;
+    }
+    let truncated: String = text.chars().take(DETAIL_MAX_CHARS).collect();
+    format!("{truncated}…")
 }
 
 /// 单 chunk 的本地降级：按文本摘要折叠该 chunk 的消息为 fact 批次。
@@ -1259,12 +1315,11 @@ async fn compact_messages_map_reduce(
     let total_chunks = chunks.len();
     // map: 每个 chunk 独立摘要，按块数决定并发上限（3-5）。
     // 块数越多并发越高，但不超过 5；避免同时打爆 provider。
-    let concurrency = match total_chunks {
-        0 => 1,
-        1..=3 => 3,
-        4..=6 => 4,
-        _ => 5,
-    };
+    // 并发 = min(配置上限, 块数)；块数少时不必超过块数。
+    let concurrency = binding
+        .max_concurrency
+        .clamp(1, 10)
+        .min(total_chunks.max(1));
     log::info!(
         target: crate::LOG_TARGET,
         "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，单块目标 {chunk_target}，并发上限 {concurrency}",
@@ -1327,10 +1382,11 @@ async fn compact_messages_map_reduce(
     for (chunk_index, error) in failed_chunks {
         log::warn!(
             target: crate::LOG_TARGET,
-            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} detail={:?} input_messages={} input_tokens={}",
             chunk_index + 1,
             total_chunks,
             error.kind_label(),
+            compact_failure_detail(&error),
             chunks[chunk_index].len(),
             estimate_messages_tokens(&chunks[chunk_index]),
         );
@@ -1514,14 +1570,18 @@ async fn compact_messages_map_reduce(
 mod compact_summary_tests;
 
 /// 组 compact LLM 调用请求（Off reasoning；取消由调用方 token 传入）。
+///
+/// `model` MUST 取自 [`crate::domain::CompactLlmBinding`]：provider 侧按
+/// `request.model` 校验非空并直接作为调用模型，空串会在发请求前被
+/// `invocation model must not be empty` 拦下，静默降级为本地压缩。
 fn compact_invoke_request(
+    model: &str,
     messages: Vec<Message>,
     max_output_tokens: u32,
+    reasoning: share::reasoning::ReasoningLevel,
 ) -> provider::ProviderRequestData {
-    provider::ProviderRequestData::new(
-        String::new(),
-        messages,
-        max_output_tokens,
-        share::reasoning::ReasoningLevel::Off,
-    )
+    // #2146 端口收敛后 request.model 参与 InvocationScope 校验（非空），
+    // 必须携带 binding 的模型 id，否则所有 compact LLM 调用必失败并静默降级。
+    // reasoning 来自 binding（config context.compact_reasoning，默认 High）。
+    provider::ProviderRequestData::new(model.to_string(), messages, max_output_tokens, reasoning)
 }

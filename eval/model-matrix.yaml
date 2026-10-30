@@ -1,0 +1,260 @@
+# 评测模型矩阵（compact / reflect / harness 共用，按原模型聚合）
+#
+# 原则：以**原模型**为主键，不区分 provider —— 同一模型在多个 provider/网关下
+# 只出现一条；effort 能力跟模型厂商官方能力走（网关可能额外透传，不单列）。
+# 运行时选择 provider：用本机配置里的 `<provider>/<ids 之一>` 作为 --model。
+# 更新方式：从 models.providers 同步；路由类模型（auto/group/cursor-auto）不列入。
+schema_version: 2
+updated_at: "2026-10-29"
+
+roles:
+  compact.compactor: 执行压缩（长上下文 + typed JSON 输出，flash/低成本优先）
+  compact.answerer:  续接问答答题（通常主对话模型）
+  compact.judge:     续接问答判卷（独立模型，避免自评偏差）
+  reflect.reflector: 执行反思（去噪/归纳两阶段）
+  reflect.judge:     反思语义判卷（合并忠实性 / outdated 成立性 / 噪音剔除）
+  harness.improver:  RSI 改进提案生成
+  harness.judge:     RSI 提案与 lesson 评价
+
+reasoning:
+  levels: [off, minimal, low, medium, high, xhigh, max]
+  input_alias:
+    none: off
+  eval_request_default: max
+  config_key: context.compact_reasoning
+  chain: "requested -> clamp(模型上限) -> server_effort_map -> effective(服务端实际档)"
+  notes: |
+    `available_efforts` 按**原模型官方能力**标注（不按 provider）；`efforts_verified: false`
+    表示尚未按厂商文档逐档确认。请求档超出集合时被 clamp/归并。
+    已确认来源：OpenAI GPT-6 系列、阿里云百炼（Qwen3.8：low/medium/high/xhigh/max，默认 max）、
+    Agnes（布尔思考开关，无分档）、智谱 5.3、方舟、DeepSeek、Kimi K3 官方阶梯。
+    已确认（用户实测）：MiniMax M3.1（low/medium/high/xhigh/max）、Beam（off/low/high/max）、
+    MiMo 2.6（thinking.type 开关，无分档）。待实测探测：MiniMax M3（同族待确认）。
+
+known_risks:
+  - id: max-thinking-budget
+    summary: "Max 档思考 + COMPACT_MAX_OUTPUT_TOKENS=16384 → thinking 吃满输出预算、正文为空、chunk 降级本地"
+    evidence: "session 01a182e6（838K token / 22 chunks）：10 块降级，全部 output=16384 thinking=16384 text_deltas=0"
+    mitigation: "独立 compact 输出预算（32K/64K）/ map 阶段降档 / 紧急 context.compact_reasoning=high"
+  - id: empty-model-regression
+    summary: "#2146 曾让 compact 请求传空 model → LLM 调用恒失败静默降级"
+    evidence: "#2152 + PR #2140 已修复并合入 main"
+    mitigation: "评测看 quality 档位；非 Llm 行不当成功"
+
+models:
+# 注：max_tokens 为模型输出上限；compact 请求实际最大输出 =
+# min(COMPACT_MAX_OUTPUT_TOKENS=16384, max_tokens)。
+  - model: "DeepSeek V4.1 Flash"
+    ids: ["deepseek-flash", "deepseek-v4.1-flash", "deepseek-v4.1-flash-1017"]
+    config_default_effort: high
+    available_efforts: [off, low, high]
+    efforts_verified: true
+    efforts_source: "DeepSeek 官方：minimal→low、medium/xhigh→high；无 max 档折叠最高"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.compactor]
+    notes: "网关可能透传更多档；本表按原模型官方能力"
+  - model: "DeepSeek V4 Pro"
+    ids: ["deepseek-v4-pro"]
+    config_default_effort: high
+    available_efforts: [off, low, high]
+    efforts_verified: true
+    efforts_source: "DeepSeek 官方（同 Flash 阶梯）"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "GLM-5.3 Flash"
+    ids: ["glm-5.3-flash", "GLM-5.3-Flash"]
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "智谱 5.3 官方：off/minimal/low→low、medium/high→high、xhigh/max→max"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.compactor]
+  - model: "GLM-5.3"
+    ids: ["glm-5.3"]
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "智谱 5.3 官方（同上）"
+    context_window: 1000000
+    max_tokens: 20000
+    for: [compact.answerer, reflect.reflector]
+  - model: "Kimi K3"
+    ids: ["k3", "kimi-k3", "moonshotai/kimi-k3-free"]
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "Kimi K3 官方：off→low，low/high/max 三档"
+    context_window: 500000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "Kimi K3 256K"
+    ids: ["k3-256k"]
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "Kimi K3 官方（同上），窗口 256K"
+    context_window: 262144
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge]
+  - model: "Kimi K3.1 Pro"
+    ids: ["k3.1-pro", "kimi-k3.1-pro"]
+    config_default_effort: high
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "Kimi K3 系列官方阶梯"
+    context_window: 500000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "Doubao Seed 2.1 Lite"
+    ids: ["doubao-seed-2.1-lite"]
+    config_default_effort: medium
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "方舟官方阶梯与智谱同构"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.compactor]
+  - model: "Doubao Seed 2.1 Pro"
+    ids: ["doubao-seed-2.1-pro"]
+    config_default_effort: medium
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "方舟官方阶梯"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "Doubao Seed Evolving"
+    ids: ["doubao-seed-evolving"]
+    config_default_effort: medium
+    available_efforts: [low, high, max]
+    efforts_verified: true
+    efforts_source: "方舟官方阶梯"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [reflect.reflector]
+  - model: "Qwen3.8 Max"
+    ids: ["qwen3.8-max"]
+    config_default_effort: xhigh
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "阿里云百炼官方（深度思考文档）：reasoning_effort 支持 low/medium/high/xhigh/max，默认 max"
+    context_window: 1000000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "Qwen3.8 Flash"
+    ids: ["qwen3.8-flash"]
+    config_default_effort: xhigh
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "阿里云百炼官方：reasoning_effort low/medium/high/xhigh/max，默认 max"
+    context_window: 1000000
+    max_tokens: 20000
+    for: [compact.compactor]
+  - model: "Qwen3.8 Flash Next (Q2_0)"
+    ids: ["qwen3.8-flash-next-q2_0"]
+    config_default_effort: xhigh
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "Qwen3.8 家族（百炼官方 reasoning_effort 五档）；量化推理版由 Strata 托管"
+    context_window: 262144
+    max_tokens: 20000
+    for: [compact.compactor]
+    notes: "context 262K"
+  - model: "Mimo V2.6 Flash"
+    ids: ["mimo-v2.6-flash"]
+    config_default_effort: medium
+    available_efforts: [off]
+    efforts_verified: true
+    efforts_source: "MiMo 2.6：thinking.type 开关（enabled/disabled），无分档；非 off 请求等价开启思考"
+    effort_model: boolean
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.compactor]
+  - model: "Mimo V2.6 Pro"
+    ids: ["mimo-v2.6-pro"]
+    config_default_effort: medium
+    available_efforts: [off]
+    efforts_verified: true
+    efforts_source: "MiMo 2.6：thinking.type 开关（enabled/disabled），无分档；非 off 请求等价开启思考"
+    effort_model: boolean
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "MiniMax M3"
+    # 官方文档为 SPA 或聚合网关，未提供档位说明 → 需实测探测
+    ids: ["MiniMax-M3"]
+    config_default_effort: medium
+    available_efforts: [off, minimal, low, medium, high, xhigh, max]
+    efforts_verified: false
+    efforts_source: "同族 M3.1 已确认 low/medium/high/xhigh/max；M3 待实测探测"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [reflect.reflector]
+  - model: "MiniMax M3.1 Flash Preview"
+    ids: ["MiniMax-M3.1-Flash-Preview"]
+    config_default_effort: medium
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "MiniMax M3.1 Flash：low/medium/high/xhigh/max"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [compact.compactor]
+  - model: "Agnes 3.0 Flash"
+    ids: ["agnes-3.0-flash"]
+    config_default_effort: max
+    available_efforts: [off]
+    efforts_verified: true
+    efforts_source: "Agnes 官方文档：思考为布尔开关（chat_template_kwargs.enable_thinking / thinking.type=enabled+budget_tokens），无分档；非 off 请求等价开启思考"
+    effort_model: boolean
+    context_window: 524288
+    max_tokens: 65536
+    for: [compact.compactor]
+    notes: "context 512K"
+  - model: "GPT-6.1 Sol"
+    ids: ["gpt-6.1-sol"]
+    config_default_effort: xhigh
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "OpenAI 官方：low/medium(default)/high/xhigh/max，不支持 none"
+    context_window: 500000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "GPT-6 Astra"
+    ids: ["gpt-6-astra"]
+    config_default_effort: xhigh
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "OpenAI 官方：不支持 none；low..max"
+    context_window: 272000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "GPT-6 Sol"
+    ids: ["gpt-6-sol"]
+    config_default_effort: xhigh
+    available_efforts: [none, low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "OpenAI 官方：支持 none；low..max"
+    context_window: 272000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "GPT-5.6 Sol"
+    ids: ["gpt-5.6-sol"]
+    config_default_effort: xhigh
+    available_efforts: [low, medium, high, xhigh, max]
+    efforts_verified: true
+    efforts_source: "OpenAI 官方：GPT-5.6 支持 max；none 未确认"
+    context_window: 272000
+    max_tokens: 20000
+    for: [compact.judge, reflect.judge, harness.judge, reflect.reflector, harness.improver]
+  - model: "OpenCode Beam Free"
+    ids: ["beam-free"]
+    config_default_effort: high
+    available_efforts: [off, low, high, max]
+    efforts_verified: true
+    efforts_source: "Beam：off/low/high/max"
+    context_window: 1048576
+    max_tokens: 20000
+    for: [reflect.reflector]

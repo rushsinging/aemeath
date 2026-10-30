@@ -81,3 +81,27 @@ pub trait WorkflowPersistence: Send + Sync {
     /// 清空 Session 索引与 active 指针；实体保留（/clear 语义）。
     fn clear_index(&self, session_id: &str) -> Result<(), PersistenceError>;
 }
+
+/// 当前 Active Workflow 的状态快照（#2088 提示注入用；只读、无 IO）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowStateHint {
+    pub workflow_id: String,
+    pub active_mode: crate::domain::ActiveMode,
+}
+
+/// Workflow 状态查询端口：供 reminder source 同步读取当前状态。
+///
+/// 不暴露 Graph 内容——提示只需 `workflow_id` 与模式，节点详情一律
+/// 走 `workflow_query`。
+pub trait WorkflowStateProbe: Send + Sync {
+    /// 当前 Session 的 Active Workflow 状态；无 Active 返回 `None`。
+    fn active_state(&self) -> Option<WorkflowStateHint>;
+}
+
+/// Session reset 端口（#2089）：`/clear` 时清空本 Session 的 Workflow 可见性。
+///
+/// 语义：清空内存表 + 持久化索引与 active 指针；实体文件保留，由统一
+/// 清理能力（`cleanup_orphan_entities`）在后续单独回收。
+pub trait WorkflowSessionReset: Send + Sync {
+    fn reset_session(&self, session_id: &str) -> Result<(), PersistenceError>;
+}

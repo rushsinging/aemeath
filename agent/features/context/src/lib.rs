@@ -92,6 +92,7 @@ pub use domain::{
     SessionAppendReceiptData, TaskProgressReminderData, TaskProgressReminderItemData,
     TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    WorkflowStateModeData,
 };
 pub use ports::{
     ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
@@ -131,6 +132,8 @@ pub mod tool_receipt {
 
 pub mod compact {
     pub use crate::adapters::compact_summary::messages_selected_for_precompact_memory;
+    // #2133 评测执行面：直接调用真实压缩管线（与生产同一实现，不走简化替身）。
+    pub use crate::adapters::compact_summary::{compact_messages_with_llm, CompactTail};
     #[cfg(test)]
     pub(crate) use crate::domain::compact::{
         microcompact_exploration, snip_superseded_exploration, CheckpointSections,

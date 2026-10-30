@@ -22,6 +22,7 @@ harness = { path = "../harness" }
 context = { path = "../context" }
 storage = { path = "../storage" }
 task = { path = "../task" }
+workflow = { path = "../workflow" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
 tokio = { workspace = true }

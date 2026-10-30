@@ -382,3 +382,52 @@ pub(crate) fn render_fact_body(fact: &context::ReminderFactData, language: &str)
         Err(error) => panic!("事实载荷反序列化失败: {error}"),
     }
 }
+
+/// Workflow 状态提示 source（#2088）。
+///
+/// 只声明 `workflow_id` 与当前 ActiveMode，不携带 Graph 内容；状态未变
+/// 由 `SkipIfUnchanged` 去重，不重复注入。Inactive / 终态返回 `None`
+/// 不入队。
+pub(crate) struct WorkflowStateReminderSource {
+    probe: Arc<dyn workflow::WorkflowStateProbe>,
+}
+
+impl WorkflowStateReminderSource {
+    pub(crate) fn new(probe: Arc<dyn workflow::WorkflowStateProbe>) -> Self {
+        Self { probe }
+    }
+
+    /// #2146 数据化：构建 workflow 状态事实（Snapshot，跨 step 覆盖）；
+    /// 无 Active Workflow 返回 `None`（调用方需 `remove_reminder_fact`）。
+    pub(crate) fn fact(&self) -> Option<context::ReminderFactData> {
+        let hint = self.probe.active_state()?;
+        Some(context::ReminderFactData {
+            kind: context::ReminderKind::workflow_state(),
+            policy: Self::policy(),
+            enqueue: context::ReminderEnqueue::Snapshot,
+            lifetime: context::ReminderFactLifetime::Snapshot,
+            rollback_keys: Vec::new(),
+            data: serde_json::to_string(&context::InvocationReminderData::WorkflowState {
+                workflow_id: hint.workflow_id,
+                mode: match hint.active_mode {
+                    workflow::ActiveMode::Executing => context::WorkflowStateModeData::Executing,
+                    workflow::ActiveMode::Replanning => context::WorkflowStateModeData::Replanning,
+                },
+            })
+            .expect("reminder 快照序列化不可失败"),
+        })
+    }
+
+    /// 该事实的策略（每 step 检查一次，未变化由 `SkipIfUnchanged` 去重）。
+    pub(crate) fn policy() -> context::ReminderPolicy {
+        context::ReminderPolicy {
+            refresh: context::RefreshTrigger::OnStepInterval(1),
+            placement: context::ReminderPlacement::TailUserMessage,
+            inject: context::InjectBehavior {
+                dedup: context::ReminderDedup::SkipIfUnchanged,
+                priority: context::ReminderPriority::workflow_state(),
+            },
+            compact: context::CompactBehavior::Rebuild,
+        }
+    }
+}

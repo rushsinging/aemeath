@@ -143,6 +143,28 @@ where
                 .reminders
                 .remove_reminder_fact(&context::ReminderKind::task_progress()),
         }
+        // Workflow 状态事实（#2088）：每 step 重新取快照（数据化后数据面
+        // 由 Runtime 负责新鲜度），状态未变由 SkipIfUnchanged 去重。
+        if let Some(probe) = self.context_request.runtime_context.workflow_probe() {
+            let workflow_source =
+                crate::application::loop_engine::chat::reminder_sources::WorkflowStateReminderSource::new(
+                    probe,
+                );
+            match workflow_source.fact() {
+                Some(fact) => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .push_reminder_fact(&self.run_id, fact),
+                None => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .remove_reminder_fact(&context::ReminderKind::workflow_state()),
+            }
+        }
         self.context_request
             .runtime_context
             .context()

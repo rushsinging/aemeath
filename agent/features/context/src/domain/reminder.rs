@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use crate::domain::constants::{
     ENVELOPE_VERSION, KIND_BACKGROUND_PROCESS, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED,
-    KIND_TASK_PROGRESS, PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL,
-    PRIORITY_TASK_STATE,
+    KIND_TASK_PROGRESS, KIND_WORKFLOW_STATE, PRIORITY_ENVIRONMENT, PRIORITY_EVENT,
+    PRIORITY_MEMORY_RECALL, PRIORITY_TASK_STATE, PRIORITY_WORKFLOW_STATE,
 };
 
 /// reminder kind 开放标识：新增 kind 只注册新 source，NEVER 扩展闭合 enum。
@@ -36,6 +36,11 @@ impl ReminderKind {
 
     pub fn background_process() -> Self {
         Self::new(KIND_BACKGROUND_PROCESS)
+    }
+
+    /// Workflow 状态提示（#2088）。
+    pub fn workflow_state() -> Self {
+        Self::new(KIND_WORKFLOW_STATE)
     }
 
     pub fn as_str(&self) -> &str {
@@ -123,6 +128,11 @@ impl ReminderPriority {
     /// 记忆召回（辅助上下文，低于任务状态）。
     pub const fn memory_recall() -> Self {
         Self(PRIORITY_MEMORY_RECALL)
+    }
+
+    /// Workflow 状态提示（#2088）。
+    pub const fn workflow_state() -> Self {
+        Self(PRIORITY_WORKFLOW_STATE)
     }
 
     pub const fn value(self) -> i32 {
@@ -695,6 +705,23 @@ pub fn render_invocation_reminder_body(
                 ),
             }
             lines.join("\n")
+        }
+        crate::domain::InvocationReminderData::WorkflowState { workflow_id, mode } => {
+            let zh = language == "zh";
+            match (mode, zh) {
+                (crate::domain::WorkflowStateModeData::Executing, true) => format!(
+                    "当前 Session 的 Active Workflow {workflow_id} 处于 Executing。执行或更新前先调用 workflow_query 获取当前 Graph、Active Node 与已有结论。"
+                ),
+                (crate::domain::WorkflowStateModeData::Replanning, true) => format!(
+                    "当前 Session 的 Active Workflow {workflow_id} 处于 Replanning。按 system prompt 中的重规划纪律处理：先 workflow_query，再 workflow_replan 或 workflow_update(fail / cancel / deactivate)。"
+                ),
+                (crate::domain::WorkflowStateModeData::Executing, false) => format!(
+                    "Active workflow {workflow_id} in this session is Executing. Call workflow_query before acting on it to read the current graph, active nodes and existing conclusions."
+                ),
+                (crate::domain::WorkflowStateModeData::Replanning, false) => format!(
+                    "Active workflow {workflow_id} in this session is Replanning. Follow the replanning discipline from the system prompt: call workflow_query first, then workflow_replan or workflow_update(fail / cancel / deactivate)."
+                ),
+            }
         }
         crate::domain::InvocationReminderData::BackgroundProcessCompleted { items } => {
             let status_text = |status: &crate::domain::BackgroundProcessCompletionStatus| match status {

@@ -215,3 +215,114 @@ async fn end_to_end_resume_via_files() {
     );
     assert_eq!(detail.nodes[0].status, crate::domain::NodeStatus::Failed);
 }
+
+// ── #2089 Session reset 与统一清理 ──
+
+use crate::ports::WorkflowSessionReset;
+
+/// `/clear` 语义（F3/F4）：重置后不可见，实体仍在磁盘。
+#[test]
+fn session_reset_hides_workflows_but_keeps_entities() {
+    let dir = tempfile::tempdir().expect("dir");
+    let persistence = Arc::new(FileWorkflowPersistence::new(dir.path()));
+    let store = InMemoryWorkflowStore::with_persistence(persistence.clone(), "session_r");
+    let aggregate = crate::application::WorkflowAggregate::new(
+        CreateWorkflowSpec {
+            name: "r".to_owned(),
+            objective: "o".to_owned(),
+            root_node_id: "root".to_owned(),
+            nodes: vec![
+                crate::domain::NodeDefinition {
+                    node_id: "root".to_owned(),
+                    kind: NodeKind::Work,
+                    role: Some(Role::Planner),
+                    description: "r".to_owned(),
+                    completion_criteria: None,
+                },
+                crate::domain::NodeDefinition {
+                    node_id: "done".to_owned(),
+                    kind: NodeKind::Complete,
+                    role: None,
+                    description: "d".to_owned(),
+                    completion_criteria: None,
+                },
+            ],
+            edges: vec![crate::domain::EdgeDefinition {
+                from_node_id: "root".to_owned(),
+                to_node_id: "done".to_owned(),
+            }],
+        },
+        "wf_reset",
+        "t",
+    )
+    .expect("aggregate");
+    store.insert(aggregate).expect("insert");
+    store.persist_snapshot(&store.get("wf_reset").unwrap().lock().unwrap().to_snapshot());
+    assert_eq!(persistence.load_all("session_r").unwrap().len(), 1);
+
+    store.reset_session("session_r").expect("reset");
+
+    // F3：索引清空后不可见。
+    assert!(persistence.load_all("session_r").unwrap().is_empty());
+    assert!(store.list(None).is_empty(), "内存表也清空");
+    // F4：实体仍在磁盘。
+    assert!(dir.path().join("entities/wf_reset.json").exists());
+}
+
+/// 统一清理：只删无引用实体，保留仍被索引引用的。
+#[test]
+fn cleanup_removes_only_orphan_entities() {
+    let dir = tempfile::tempdir().expect("dir");
+    let persistence = FileWorkflowPersistence::new(dir.path());
+    // session_a 引用 wf_keep；wf_orphan 无任何引用。
+    persistence
+        .save("session_a", &snapshot("wf_keep"))
+        .expect("save keep");
+    persistence
+        .save("session_b", &snapshot("wf_orphan"))
+        .expect("save orphan");
+    persistence.clear_index("session_b").expect("clear b");
+
+    let report = persistence.cleanup_orphan_entities().expect("cleanup");
+    assert_eq!(report.scanned, 2);
+    assert_eq!(report.referenced, 1);
+    assert_eq!(report.removed, vec!["wf_orphan".to_owned()]);
+    assert!(dir.path().join("entities/wf_keep.json").exists());
+    assert!(!dir.path().join("entities/wf_orphan.json").exists());
+}
+
+/// 幂等：重复清理结果不变（第二次 removed 为空）。
+#[test]
+fn cleanup_is_idempotent() {
+    let dir = tempfile::tempdir().expect("dir");
+    let persistence = FileWorkflowPersistence::new(dir.path());
+    persistence
+        .save("session_a", &snapshot("wf_orphan"))
+        .expect("save");
+    persistence.clear_index("session_a").expect("clear");
+
+    let first = persistence.cleanup_orphan_entities().expect("first");
+    assert_eq!(first.removed, vec!["wf_orphan".to_owned()]);
+    let second = persistence.cleanup_orphan_entities().expect("second");
+    assert!(second.removed.is_empty(), "重复执行不再删除");
+    assert_eq!(second.scanned, 0);
+}
+
+/// 索引损坏时 fail-closed：不删除任何实体。
+#[test]
+fn cleanup_refuses_when_index_corrupt() {
+    let dir = tempfile::tempdir().expect("dir");
+    let persistence = FileWorkflowPersistence::new(dir.path());
+    persistence
+        .save("session_a", &snapshot("wf_keep"))
+        .expect("save");
+    fs::write(dir.path().join("index/session_a.json"), b"{ broken").expect("corrupt");
+    let error = persistence
+        .cleanup_orphan_entities()
+        .expect_err("must fail");
+    assert!(matches!(error, PersistenceError::Corrupt(_)), "{error:?}");
+    assert!(
+        dir.path().join("entities/wf_keep.json").exists(),
+        "不得删除"
+    );
+}

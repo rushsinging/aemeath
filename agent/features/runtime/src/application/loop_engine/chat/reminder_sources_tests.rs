@@ -2,7 +2,7 @@ use super::*;
 
 use crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS;
 use crate::application::loop_engine::chat::reminder_sources::{
-    RunStartFactReminderSource, TaskProgressReminderSource,
+    RunStartFactReminderSource, TaskProgressReminderSource, WorkflowStateReminderSource,
 };
 use std::time::SystemTime;
 
@@ -605,4 +605,104 @@ fn config_sources_changed_renders_key_list_and_session_semantics() {
     let en =
         crate::application::loop_engine::chat::reminder_sources::render_fact_body(&snapshot, "en");
     assert!(en.contains("configuration changed"));
+}
+
+// ── #2088 Workflow 状态提示 source ──
+
+struct FixedProbe(Option<workflow::WorkflowStateHint>);
+
+impl workflow::WorkflowStateProbe for FixedProbe {
+    fn active_state(&self) -> Option<workflow::WorkflowStateHint> {
+        self.0.clone()
+    }
+}
+
+fn workflow_hint(mode: workflow::ActiveMode) -> workflow::WorkflowStateHint {
+    workflow::WorkflowStateHint {
+        workflow_id: "wf_1".to_owned(),
+        active_mode: mode,
+    }
+}
+
+/// G3：无 Active Workflow 时不入队。
+#[test]
+fn workflow_state_source_skips_without_active_workflow() {
+    let source = WorkflowStateReminderSource::new(Arc::new(FixedProbe(None)));
+    assert!(source.fact().is_none());
+}
+
+/// Executing / Replanning 各产生一次快照，body 只含 workflow_id 与模式。
+#[test]
+fn workflow_state_source_builds_snapshot_without_graph_details() {
+    for (mode, label) in [
+        (workflow::ActiveMode::Executing, "executing"),
+        (workflow::ActiveMode::Replanning, "replanning"),
+    ] {
+        let source =
+            WorkflowStateReminderSource::new(Arc::new(FixedProbe(Some(workflow_hint(mode)))));
+        let snapshot = source.fact().expect("snapshot");
+        assert!(snapshot.data.contains("wf_1"), "{}", snapshot.data);
+        assert!(snapshot.data.contains(label), "{}", snapshot.data);
+        // G4：不携带节点列表 / 结论 / evidence。
+        for forbidden in ["nodes", "conclusion", "evidence", "objective"] {
+            assert!(
+                !snapshot.data.contains(forbidden),
+                "snapshot must not contain {forbidden}: {}",
+                snapshot.data
+            );
+        }
+        let rendered_en = crate::application::loop_engine::chat::reminder_sources::render_fact_body(
+            &snapshot, "en",
+        );
+        let rendered_zh = crate::application::loop_engine::chat::reminder_sources::render_fact_body(
+            &snapshot, "zh",
+        );
+        assert!(rendered_en.contains("wf_1"));
+        assert!(rendered_zh.contains("wf_1"));
+        // 只声明模式事实：不含结构化 Graph 字段名。
+        for forbidden in [
+            "node_id",
+            "evidence_refs",
+            "completion_criteria",
+            "objective",
+        ] {
+            assert!(
+                !rendered_en.contains(forbidden),
+                "render must not contain {forbidden}: {rendered_en}"
+            );
+        }
+    }
+}
+
+/// 状态未变 → 同 kind 同 snapshot fingerprint，SkipIfUnchanged 去重。
+#[test]
+fn workflow_state_source_policy_enables_unchanged_dedup() {
+    let source = WorkflowStateReminderSource::new(Arc::new(FixedProbe(Some(workflow_hint(
+        workflow::ActiveMode::Executing,
+    )))));
+    let policy = WorkflowStateReminderSource::policy();
+    assert_eq!(policy.refresh, context::RefreshTrigger::OnStepInterval(1));
+    assert_eq!(policy.placement, ReminderPlacement::TailUserMessage);
+    assert_eq!(policy.inject.dedup, ReminderDedup::SkipIfUnchanged);
+    assert_eq!(policy.inject.priority, ReminderPriority::workflow_state());
+
+    // 两次 build 的 data 完全一致 → 队列会判定 unchanged 并跳过。
+    let first = source.fact().expect("first");
+    let second = source.fact().expect("second");
+    assert_eq!(first.data, second.data);
+}
+
+/// 模式切换产生不同 fingerprint → 会再次注入。
+#[test]
+fn workflow_state_source_mode_switch_changes_snapshot() {
+    let executing = WorkflowStateReminderSource::new(Arc::new(FixedProbe(Some(workflow_hint(
+        workflow::ActiveMode::Executing,
+    )))));
+    let replanning = WorkflowStateReminderSource::new(Arc::new(FixedProbe(Some(workflow_hint(
+        workflow::ActiveMode::Replanning,
+    )))));
+    assert_ne!(
+        executing.fact().unwrap().data,
+        replanning.fact().unwrap().data
+    );
 }

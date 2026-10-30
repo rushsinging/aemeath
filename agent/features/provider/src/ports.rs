@@ -35,11 +35,8 @@ impl ResolvedInvocation {
                 "invocation max_tokens must be greater than zero",
             ));
         }
-        if effective_reasoning > requested_reasoning {
-            return Err(configuration(
-                "effective reasoning must not exceed requested reasoning",
-            ));
-        }
+        // #2148：server_effort_map 允许把 Off 归并为更高档（#2032 权威口径），
+        // effective 高于 requested 是合法形态，不再视为配置错误。
         Ok(Self {
             model,
             max_tokens,

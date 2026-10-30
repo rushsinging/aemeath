@@ -74,6 +74,8 @@ pub const KIND_MEMORY_RECALL: &str = "memory_recall";
 
 /// 后台进程完成通知（#252，事件类，OnEvent 触发）。
 pub const KIND_BACKGROUND_PROCESS: &str = "background_process";
+/// Workflow 状态提示（Active 出现 / 进入 Replanning 的一次性提示）。
+pub const KIND_WORKFLOW_STATE: &str = "workflow_state";
 
 /// 注入优先级缺省：事件类（后台进程完成、memory 更新）最高。
 pub const PRIORITY_EVENT: i32 = 300;
@@ -86,6 +88,8 @@ pub const PRIORITY_ENVIRONMENT: i32 = 100;
 
 /// 记忆召回 reminder：辅助上下文，低于任务状态（先砍它保任务态）。
 pub const PRIORITY_MEMORY_RECALL: i32 = 150;
+/// Workflow 状态提示：高于环境、低于任务状态（编排事实优先于环境描述）。
+pub const PRIORITY_WORKFLOW_STATE: i32 = 180;
 
 /// 统一 envelope 的格式版本：解析兼容与格式演进的依据。
 pub const ENVELOPE_VERSION: u32 = 1;

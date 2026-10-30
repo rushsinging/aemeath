@@ -122,6 +122,18 @@ pub enum Commands {
         command: RsiCommands,
     },
 
+    /// Remove orphaned on-disk data (sessions / tool results / workflows) that
+    /// no longer has any reference. Irreversible.
+    Cleanup {
+        /// Only list what would be removed, delete nothing
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -131,6 +143,232 @@ pub enum Commands {
 
     /// Print version information
     Version,
+
+    /// Offline evaluation tools for the compaction chain (hidden)
+    #[command(hide = true)]
+    Eval {
+        #[command(subcommand)]
+        command: EvalCommands,
+    },
+}
+
+/// `aemeath eval` 子命令集（隐藏，离线评测用，不参与日常对话链路）。
+#[derive(Subcommand)]
+pub enum EvalCommands {
+    /// Compact chain evaluation
+    #[command(hide = true)]
+    Compact {
+        #[command(subcommand)]
+        command: CompactEvalCommands,
+    },
+}
+
+/// `aemeath eval compact quiz` 子命令集（两步式）。
+#[derive(Subcommand)]
+pub enum QuizCommands {
+    /// 出题：答题模型读 early 历史，产出题库文件（后续多档复用）
+    Generate {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// 出题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 出题推理档位（缺省 low，跟随全局默认）
+        #[arg(long, default_value = "low")]
+        reasoning: String,
+
+        /// 最多为多少个 case 出题
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 题库输出路径（JSON）
+        #[arg(long)]
+        output: PathBuf,
+    },
+
+    /// 答题+判卷：用固定题库，多档位可复用保证可比
+    Answer {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// generate 产出的题库文件
+        #[arg(long)]
+        questions: PathBuf,
+
+        /// 压缩输出目录（<case_id>.summary.txt；可含 run_summary.json 取 tail 条数）
+        #[arg(long)]
+        summaries: PathBuf,
+
+        /// 答题模型 selection
+        #[arg(long)]
+        model: String,
+
+        /// 独立判卷模型 selection（评测时显式指定，不设默认）
+        #[arg(long)]
+        judge: String,
+
+        /// 答题推理档位（缺省 low，跟随全局默认）
+        #[arg(long, default_value = "low")]
+        reasoning: String,
+
+        /// 判卷推理档位（缺省跟随 --reasoning；判卷质量优先时可单独抬高）
+        #[arg(long)]
+        judge_reasoning: Option<String>,
+
+        /// 最多评多少个 case
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+
+        /// 报告输出路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+/// `aemeath eval compact` 子命令集。
+#[derive(Subcommand)]
+pub enum CompactEvalCommands {
+    /// 从 context.log 输出压缩画像（频率/耗时/分块/降级/模型分桶）
+    Telemetry {
+        /// 日志路径（默认 ~/.agents/logs/context.log）
+        #[arg(long)]
+        log: Option<PathBuf>,
+
+        /// 只统计该 ISO 日期前缀之后的事件，如 2026-10-01
+        #[arg(long)]
+        since: Option<String>,
+
+        /// 输出 JSON 路径（默认 eval/compact/results/telemetry_baseline.json）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
+    /// 从真实 session dataset 导出压缩评测 case
+    Export {
+        /// session 根目录（默认 ~/.agents/session）
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// case 输出目录（必填）
+        #[arg(long)]
+        output_dir: PathBuf,
+
+        /// 最多导出多少个 case
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+
+        /// 只导出 committed steps 不少于该数量的会话
+        #[arg(long, default_value_t = 40)]
+        min_steps: usize,
+
+        /// 每个 case 的 must_keep 上限（按出现频次取前 N）
+        #[arg(long, default_value_t = 1000)]
+        max_must_keep: usize,
+
+        /// must_keep 最低出现次数（默认 3；只出现一次的路径多为噪声，不计入）
+        #[arg(long, default_value_t = 3)]
+        min_must_keep_frequency: usize,
+
+        /// 跳过估算 token 超过该值的会话（超出压缩窗口的巨型历史不适合评测）
+        #[arg(long, default_value_t = 3_000_000)]
+        max_tokens: u64,
+
+        /// 只导出发生过压缩的会话（真实生产压缩点，quiz/生产反馈用）
+        #[arg(long, default_value_t = false)]
+        only_compacted: bool,
+
+        /// 只导出被压缩历史（early）估算 token 不低于该值的会话
+        #[arg(long, default_value_t = 100_000)]
+        min_compacted_tokens: u64,
+
+        /// 只导出指定会话（dataset 目录名 stem，如 01a182e6-0323-...）
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// 生产实际反馈指标（重问率/重复读取/错误率/中断/不满信号/成本）
+    Feedback {
+        /// session 根目录（默认 ~/.agents/session）
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// 最多检查多少个 session
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+
+        /// 输出 JSON 路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
+    /// 对导出的 case 跑一次真实压缩（走生产装配与管线）
+    Run {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// summary 输出目录（写 <case_id>.summary.txt 与 run_summary.json）
+        #[arg(long)]
+        output_dir: PathBuf,
+
+        /// 最多跑多少个 case
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+
+        /// 显式 compact 模型 selection（如 "Bailian Token Plan/deepseek-v4.1-flash-1017"）；
+        /// 缺省跟随 context.compact_model
+        #[arg(long)]
+        model: Option<String>,
+
+        /// 压缩调用的推理档位（off/minimal/low/medium/high/xhigh/max）；
+        /// 缺省跟随 context.compact_reasoning（未配置=low）
+        #[arg(long)]
+        reasoning: Option<String>,
+    },
+
+    /// 续接问答（P3，两步式）：generate 出题落盘 → answer 多档复用同一题库
+    Quiz {
+        #[command(subcommand)]
+        command: QuizCommands,
+    },
+
+    /// 真实压缩摘要的 must_keep 召回与压缩率（用已落盘摘要，不重跑压缩）
+    Recall {
+        /// session 根目录（默认 ~/.agents/session）
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// 最多检查多少个 session
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+
+        /// 每个 session 的 must_keep 上限（按出现频次取前 N）
+        #[arg(long, default_value_t = 1000)]
+        max_must_keep: usize,
+
+        /// 输出 JSON 路径（缺省打印到 stdout）
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+
+    /// 按 case 计算确定性指标（需要压缩输出）
+    Score {
+        /// export 产生的 case 目录
+        #[arg(long)]
+        cases: PathBuf,
+
+        /// 压缩输出目录，文件名约定 <case_id>.summary.txt
+        #[arg(long)]
+        summaries: Option<PathBuf>,
+
+        /// 输出 JSON 路径
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 /// `aemeath systemone` 子命令集。

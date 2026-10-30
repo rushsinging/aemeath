@@ -521,7 +521,8 @@ where
                                 continue;
                             }
                         };
-                        let session_id = crate::ports::SessionId::new(bound.session().id.clone());
+                        let session_text = bound.session().id.clone();
+                        let session_id = crate::ports::SessionId::new(session_text.clone());
                         let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context().clone());
                         match coordinator.clear_session(&session_id).await {
                             Ok(()) => {
@@ -529,6 +530,34 @@ where
                                 // Run 计数器（Reflection interval 频控）绑定
                                 // session epoch：/clear 即新 epoch，从 0 重数。
                                 run_count = 0;
+                                // #2089：Workflow 只清 Session 可见性（索引 +
+                                // 内存表），实体保留待统一清理回收。失败不阻断
+                                // 会话 reset，但必须如实回报，避免 Workflow 残留
+                                // 被误认为「仍然可见」。
+                                if let Some(reset) = shell
+                                    .runtime_context_factory
+                                    .services()
+                                    .workflow_reset
+                                    .clone()
+                                {
+                                    if let Err(error) = reset.reset_session(session_text.as_str()) {
+                                        log::warn!(
+                                            target: crate::LOG_TARGET,
+                                            "workflow_session_reset_failed session_id={} error={error}",
+                                            session_text,
+                                        );
+                                        sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Workflow 索引清理失败（实体仍保留）：{error}"),
+                                            is_error: true,
+                                        }).await;
+                                    } else {
+                                        log::debug!(
+                                            target: crate::LOG_TARGET,
+                                            "workflow_session_reset session_id={}",
+                                            session_text,
+                                        );
+                                    }
+                                }
                                 sink.send_event(RuntimeStreamEvent::SessionReset).await;
                             }
                             Err(error) => {
@@ -806,6 +835,7 @@ where
                 // 重注入陈旧进度，无法区分「旧进度」与「当前无任务」）。
                 let task_progress_fact = task_progress_source.fact();
                 let task_progress_present = task_progress_fact.is_some();
+                let mut workflow_state_present = true;
                 if let Some(fact) = task_progress_fact {
                     startup_facts.push(fact);
                 }
@@ -888,6 +918,22 @@ where
                         }
                     }
                 }
+                // Workflow 状态提示（#2088）：开关开启且装配了 probe 时注册
+                // kind；状态未变由 SkipIfUnchanged 去重，不重复注入。
+                // 数据面在 run_services step 边界每步重新推送（Snapshot）。
+                if let Some(probe) = runtime_context.workflow_probe() {
+                    let workflow_source =
+                        crate::application::loop_engine::chat::reminder_sources::WorkflowStateReminderSource::new(probe);
+                    allowed_kinds.push(context::ReminderKind::workflow_state());
+                    match workflow_source.fact() {
+                        Some(fact) => startup_facts.push(fact),
+                        None => workflow_state_present = false,
+                    }
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "reminder_fact_registered kind=workflow_state trigger=on_step_interval",
+                    );
+                }
                 let reminder_context_port = runtime_context.context();
                 reminder_context_port.reminders.create_reminder_pipeline(
                     run_id.clone(),
@@ -897,6 +943,11 @@ where
                     reminder_context_port
                         .reminders
                         .remove_reminder_fact(&context::ReminderKind::task_progress());
+                }
+                if !workflow_state_present {
+                    reminder_context_port
+                        .reminders
+                        .remove_reminder_fact(&context::ReminderKind::workflow_state());
                 }
                 for fact in startup_facts {
                     reminder_context_port

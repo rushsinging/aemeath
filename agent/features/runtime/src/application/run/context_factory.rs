@@ -158,6 +158,8 @@ impl RuntimeContextFactory {
         scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
         scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
         policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
+        workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
+        workflow_reset: Option<Arc<dyn workflow::WorkflowSessionReset>>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -170,6 +172,8 @@ impl RuntimeContextFactory {
             scoring_for_recall,
             scoring_for_skill_match,
             policy_triage,
+            workflow_probe,
+            workflow_reset,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -184,6 +188,8 @@ impl RuntimeContextFactory {
         scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
         scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
         policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
+        workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
+        workflow_reset: Option<Arc<dyn workflow::WorkflowSessionReset>>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -200,6 +206,8 @@ impl RuntimeContextFactory {
                 scoring_for_skill_match,
                 policy_triage,
                 compact_model_resolver: None,
+                workflow_probe,
+                workflow_reset,
             },
             provider_factory: None,
             skill_catalog: None,
