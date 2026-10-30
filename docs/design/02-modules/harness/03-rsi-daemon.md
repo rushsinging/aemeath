@@ -44,8 +44,8 @@ enum RsiControlAck {
 单个改进周期材料量大（组件树全量 + 跨会话行为投影 + 经验库），**MUST 分块执行**：
 
 1. **材料分块**：按组件分组读入（每块 = 一个/一组组件 + 与其相关的行为投影切片 + 相关 Active lessons）；跨会话行为投影按时间窗口切块。
-2. **分块提案**：LLM 逐块处理——每块独立产出局部 ChangeSet（每条 edit 附证据引用与理由，结构化输出 + JSON 兜底，对齐反思解析修复链路经验：空输出/解析失败重试与修复上限）。
-3. **分块落盘**：每块局部 ChangeSet 独立 validate → 成功即原子写盘（块级采纳）→ 回写该块经验；**单块失败只作废该块**，NEVER 拖垮整个周期（区别于交互提案的整份作废：定时批量场景块级幂等优先）。
+2. **分块提案**：LLM 逐块处理——每块独立产出局部 ChangeSet（每条 edit 附证据引用与理由，结构化输出 + JSON 兜底，对齐反思解析修复链路经验：空输出/解析失败重试与修复上限）。single-phase 兼容路径使用短 evidence ref；two-phase 则先由宿主路由候选组件，再由诊断阶段选择固定目标。
+3. **分块落盘**：每块局部 ChangeSet 独立 validate → 成功即原子写盘（块级采纳）→ 回写该块经验；**单块失败只作废该块**，NEVER 拖垮整个周期（区别于交互提案的整份作废：定时批量场景块级幂等优先）。two-phase 执行只写诊断指定组件，NEVER 输出 component id/action。
 4. 周期结束记录汇总（采纳/作废/无变更计数）入经验库与日志。
 
 变更对会话的生效路径：daemon 落盘 → 活跃会话在下一 run 边界热载检测到变更 → 防御性复检 → 生效/回退 → **Remind 通知 LLM**（复用 GuidanceReloadPolicy 通道，告知组件已更新）。
@@ -64,7 +64,7 @@ enum RsiControlAck {
 | `evidence_max_runs_per_cycle` | 50 | 每周期步长上限：最多处理的 run 数，超出留待下周期增量消化。默认配合 8 小时周期；按真实 corpus 模拟，session 不跨块时平均约 11–12 个数据块/轮。旧键 `evidence_max_sessions_per_cycle` 仅兼容 alias |
 | `evidence_block_runs` | 5 | 数据源分块粒度：每块包含的 run 数上限；旧键 `evidence_block_sessions` 仅兼容 alias（流模型见 04 分片 §2A.5/2A.6） |
 | `chunk_max_components` | 待废弃 | v1 按组件分块的遗留参数，语义降级为「单块内组件面体积兜底」（主分块单位是数据源块，04 分片 §2A.5） |
-| `execution_mode` | `single_phase` | 改进执行模式：`single_phase`（一次提案即落盘，v1 行为）/ `diagnose_only`（每块 1 次诊断仅产出 issue + 跨块汇总，**不落盘**，执行派发与强度门禁由 #2092 决定，#2078） |
+| `execution_mode` | `single_phase` | 改进执行模式：`single_phase`（一次提案即落盘，v1 兼容路径，带路由止血校验）/ `diagnose_only`（仅诊断，不落盘）/ `two_phase`（宿主路由候选 → 诊断选择固定组件 → 执行只写正文） |
 
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 
@@ -94,7 +94,7 @@ aemeath rsi run [--dry-run] [--max-runs N] [--window-days N] [--json]
 
 `aemeath rsi run --dry-run` 执行**完整周期但不产生任何持久副作用**：
 
-- ✅ 执行：证据投影（按流模型取数）→ LLM 提案 → ChangeSet 校验（含整份作废预检）→ **虚拟采纳** → Compose 仲裁
+- ✅ 执行：证据投影（按流模型取数）→ 组件路由 → LLM 诊断/提案 → ChangeSet 校验（含整份作废预检）→ **虚拟采纳** → Compose 仲裁
 - **虚拟终态**：dry-run 使用内存 overlay registry。改进块与 Compose 的编辑只写入 overlay，后续块和 Compose 都能看到叠加后的虚拟终态；底层真实组件 registry NEVER 被写入
 - ❌ 不执行：组件落盘、lesson 写入、checkpoint 推进——三者全部跳过（校验失败的作废同样只报告不落任何状态；Compose 修正同样只预览不落盘）
 - **预览输出**：每块提案摘要与 Compose 仲裁摘要（组件 id + 编辑类型 + reason + diff 概要）写入 stdout（`--json` 时输出结构化结果），并落 `~/.agents/harness/dry-run-preview.md` 供事后查看（预览文件 ALWAYS 覆盖写，NEVER 累积）
@@ -112,6 +112,7 @@ TaskKind 插拔面保留（c8 plugin 等后续组件治理任务可注册），�
 - **daemon 生命周期**：常驻不自动退出、显式 stop、崩溃后重拉，主会话全程可用（L4 场景）。
 - **控制协议**：Trigger/Status/Stop 往返、Busy 排队路径。
 - **dry-run 全链路**：有虚拟采纳时 MUST 进入 Compose；Compose prompt 使用内存叠加终态与采纳前 lesson 快照；真实 registry write/delete、lesson append/retire、checkpoint 推进全部为 0（L2 + 真模型 e2e）。
+- **组件路由**：signal → 候选组件、Skill 精确匹配、unknown unresolved、single-phase 路由外组件拒绝、two-phase 执行固定组件均有 L2 测试；事件流记录候选/选择/拒绝/unresolved。
 - **分块**：大材料分块处理、单块失败不影响其余块（L2）。
 - **真模型 e2e**：Timer 触发 → daemon 分块提案 → daemon 落盘 → 活跃会话下一 run 生效且收到 Remind 通知 → 经验库含证据记录；**无会话时离线改进路径同样验证**。mock 全绿不构成本项验收（既有教训）。
 - TUI：Manual 回执可见；Timer 周期静默（结果可查）。

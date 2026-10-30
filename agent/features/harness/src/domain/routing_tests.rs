@@ -102,6 +102,18 @@ fn unknown_skill_name_is_unresolved_rather_than_overlay_fallback() {
 }
 
 #[test]
+fn route_context_extracts_skill_name_from_bounded_session_context() {
+    let context = crate::domain::routing::RouteContext::from_context_excerpt(
+        r#"前文\n工具调用 Skill（goal：诊断）：{"skill":"cmux-diagnostics","query":"x"}\n结果"#,
+    );
+    assert_eq!(context.skill_name.as_deref(), Some("cmux-diagnostics"));
+    assert_eq!(
+        crate::domain::routing::RouteContext::from_context_excerpt("没有 skill 输入"),
+        crate::domain::routing::RouteContext::default()
+    );
+}
+
+#[test]
 fn aggregate_run_outcome_has_no_component_route() {
     let decision = crate::domain::routing::route_signal(
         &signal(SignalKind::RunOutcome, "run_outcome:aggregate"),

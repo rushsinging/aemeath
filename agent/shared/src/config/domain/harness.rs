@@ -32,6 +32,8 @@ pub enum RsiExecutionMode {
     /// 诊断优先：每块 1 次诊断只产出 issue，跨块汇总，执行派发由后续
     /// 强度门禁（#2092）决定——本模式当前**不落盘**。
     DiagnoseOnly,
+    /// 两阶段：宿主路由候选 → 诊断选择固定组件 → 执行只写该组件正文。
+    TwoPhase,
 }
 
 /// RSI 维护 daemon 配置。

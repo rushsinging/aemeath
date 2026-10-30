@@ -34,17 +34,17 @@
 {组件材料 JSON：id / frontmatter / body}
 
 近期执行证据（session 行为聚合信号——改进的主要依据）：
-{证据块：每行 "- <signal_id> | <摘要> | 摘录: <摘录>"，按优先级排序}
+{证据块：每行 "- [E0] <signal kind> | <摘要> | 摘录: <摘录>"，按优先级排序}
 
 历史经验（此前采纳的改进结论，供参考、可被新证据推翻）：
 {lessons 块：每行 "- [<组件类型>] <lesson 文本>"；空则「（暂无历史经验）」}
 
 任务：基于执行证据判断组件是否存在值得改进的问题（缺失、冗余、错误、
 空壳占位、重复失败未覆盖的规则）。空壳占位（TODO、无实际内容的正文）
-视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 指出它回应
-证据中的哪条信号（reason 中引用其 signal id，如 repeated_failure:Bash:…）；
-无法对应任何信号的编辑是投机，NEVER 提出。证据与组件现状都不足时选择
-no_change——那是一个正当答案，比牵强的编辑更好。
+视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 在 evidence_refs
+中结构化列出它回应的短证据编号（如 E0）；无法对应任何证据的编辑是投机，
+NEVER 提出。证据与组件现状都不足时选择 no_change——那是一个正当答案，
+比牵强的编辑更好。
 
 写规则的质量标准（每次落笔先自检）：
 - **可执行**：每条规则必须写清「什么条件下」+「必须/禁止做什么」，
@@ -74,11 +74,11 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
-- `signal_ids` MUST 非空且每个 id 都来自上方证据块；空/重复/未知引用整份作废
+- `evidence_refs` MUST 非空，且每个 ref 都来自上方证据块（E0/E1…）；空/重复/未知引用整份作废
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{"decision":"propose","reason":"<提案依据，一句话>","signal_ids":["<证据块中的 signal id>"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"<名>"},"content":{"frontmatter":null,"body":"<完整正文>"}}]}}
+{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"<名>"},"content":{"frontmatter":null,"body":"<完整正文>"}}]}}
 {"decision":"no_change","reason":"<一句话理由>"}
 不要输出 JSON 以外的任何文字。
 ```
@@ -88,7 +88,7 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 | 约束 | 原因 |
 |---|---|
 | 证据置于组件材料**之后**、lessons 之前 | 组件是编辑对象，证据是依据，经验是参考——阅读顺序即决策优先级 |
-| 每条编辑 **MUST 结构化引用 signal_ids** | 对齐 Harness²「每条编辑 MUST 追溯到轨迹时刻，否则是投机」；解析侧校验非空/存在/去重，同时是 lesson 证据绑定与来源回读的入口 |
+| 每条编辑 **MUST 结构化引用 evidence_refs** | 对齐 Harness²「每条编辑 MUST 追溯到轨迹时刻，否则是投机」。模型只复制 E0/E1 短编号；runtime 映射完整 signal id，lesson 与事件 NEVER 持久化短 ref |
 | 空壳占位（TODO）显式点名为缺陷 | 首轮 e2e 实证：不点名则模型倾向 no_change，组件永远不长大 |
 | `no_change` 是**正当答案** | 防止为凑数产出牵强编辑（真实失败模式：模型会写空泛规则） |
 | omitted-is-inherited + 整份作废 | 半成品提案 NEVER 上线（任一条校验失败整份拒绝） |
@@ -100,10 +100,11 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 ### 2.3 证据块渲染
 
 ```rust
-// render_evidence_block：按 SignalKind::render_priority() 排序
+// route_evidence_facts：按 SignalKind::render_priority() 排序
 // repeated_failure(0) > retry_pattern(1) > oversized_result(2) > run_outcome(3) > cycle_observation(4)
-"- {signal_id} | {summary} | 摘录: {excerpt}"
+"- [E0] repeated_failure | {summary} | 摘录: {excerpt}"
 ```
+- 模型只引用 `E0/E1`；完整 signal id 由 runtime 映射（长 retry fingerprint NEVER 要求模型逐字复制）
 - 空证据 → 「（近期无执行证据）」（周期照常，NEVER 跳过）
 - 摘录有界（`EVIDENCE_EXCERPT_BOUND` = 200 字符）
 
@@ -114,6 +115,56 @@ no_change——那是一个正当答案，比牵强的编辑更好。
 ```
 - 只列 Active（`load_active`）；被覆盖组件的旧 lesson 已自动 retired（§3.2）
 - 空 corpus → 「（暂无历史经验）」
+
+### 2.5 TwoPhase：路由候选诊断 + 固定组件执行
+
+TwoPhase 不再把全部组件 chunk 与证据混合后让模型自由选择落点。
+
+诊断 prompt 结构：
+
+```text
+证据与候选：
+- [E0] repeated_failure | {summary} | 摘录: {excerpt} | 候选: C0=tool-guidance/default,C1=guardrails/default
+
+候选组件当前内容：
+{仅路由命中组件的 JSON 材料}
+
+输出：
+{"decision":"diagnose","reason":"...","issues":[
+  {
+    "evidence_ref":"E0",
+    "component_candidate":0,
+    "problem":"...",
+    "direction":"...",
+    "route_reason":"..."
+  }
+]}
+```
+
+约束：
+
+- 宿主先按 signal/tool/skill/context 生成候选集；诊断只能在候选 index 内选择。
+- Skill 证据必须从来源上下文提取精确 skill 名；无法识别则 unresolved。
+- `run_outcome:aggregate` / `cycle_observation` 无组件路由，只观察。
+- 诊断输出 NEVER 包含组件正文。
+
+固定执行 prompt：
+
+```text
+目标组件：{由 runtime 注入的 ComponentId}
+当前内容：{该组件完整内容}
+诊断任务：[E0] problem / direction / occurrences
+
+输出：
+{"decision":"propose","reason":"...","evidence_refs":["E0"],"body":"<完整正文>"}
+```
+
+约束：
+
+- 执行输出 NEVER 包含 component id、action、change_set。
+- runtime 用诊断结果组装唯一 upsert；delete 不允许。
+- evidence_refs 只能指向本次输入的短编号。
+- dry-run 只写虚拟 overlay；正式路径 validate 后原子写盘并回写 lesson。
 
 ## 3. 周期汇总（Compose）提示词
 

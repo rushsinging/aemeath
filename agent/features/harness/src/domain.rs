@@ -39,6 +39,8 @@ pub mod task;
 mod task_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(test)]
+mod two_phase_tests;
 pub mod versioning;
 pub mod virtual_registry;
 #[cfg(test)]

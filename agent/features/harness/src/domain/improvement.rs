@@ -267,6 +267,45 @@ pub fn parse_diagnosis(response_text: &str) -> Result<DiagnosisProposal, Harness
     }
 }
 
+/// 解析 TwoPhase 诊断应答（候选 index 协议）。
+pub fn parse_two_phase_diagnosis(
+    response_text: &str,
+) -> Result<TwoPhaseDiagnosisProposal, HarnessError> {
+    parse_first_json_object(response_text, "诊断应答")
+}
+
+/// 解析固定组件执行应答（无 component id/action 协议）。
+pub fn parse_fixed_component_execution(
+    response_text: &str,
+) -> Result<FixedComponentExecutionProposal, HarnessError> {
+    parse_first_json_object(response_text, "执行应答")
+}
+
+fn parse_first_json_object<T: serde::de::DeserializeOwned>(
+    response_text: &str,
+    label: &str,
+) -> Result<T, HarnessError> {
+    let trimmed = response_text.trim();
+    let payload_start = trimmed
+        .find('{')
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, format!("{label}不含 JSON 对象")))?;
+    let json_source = trimmed
+        .get(payload_start..)
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, format!("{label}载荷切分越界")))?;
+    let mut stream = serde_json::Deserializer::from_str(json_source).into_iter::<T>();
+    match stream.next() {
+        Some(Ok(value)) => Ok(value),
+        Some(Err(error)) => Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!("{label}解析失败：{error}"),
+        )),
+        None => Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!("{label}JSON 流为空"),
+        )),
+    }
+}
+
 /// 执行阶段 prompt（#2078）：消费诊断出的改进任务，写出具体组件修改。
 pub fn build_execution_prompt(
     issues: &[DiagnosedIssue],
@@ -317,6 +356,49 @@ pub fn build_execution_prompt(
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
+}
+
+/// TwoPhase 诊断输出的单条 issue DTO：只引用短证据与候选 index。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TwoPhaseDiagnosisIssue {
+    pub evidence_ref: String,
+    pub component_candidate: usize,
+    pub problem: String,
+    pub direction: String,
+    pub route_reason: String,
+}
+
+/// TwoPhase 诊断应答信封。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum TwoPhaseDiagnosisProposal {
+    Diagnose {
+        reason: String,
+        issues: Vec<TwoPhaseDiagnosisIssue>,
+    },
+    NoIssue {
+        reason: String,
+    },
+}
+
+/// 固定组件执行应答：NEVER 输出 component id/action。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum FixedComponentExecutionProposal {
+    Propose {
+        reason: String,
+        evidence_refs: Vec<String>,
+        body: String,
+    },
+    NoChange {
+        reason: String,
+    },
+}
+
+/// TwoPhase 运行结果（diagnosis 供上层报告/Compose 使用）。
+pub struct RunTwoPhaseOutcome {
+    pub outcome: CycleOutcome,
+    pub diagnosis: DiagnosisSummary,
 }
 
 /// 组装单块提案 prompt（结构化材料 + 经验 + 编辑契约 + 输出格式）。
@@ -1191,6 +1273,555 @@ pub async fn run_diagnosis_cycle(
         ));
     }
     Ok(summary)
+}
+
+/// TwoPhase 单条证据的路由计划：短 ref + 完整 signal + 受限候选组件。
+struct TwoPhaseRoutePlan {
+    fact: crate::domain::routing::RouteEvidenceFact,
+    candidates: Vec<ComponentId>,
+}
+
+/// TwoPhase：宿主路由 → 诊断选择固定组件 → 执行只写该组件正文。
+///
+/// dry-run 调用方 MUST传入 `VirtualComponentRegistry`（与 single-phase 相同），
+/// 使后续 Compose 能看到虚拟叠加终态；本函数不接触底层真实 registry。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_two_phase_cycle(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
+    _config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    let cycle_ref = cycle_id.to_string();
+    let lessons = lesson_store.load_active()?;
+    let component_ids = registry.list();
+    let mut component_contents = Vec::with_capacity(component_ids.len());
+    for id in &component_ids {
+        component_contents.push((id.clone(), registry.read(id)?));
+    }
+
+    // #2092 强度门禁：observe 档只观察，NEVER 进入诊断候选。
+    history.accumulate(cycle_id, &evidence.signals);
+    let thresholds = crate::domain::strength::StrengthThresholds::default();
+    let mut verdicts = Vec::new();
+    for signal in &evidence.signals {
+        let input = history.build_input(cycle_id, signal, &lessons);
+        verdicts.push(crate::domain::strength::judge_strength(&input, &thresholds));
+    }
+    for verdict in &verdicts {
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::StrengthGate {
+                signal_id: verdict.signal_id.clone(),
+                tier: verdict.tier.as_str().to_string(),
+                rationale: verdict.rationale.clone(),
+            });
+        }
+        preview_lines.push(format!(
+            "  [强度] {} → {}（{}）",
+            verdict.signal_id,
+            verdict.tier.as_str(),
+            verdict.rationale
+        ));
+    }
+    let strong_ids: std::collections::BTreeSet<String> = verdicts
+        .iter()
+        .filter(|verdict| verdict.tier.allows_apply())
+        .map(|verdict| verdict.signal_id.clone())
+        .collect();
+    let mut gated_evidence = evidence.clone();
+    gated_evidence.signals = evidence
+        .signals
+        .iter()
+        .filter(|signal| strong_ids.contains(&signal.signal_id))
+        .cloned()
+        .collect();
+
+    // 宿主先生成受限候选；unresolved 只进事件，不进诊断 prompt。
+    let context = build_route_context(&gated_evidence, context_reader);
+    let mut route_plans = Vec::new();
+    for fact in crate::domain::routing::route_evidence_facts(&gated_evidence) {
+        match crate::domain::routing::route_signal(&fact.signal, &component_ids, &context) {
+            crate::domain::routing::RouteDecision::Exact { component, reason } => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::RouteCandidates {
+                        block_index: 0,
+                        signal_id: fact.signal.signal_id.clone(),
+                        candidates: vec![component.to_string()],
+                        reason: reason.clone(),
+                    });
+                    recorder.record(&crate::domain::events::RsiCycleEvent::RouteSelected {
+                        block_index: 0,
+                        signal_id: fact.signal.signal_id.clone(),
+                        component: component.to_string(),
+                        stage: "router".to_string(),
+                        reason,
+                    });
+                }
+                route_plans.push(TwoPhaseRoutePlan {
+                    fact,
+                    candidates: vec![component],
+                });
+            }
+            crate::domain::routing::RouteDecision::Choose { candidates, reason } => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::RouteCandidates {
+                        block_index: 0,
+                        signal_id: fact.signal.signal_id.clone(),
+                        candidates: candidates.iter().map(|id| id.to_string()).collect(),
+                        reason,
+                    });
+                }
+                route_plans.push(TwoPhaseRoutePlan { fact, candidates });
+            }
+            crate::domain::routing::RouteDecision::Unresolved { reason } => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::RouteUnresolved {
+                        block_index: 0,
+                        signal_id: fact.signal.signal_id.clone(),
+                        reason,
+                    });
+                }
+            }
+        }
+    }
+
+    if route_plans.is_empty() {
+        return Ok(RunTwoPhaseOutcome {
+            outcome: CycleOutcome {
+                summary: "无候选组件：仅观察".to_string(),
+                adopted: Vec::new(),
+            },
+            diagnosis: DiagnosisSummary::default(),
+        });
+    }
+
+    // 只渲染候选组件的当前内容，NEVER 让全组件面重复进入诊断。
+    let candidate_ids: Vec<ComponentId> = {
+        let mut ids = Vec::new();
+        for plan in &route_plans {
+            for candidate in &plan.candidates {
+                if !ids.contains(candidate) {
+                    ids.push(candidate.clone());
+                }
+            }
+        }
+        ids
+    };
+    let candidate_materials: Vec<(ComponentId, ComponentContent)> = component_contents
+        .iter()
+        .filter(|(id, _)| candidate_ids.contains(id))
+        .cloned()
+        .collect();
+
+    let route_block = route_plans
+        .iter()
+        .map(|plan| {
+            let candidates = plan
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(index, id)| format!("C{index}={id}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "- [{}] {} | {}{} | 候选: {}",
+                plan.fact.evidence_ref,
+                plan.fact.signal.kind.as_str(),
+                plan.fact.signal.summary,
+                plan.fact
+                    .signal
+                    .excerpt
+                    .as_deref()
+                    .map(|excerpt| format!(" | 摘录: {excerpt}"))
+                    .unwrap_or_default(),
+                candidates
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let materials_block = serde_json::to_string(&candidate_materials).map_err(|error| {
+        HarnessError::invalid(ERROR_DOMAIN, format!("候选组件序列化失败：{error}"))
+    })?;
+    let lessons_block = if lessons.is_empty() {
+        "（暂无历史经验）".to_string()
+    } else {
+        lessons
+            .iter()
+            .map(|lesson| format!("- [{}] {}", lesson.component_kind, lesson.lesson))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let diagnosis_prompt = format!(
+        r#"你是 harness 组件诊断器（TwoPhase）。宿主已根据证据生成候选组件；你只能在候选 index 中选择目标，NEVER 生成新组件或路由外组件。
+
+证据与候选：
+{route_block}
+
+候选组件当前内容：
+{materials_block}
+
+历史经验：
+{lessons_block}
+
+输出每条 issue：
+- evidence_ref：E0/E1 等短引用
+- component_candidate：候选编号数字（如 0 表示 C0）
+- problem / direction / route_reason
+
+只输出一个 JSON 对象：
+{{"decision":"diagnose","reason":"<一句话>","issues":[{{"evidence_ref":"E0","component_candidate":0,"problem":"<问题>","direction":"<方向>","route_reason":"<选择该组件的原因>"}}]}}
+或：
+{{"decision":"no_issue","reason":"<一句话>"}}
+不要输出 JSON 以外的任何文字。"#
+    );
+    let diagnosis_completion =
+        complete_with_usage_event(llm, &diagnosis_prompt, "two_phase_diagnosis", 0, recorder)
+            .await?;
+    let parsed_issues = match parse_two_phase_diagnosis(&diagnosis_completion.text) {
+        Ok(TwoPhaseDiagnosisProposal::Diagnose { issues, .. }) => issues,
+        Ok(TwoPhaseDiagnosisProposal::NoIssue { .. }) => Vec::new(),
+        Err(error) => {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index: 0,
+                    stage: "two_phase_diagnosis".to_string(),
+                    message: error.message().chars().take(120).collect(),
+                });
+            }
+            Vec::new()
+        }
+    };
+
+    let mut diagnosed_issues = Vec::new();
+    for issue in parsed_issues {
+        let Some(plan) = route_plans
+            .iter()
+            .find(|plan| plan.fact.evidence_ref == issue.evidence_ref)
+        else {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index: 0,
+                    stage: "two_phase_route_ref".to_string(),
+                    message: format!("未知 evidence ref {}", issue.evidence_ref)
+                        .chars()
+                        .take(120)
+                        .collect(),
+                });
+            }
+            continue;
+        };
+        let Some(component) = plan.candidates.get(issue.component_candidate).cloned() else {
+            if let Some(recorder) = recorder {
+                recorder.record(
+                    &crate::domain::events::RsiCycleEvent::ComponentRouteRejected {
+                        block_index: 0,
+                        component: format!("candidate:{}", issue.component_candidate),
+                        signal_ids: vec![plan.fact.signal.signal_id.clone()],
+                        message: "候选 index 越界".to_string(),
+                    },
+                );
+            }
+            continue;
+        };
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::RouteSelected {
+                block_index: 0,
+                signal_id: plan.fact.signal.signal_id.clone(),
+                component: component.to_string(),
+                stage: "diagnosis".to_string(),
+                reason: issue.route_reason.clone(),
+            });
+        }
+        diagnosed_issues.push(DiagnosedIssue {
+            component: component.to_string(),
+            target_signal: plan.fact.signal.signal_id.clone(),
+            problem: issue.problem,
+            direction: issue.direction,
+        });
+    }
+    if let Some(recorder) = recorder {
+        recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
+            block_index: 0,
+            issues: diagnosed_issues.len(),
+        });
+    }
+    let diagnosis = DiagnosisSummary::merge(vec![diagnosed_issues]);
+    if let Some(recorder) = recorder {
+        recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisSummarized {
+            issues: diagnosis.issues.len(),
+            occurrences: diagnosis.issues.iter().map(|issue| issue.occurrences).sum(),
+        });
+    }
+
+    let mut adopted = 0usize;
+    let mut no_change = 0usize;
+    let mut discarded = 0usize;
+    let mut adoption_records = Vec::new();
+    let mut grouped: std::collections::BTreeMap<
+        ComponentId,
+        Vec<&crate::domain::improvement::AggregatedIssue>,
+    > = std::collections::BTreeMap::new();
+    for issue in &diagnosis.issues {
+        let Some(id) = crate::domain::component::parse_component_id(&issue.component) else {
+            discarded += 1;
+            continue;
+        };
+        grouped.entry(id).or_default().push(issue);
+    }
+
+    for (block_index, (component_id, issues)) in grouped.into_iter().enumerate() {
+        if !component_ids.contains(&component_id) || !candidate_ids.contains(&component_id) {
+            discarded += issues.len();
+            continue;
+        }
+        let content = registry.read(&component_id)?;
+        let signal_ids: Vec<String> = issues
+            .iter()
+            .map(|issue| issue.target_signal.clone())
+            .collect();
+        if let Some(recorder) = recorder {
+            recorder.record(
+                &crate::domain::events::RsiCycleEvent::ExecutionTargetFixed {
+                    block_index,
+                    component: component_id.to_string(),
+                    signal_ids: signal_ids.clone(),
+                },
+            );
+        }
+        let issue_block = issues
+            .iter()
+            .enumerate()
+            .map(|(index, issue)| {
+                format!(
+                    "- [E{index}] 问题「{}」；方向「{}」；出现 {} 次\n",
+                    issue.problem, issue.direction, issue.occurrences
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let execution_prompt = format!(
+            r#"你是 harness 组件执行器（固定组件）。目标组件由诊断阶段确定，你只能输出完整正文；NEVER 输出组件 id、action 或 change_set。
+
+目标组件：{component_id}
+当前内容：
+{body}
+
+诊断任务：
+{issue_block}
+
+要求：
+- evidence_refs 只能使用 E0/E1 等上方短引用；
+- 正文必须保留与任务无关的既有规则；
+- 输出必须是完整 body，不是 diff。
+
+只输出一个 JSON 对象：
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<完整正文>"}}
+或：
+{{"decision":"no_change","reason":"<一句话>"}}
+不要输出 JSON 以外的任何文字。"#,
+            body = content.body
+        );
+        let execution_completion = complete_with_usage_event(
+            llm,
+            &execution_prompt,
+            "two_phase_execution",
+            block_index,
+            recorder,
+        )
+        .await?;
+        let execution = match parse_fixed_component_execution(&execution_completion.text) {
+            Ok(FixedComponentExecutionProposal::Propose {
+                reason,
+                evidence_refs,
+                body,
+            }) => {
+                if execution_evidence_refs_invalid(&evidence_refs, issues.len()) {
+                    discarded += issues.len();
+                    continue;
+                }
+                let new_content = ComponentContent {
+                    frontmatter: content.frontmatter.clone(),
+                    body,
+                };
+                if let Err(error) = registry.validate(&component_id, &new_content) {
+                    if let Some(recorder) = recorder {
+                        recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                            block_index,
+                            stage: "two_phase_execution".to_string(),
+                            message: error.message().chars().take(120).collect(),
+                        });
+                    }
+                    discarded += issues.len();
+                    continue;
+                }
+                (reason, new_content)
+            }
+            Ok(FixedComponentExecutionProposal::NoChange { .. }) => {
+                no_change += 1;
+                continue;
+            }
+            Err(error) => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                        block_index,
+                        stage: "two_phase_execution".to_string(),
+                        message: error.message().chars().take(120).collect(),
+                    });
+                }
+                discarded += issues.len();
+                continue;
+            }
+        };
+        let (reason, new_content) = execution;
+        let change_set = ChangeSet {
+            edits: vec![crate::domain::changeset::ComponentEdit::Upsert {
+                id: component_id.clone(),
+                content: new_content.clone(),
+            }],
+        };
+        let evidence_bindings: Vec<EvidenceBinding> = signal_ids
+            .iter()
+            .filter_map(|signal_id| {
+                evidence
+                    .signals
+                    .iter()
+                    .find(|signal| &signal.signal_id == signal_id)
+            })
+            .map(|signal| EvidenceBinding {
+                run_ref: cycle_ref.clone(),
+                signal: signal.kind,
+                excerpt: signal
+                    .excerpt
+                    .clone()
+                    .unwrap_or_else(|| signal.summary.clone()),
+                signal_id: signal.signal_id.clone(),
+                source: signal.sources.first().cloned(),
+            })
+            .collect();
+
+        if dry_run {
+            preview_lines.push(format!(
+                "[dry-run][two-phase] upsert {component_id}：{}",
+                reason
+            ));
+            if let Err(error) = apply_change_set(registry, &change_set) {
+                discarded += issues.len();
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                        block_index,
+                        stage: "two_phase_execution".to_string(),
+                        message: error.message().chars().take(120).collect(),
+                    });
+                }
+                continue;
+            }
+            adopted += 1;
+            adoption_records.push(crate::domain::task::AdoptionRecord {
+                id: component_id,
+                reason,
+                evidence: evidence_bindings,
+            });
+            continue;
+        }
+
+        if let Some(version_store) = version_store {
+            if let Err(error) = version_store.capture(registry, &component_id, &cycle_ref, "upsert")
+            {
+                log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");
+            }
+        }
+        match apply_change_set(registry, &change_set) {
+            Ok(applied) => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::EditApplied {
+                        component: component_id.to_string(),
+                        action: "upsert".to_string(),
+                        old_chars: content.body.chars().count(),
+                        new_chars: new_content.body.chars().count(),
+                    });
+                }
+                record_adopted_lesson(
+                    lesson_store,
+                    &change_set,
+                    &reason,
+                    &cycle_ref,
+                    recorder,
+                    &|_| evidence_bindings.clone(),
+                );
+                adopted += 1;
+                for edit in applied {
+                    adoption_records.push(crate::domain::task::AdoptionRecord {
+                        id: match edit {
+                            AppliedEdit::Upserted { id } | AppliedEdit::Deleted { id } => id,
+                        },
+                        reason: reason.clone(),
+                        evidence: evidence_bindings.clone(),
+                    });
+                }
+            }
+            Err(_) => discarded += issues.len(),
+        }
+    }
+
+    let prefix = if dry_run { "（dry-run）" } else { "" };
+    let summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    Ok(RunTwoPhaseOutcome {
+        outcome: CycleOutcome {
+            summary,
+            adopted: adoption_records,
+        },
+        diagnosis,
+    })
+}
+
+fn build_route_context(
+    evidence: &crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+) -> crate::domain::routing::RouteContext {
+    for signal in &evidence.signals {
+        if crate::domain::routing::signal_tool(signal) != "Skill" {
+            continue;
+        }
+        for source in &signal.sources {
+            if let Some(excerpt) = context_reader.read_context(source) {
+                let context =
+                    crate::domain::routing::RouteContext::from_context_excerpt(&excerpt.text);
+                if context.skill_name.is_some() {
+                    return context;
+                }
+            }
+        }
+    }
+    crate::domain::routing::RouteContext::default()
+}
+
+fn execution_evidence_refs_invalid(evidence_refs: &[String], issue_count: usize) -> bool {
+    if evidence_refs.is_empty() {
+        return true;
+    }
+    let mut seen = Vec::with_capacity(evidence_refs.len());
+    for evidence_ref in evidence_refs {
+        let index = match evidence_ref
+            .strip_prefix('E')
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            Some(index) => index,
+            None => return true,
+        };
+        if index >= issue_count || seen.contains(&index) {
+            return true;
+        }
+        seen.push(index);
+    }
+    false
 }
 
 /// 执行一轮完整改进周期（分块串行、块级幂等：单块失败不影响其余块）。

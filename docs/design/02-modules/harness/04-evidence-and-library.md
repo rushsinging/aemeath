@@ -124,6 +124,8 @@ enum SignalKind {
 
 **事件流**：`strength_gate { signal_id, tier, rationale }`、`lesson_reviewed { lesson_id, action, rationale }`。
 
+**组件路由事件**：`route_candidates { signal_id, candidates, reason }`、`route_selected { signal_id, component, stage, reason }`、`route_unresolved { signal_id, reason }`、`component_route_rejected { component, signal_ids, message }`、`execution_target_fixed { component, signal_ids }`。
+
 ### 2A.5 数据源流模型（checkpoint · 步长 · 数据源分块，2026-10-23 拍板）
 
 > 修正 v1 语义：分块对象是**数据源（session 证据流）**，NEVER 按组件分块——组件面是每轮提案的编辑对象，不是分块单位。模型对齐 Harness² 的 continual-learning 任务流（`schedule.py::stream_order`）与断点纪律（`runmark.py`）：处理单元推进、完成显式打标、指纹校验复用。

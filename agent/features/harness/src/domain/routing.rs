@@ -66,6 +66,38 @@ pub(crate) fn route_evidence_facts(evidence: &EvidenceBundle) -> Vec<RouteEviden
         .collect()
 }
 
+impl RouteContext {
+    /// 从有界 session 上下文中提取 Skill 名。只做最小 JSON 字符串字段
+    /// 识别，NEVER 解析整段上下文或要求上下文是完整 JSON。
+    pub fn from_context_excerpt(text: &str) -> Self {
+        Self {
+            skill_name: extract_json_string_field(text, "skill"),
+        }
+    }
+}
+
+fn extract_json_string_field(text: &str, field: &str) -> Option<String> {
+    let marker = format!("\"{field}\"");
+    let field_start = text.find(&marker)? + marker.len();
+    let colon = text[field_start..].find(':')? + field_start;
+    let quote = text[colon..].find('"')? + colon + 1;
+    let mut value = String::new();
+    let mut escaped = false;
+    for character in text[quote..].chars() {
+        if escaped {
+            value.push(character);
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' => escaped = true,
+            '"' => return Some(value),
+            _ => value.push(character),
+        }
+    }
+    None
+}
+
 /// 单条 signal 的路由决策。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouteDecision {
@@ -82,7 +114,7 @@ pub enum RouteDecision {
     },
 }
 
-fn signal_tool(signal: &EvidenceSignal) -> &str {
+pub(crate) fn signal_tool(signal: &EvidenceSignal) -> &str {
     signal.signal_id.split(':').nth(1).unwrap_or("")
 }
 

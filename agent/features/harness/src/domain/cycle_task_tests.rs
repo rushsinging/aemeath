@@ -306,6 +306,68 @@ async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
     );
 }
 
+#[tokio::test]
+async fn two_phase_cycle_uses_router_and_fixed_execution() {
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
+        FakeRegistry::with_entries(vec![(component_id("default"), body_content("old"))]),
+    );
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+    let stream = FakeEvidenceStream::default();
+    stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
+        runs: vec![RunRef {
+            session_key: "s1.dataset".into(),
+            run_id: "run-1".into(),
+        }],
+    });
+    *stream.evidence.lock().expect("evidence") = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RepeatedFailure,
+            signal_id: "repeated_failure:Bash:test-failed".into(),
+            summary: "Bash 连续失败 ×3".into(),
+            excerpt: Some("exit code 1".into()),
+            occurrences: 3,
+            sources: Vec::new(),
+        }],
+    };
+    let llm = PromptRecordingLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"工具纪律","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"Bash 失败后未诊断","direction":"补充规则","route_reason":"通用工具纪律"}]}"#.to_string(),
+        r#"{"decision":"propose","reason":"补充规则","evidence_refs":["E0"],"body":"new body"}"#.to_string(),
+        r#"{"decision":"no_change","reason":"无冲突"}"#.to_string(),
+    ]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry,
+        llm.clone(),
+        lesson_store,
+        RsiConfig {
+            execution_mode: share::config::RsiExecutionMode::TwoPhase,
+            ..RsiConfig::default()
+        },
+    )
+    .with_dry_run()
+    .with_evidence_stream(Box::new(stream));
+    let outcome = task.run_cycle().await.expect("two-phase cycle");
+    assert!(
+        outcome.summary.contains("TwoPhase") && outcome.summary.contains("Compose"),
+        "{}",
+        outcome.summary
+    );
+    let prompts = llm.prompts.lock().expect("prompts").clone();
+    assert_eq!(prompts.len(), 3, "诊断 + 固定执行 + Compose");
+    assert!(
+        prompts[0].contains("C0=tool-guidance/default"),
+        "诊断 prompt 必须只提供路由候选：{}",
+        prompts[0]
+    );
+    assert!(
+        prompts[1].contains("NEVER 输出组件 id"),
+        "执行 prompt 必须固定组件：{}",
+        prompts[1]
+    );
+}
+
 /// 完整周期：Compose 必须使用采纳前 Active lesson 快照，避免历史经验
 /// 被本周期 Block 退役，也避免当前 proposal 与自身派生 lesson 配对。
 #[tokio::test]
