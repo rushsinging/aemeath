@@ -148,7 +148,7 @@ session 流（按 updated_at 全序）
 1. **显式推进**：只有「块执行完成且落盘成功」才写游标——输出存在不等于完成（"presence of output is not enough"）；
 2. **指纹校验**：checkpoint 记录处理时的组件树指纹；组件树在游标之后被外部修改（指纹不符）时，当块从游标重跑——NEVER 用陈旧组件状态生成的提案覆盖新改动；
 3. **首次窗口**：无 checkpoint 时默认读最近 30 天（`harness.rsi.evidence_initial_window_days`，可配）活跃 session；
-4. **步长上限**：`harness.rsi.evidence_max_runs_per_cycle`（默认 100）——每次周期最多处理的 run 数，超出的留待下周期（增量消化，NEVER 一次吞尽）。旧键 `evidence_max_sessions_per_cycle` 仅作兼容 alias，语义同名新键。
+4. **步长上限**：`harness.rsi.evidence_max_runs_per_cycle`（默认 20）——每次周期最多处理的 run 数，超出的留待下周期（增量消化，NEVER 一次吞尽）。旧键 `evidence_max_sessions_per_cycle` 仅作兼容 alias，语义同名新键。
 
 **组件面体积控制**：单块内若组件面过大导致材料超预算，按组件分次提案作为**体积兜底**（v1 的 `chunk_max_components` 语义降级至此并标注待废弃；正确的主分块单位永远是数据源块）。
 
@@ -170,7 +170,7 @@ session 流（按 updated_at 全序）
 ```
 
 - **增量判定**：扫描时按 step `cursor.run_id` 分组，跳过 `processed_run_ids` 集合内的 run——session 更新只新增 run，NEVER 漂移、NEVER 漏读、重读零冗余（run_id 集合判定，不依赖 mtime 可比性）；
-- **步长按 run**：`evidence_max_runs_per_cycle`（默认 100，每周期最多处理 run 数）；`evidence_block_runs`（默认 5，每块最多 run 数；旧键 `evidence_block_sessions` 仅兼容 alias）；块边界优先切在 **session 边界**（尽量完成一个 session）；单 session run 数超块上限才切（`session_complete: false`，下周期续）；
+- **步长按 run**：`evidence_max_runs_per_cycle`（默认 20，每周期最多处理 run 数）；`evidence_block_runs`（默认 5，每块最多 run 数；旧键 `evidence_block_sessions` 仅兼容 alias）；块边界优先切在 **session 边界**（尽量完成一个 session）；单 session run 数超块上限才切（`session_complete: false`，下周期续）；
 - **调度序**：mtime 只决定处理顺序，NEVER 承担游标语义；
 - **自动清理**：checkpoint 条目只保留 ①未完成 session（`session_complete: false`）②最近 N 条（默认 50）已完整处理的 session——超出的删除（重读风险限于极旧 session，且首次窗口天然限制选集）；盘上已消失的 session 条目即时清理。
 

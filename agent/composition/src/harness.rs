@@ -91,7 +91,7 @@ pub async fn run_rsi_serve(on_ready: impl FnOnce(&Path)) -> RsiServeExit {
 
 use async_trait::async_trait;
 use harness::domain::errors::HarnessError;
-use harness::domain::improvement::RsiLlmPort;
+use harness::domain::improvement::{RsiLlmCompletion, RsiLlmPort, RsiLlmUsage};
 use harness::domain::lesson::LessonStore;
 use provider::composition::{LlmClient, ProviderClientSpecData};
 use provider::published_language::{ModelInfo, ProviderContentData, ProviderRequestData};
@@ -112,9 +112,8 @@ struct ProductionRsiLlm {
     model: ModelInfo,
 }
 
-#[async_trait]
-impl RsiLlmPort for ProductionRsiLlm {
-    async fn complete(&self, prompt: &str) -> Result<String, HarnessError> {
+impl ProductionRsiLlm {
+    async fn invoke_text(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
         // 结构化 JSON 输出任务显式低思考档（对齐反思链路教训：高思考
         // 档会把输出预算耗在 thinking 上导致正文为空）——取模型阶梯
         // 最低档；空阶梯 fallback Off。
@@ -151,7 +150,28 @@ impl RsiLlmPort for ProductionRsiLlm {
                 "RSI 模型返回空文本（结构化输出任务勿用高思考档——harness.rsi.* 档位独立配置随信号装配接入）",
             ));
         }
-        Ok(text)
+        let usage = response
+            .token_usage
+            .map(|usage| RsiLlmUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_tokens: usage.cache_read_tokens,
+                cache_write_tokens: usage.cache_write_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+            })
+            .unwrap_or_default();
+        Ok(RsiLlmCompletion { text, usage })
+    }
+}
+
+#[async_trait]
+impl RsiLlmPort for ProductionRsiLlm {
+    async fn complete(&self, prompt: &str) -> Result<String, HarnessError> {
+        Ok(self.invoke_text(prompt).await?.text)
+    }
+
+    async fn complete_with_usage(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
+        self.invoke_text(prompt).await
     }
 }
 

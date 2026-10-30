@@ -15,12 +15,43 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use share::config::RsiConfig;
 
+/// RSI LLM usage 快照（provider 未报告的字段保持 `None`）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RsiLlmUsage {
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub cache_read_tokens: Option<u32>,
+    pub cache_write_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
+}
+
+/// RSI LLM 终态：文本与 provider 报告的 usage MUST 一起保留。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RsiLlmCompletion {
+    pub text: String,
+    pub usage: RsiLlmUsage,
+}
+
+impl RsiLlmCompletion {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            usage: RsiLlmUsage::default(),
+        }
+    }
+}
+
 /// LLM 补全端口（daemon 侧唯一模型入口；生产装配在 composition 经
 /// provider 实现，测试注入桩）。
 #[async_trait]
 pub trait RsiLlmPort: Send + Sync {
-    /// 单轮文本补全（非流式）。
+    /// 单轮文本补全（非流式；兼容简单调用面）。
     async fn complete(&self, prompt: &str) -> Result<String, HarnessError>;
+
+    /// 单轮文本补全并保留 token usage（生产端口 MUST 覆写）。
+    async fn complete_with_usage(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
+        Ok(RsiLlmCompletion::text(self.complete(prompt).await?))
+    }
 }
 
 /// 一轮改进的材料（行为信号自动采集随信号装配接入扩展）。
@@ -429,6 +460,44 @@ fn validate_block_proposal_signals(
     Ok(())
 }
 
+/// 调用 LLM 并记录 token/耗时事件；usage 缺失时字段为 null，NEVER 伪造。
+async fn complete_with_usage_event(
+    llm: &dyn RsiLlmPort,
+    prompt: &str,
+    stage: &str,
+    block_index: usize,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<RsiLlmCompletion, HarnessError> {
+    let started = std::time::Instant::now();
+    let prompt_chars = prompt.chars().count();
+    let result = llm.complete_with_usage(prompt).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let event = match &result {
+        Ok(completion) => crate::domain::events::RsiCycleEvent::LlmCall {
+            stage: stage.to_string(),
+            block_index,
+            duration_ms,
+            prompt_chars,
+            response_chars: completion.text.chars().count(),
+            usage: completion.usage,
+            error: None,
+        },
+        Err(error) => crate::domain::events::RsiCycleEvent::LlmCall {
+            stage: stage.to_string(),
+            block_index,
+            duration_ms,
+            prompt_chars,
+            response_chars: 0,
+            usage: RsiLlmUsage::default(),
+            error: Some(error.message().chars().take(120).collect()),
+        },
+    };
+    if let Some(recorder) = recorder {
+        recorder.record(&event);
+    }
+    result
+}
+
 /// 单块成功采纳后的材料（每个 edit 共享本次提案的证据绑定）。
 struct AcceptedBlock {
     edits: Vec<AppliedEdit>,
@@ -456,9 +525,12 @@ async fn run_block(
     // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
     // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
     let prompt = build_block_prompt(chunk, lessons, evidence);
-    let Ok(response) = llm.complete(&prompt).await else {
-        return (None, "作废（LLM 调用失败）");
-    };
+    let completion =
+        match complete_with_usage_event(llm, &prompt, "block", block_index, recorder).await {
+            Ok(completion) => completion,
+            Err(_) => return (None, "作废（LLM 调用失败）"),
+        };
+    let response = completion.text;
     let proposal = match parse_block_proposal(&response) {
         Ok(proposal) => {
             if let Some(recorder) = recorder {
@@ -874,23 +946,27 @@ pub async fn run_diagnosis_cycle(
     for (block_index, chunk) in chunks.iter().enumerate() {
         let prompt =
             build_diagnosis_prompt_with_strength(chunk, lessons, &gated_evidence, &verdicts);
-        let issues = match llm.complete(&prompt).await {
-            Ok(response) => match parse_diagnosis(&response) {
-                Ok(DiagnosisProposal::Diagnose { issues, .. }) => issues,
-                Ok(DiagnosisProposal::NoIssue { .. }) => Vec::new(),
-                Err(error) => {
-                    if let Some(recorder) = recorder {
-                        recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
-                            block_index,
-                            stage: "diagnosis_parse".to_string(),
-                            message: error.message().chars().take(120).collect(),
-                        });
+        let issues =
+            match complete_with_usage_event(llm, &prompt, "diagnosis", block_index, recorder).await
+            {
+                Ok(completion) => match parse_diagnosis(&completion.text) {
+                    Ok(DiagnosisProposal::Diagnose { issues, .. }) => issues,
+                    Ok(DiagnosisProposal::NoIssue { .. }) => Vec::new(),
+                    Err(error) => {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                    block_index,
+                                    stage: "diagnosis_parse".to_string(),
+                                    message: error.message().chars().take(120).collect(),
+                                },
+                            );
+                        }
+                        Vec::new()
                     }
-                    Vec::new()
-                }
-            },
-            Err(_) => Vec::new(),
-        };
+                },
+                Err(_) => Vec::new(),
+            };
         if let Some(recorder) = recorder {
             recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
                 block_index,
@@ -1466,12 +1542,17 @@ pub async fn run_compose_phase(
         lessons = lessons_block,
         similar = similar_block,
     );
-    let Ok(response) = llm.complete(&prompt).await else {
-        return Ok(Some(CycleOutcome {
-            summary: "Compose：LLM 调用失败（跳过仲裁）".to_string(),
-            adopted: Vec::new(),
-        }));
-    };
+    let completion =
+        match complete_with_usage_event(llm, &prompt, "compose", adoptions.len(), recorder).await {
+            Ok(completion) => completion,
+            Err(_) => {
+                return Ok(Some(CycleOutcome {
+                    summary: "Compose：LLM 调用失败（跳过仲裁）".to_string(),
+                    adopted: Vec::new(),
+                }));
+            }
+        };
+    let response = completion.text;
     let label = match parse_block_proposal(&response) {
         Ok(BlockProposal::NoChange { .. }) => "无变更（各块结论一致）",
         Ok(BlockProposal::Propose {

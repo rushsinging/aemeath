@@ -61,7 +61,7 @@ enum RsiControlAck {
 | `max_tokens` / `reasoning` | 继承 catalog | 独立输出预算与思考档（结构化 JSON 输出任务需显式降思考档的教训已在反思链路验证） |
 | `interval_secs` | 1800 | Timer 触发周期 |
 | `evidence_initial_window_days` | 30 | 首次（无 checkpoint）读取的活跃 session 时间窗（天） |
-| `evidence_max_runs_per_cycle` | 100 | 每周期步长上限：最多处理的 run 数，超出留待下周期增量消化。旧键 `evidence_max_sessions_per_cycle` 仅兼容 alias |
+| `evidence_max_runs_per_cycle` | 20 | 每周期步长上限：最多处理的 run 数，超出留待下周期增量消化。默认按 30 分钟 daemon 周期与实测 token/耗时预算保守设置；旧键 `evidence_max_sessions_per_cycle` 仅兼容 alias |
 | `evidence_block_runs` | 5 | 数据源分块粒度：每块包含的 run 数上限；旧键 `evidence_block_sessions` 仅兼容 alias（流模型见 04 分片 §2A.5/2A.6） |
 | `chunk_max_components` | 待废弃 | v1 按组件分块的遗留参数，语义降级为「单块内组件面体积兜底」（主分块单位是数据源块，04 分片 §2A.5） |
 | `execution_mode` | `single_phase` | 改进执行模式：`single_phase`（一次提案即落盘，v1 行为）/ `diagnose_only`（每块 1 次诊断仅产出 issue + 跨块汇总，**不落盘**，执行派发与强度门禁由 #2092 决定，#2078） |

@@ -73,6 +73,21 @@ impl RsiLlmPort for ScriptedLlm {
             .cloned()
             .ok_or_else(|| HarnessError::unavailable(crate::constants::ERROR_DOMAIN, "桩耗尽"))
     }
+
+    async fn complete_with_usage(
+        &self,
+        prompt: &str,
+    ) -> Result<crate::domain::improvement::RsiLlmCompletion, HarnessError> {
+        Ok(crate::domain::improvement::RsiLlmCompletion {
+            text: self.complete(prompt).await?,
+            usage: crate::domain::improvement::RsiLlmUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(20),
+                reasoning_tokens: Some(3),
+                ..Default::default()
+            },
+        })
+    }
 }
 
 /// 分块：按 chunk_max_components 分组、上限至少 1。
@@ -641,6 +656,69 @@ async fn compose_phase_passes_active_lessons_and_context_to_prompt() {
         prompt.contains("历史上下文：同场景反复失败"),
         "prompt 缺 lesson 来源上下文：{prompt}"
     );
+}
+
+/// LLM usage MUST 进入过程事件；provider 未报告字段保持 null，NEVER 伪造。
+#[tokio::test]
+async fn llm_usage_is_recorded_in_cycle_events() {
+    let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前先读取文件内容",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
+    );
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"no_change","reason":"无冲突"}"#.to_string()
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let events_dir = tempfile::tempdir().expect("tempdir");
+    let recorder = crate::domain::events::RsiEventRecorder::new(events_dir.path());
+    let outcome = crate::domain::improvement::run_compose_phase(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &[proposal],
+        &[],
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        Some(&recorder),
+        None,
+    )
+    .await
+    .expect("Compose 必须成功")
+    .expect("Compose 结果");
+    assert!(outcome.summary.contains("无变更"), "{}", outcome.summary);
+
+    let path = events_dir
+        .path()
+        .read_dir()
+        .expect("事件目录")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+        .expect("事件文件");
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(path)
+        .expect("事件文件")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("事件 JSON"))
+        .collect();
+    let call = events
+        .iter()
+        .find(|event| event["event"] == "llm_call")
+        .expect("llm_call 事件");
+    assert_eq!(call["stage"], "compose");
+    assert_eq!(call["usage"]["input_tokens"], 100);
+    assert_eq!(call["usage"]["output_tokens"], 20);
+    assert_eq!(call["usage"]["reasoning_tokens"], 3);
+    assert!(call["prompt_chars"].as_u64().unwrap() > 0);
+    assert!(call["duration_ms"].as_u64().is_some());
 }
 
 /// Compose 修正必须继承被仲裁采纳的真实 signal/source，不能写成空绑定。

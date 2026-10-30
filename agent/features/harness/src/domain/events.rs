@@ -25,6 +25,15 @@ pub enum RsiCycleEvent {
         sessions_runs: Vec<String>,
         signals: Vec<String>,
     },
+    LlmCall {
+        stage: String,
+        block_index: usize,
+        duration_ms: u64,
+        prompt_chars: usize,
+        response_chars: usize,
+        usage: crate::domain::improvement::RsiLlmUsage,
+        error: Option<String>,
+    },
     DiagnosisSummarized {
         issues: usize,
         occurrences: usize,

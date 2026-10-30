@@ -15,7 +15,7 @@ pub(crate) fn default_evidence_initial_window_days() -> u64 {
 }
 
 pub(crate) fn default_evidence_max_runs_per_cycle() -> usize {
-    100
+    20
 }
 
 pub(crate) fn default_evidence_block_runs() -> usize {
