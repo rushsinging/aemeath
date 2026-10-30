@@ -5,10 +5,11 @@
 //! [`ImprovementMaterials`] 是唯一装配点，接入时扩字段即可。
 
 use crate::application::ComponentRegistry;
-use crate::constants::ERROR_DOMAIN;
+use crate::constants::{ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND};
 use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet};
 use crate::domain::component::{ComponentContent, ComponentId};
 use crate::domain::errors::HarnessError;
+use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
 use crate::domain::task::CycleOutcome;
 use async_trait::async_trait;
@@ -976,10 +977,9 @@ fn evidence_bindings_for(
                 .map(|signal| EvidenceBinding {
                     run_ref: cycle_ref.to_string(),
                     signal: signal.kind,
-                    excerpt: signal
-                        .excerpt
-                        .clone()
-                        .unwrap_or_else(|| signal.summary.clone()),
+                    excerpt: signal.excerpt.clone().unwrap_or_else(|| {
+                        truncate_chars(&signal.summary, EVIDENCE_EXCERPT_BOUND).unwrap_or_default()
+                    }),
                     signal_id: signal.signal_id.clone(),
                     source: signal.sources.first().cloned(),
                 })

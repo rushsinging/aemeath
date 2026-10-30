@@ -313,14 +313,14 @@ fn error_signature(error_text: &str) -> String {
     bounded
 }
 
-fn truncate_chars(text: &str, bound: usize) -> Option<String> {
+pub(crate) fn truncate_chars(text: &str, bound: usize) -> Option<String> {
     if text.is_empty() {
         return None;
     }
     if text.chars().count() <= bound {
         return Some(text.to_string());
     }
-    let mut truncated: String = text.chars().take(bound).collect();
+    let mut truncated: String = text.chars().take(bound.saturating_sub(1)).collect();
     truncated.push('…');
     Some(truncated)
 }

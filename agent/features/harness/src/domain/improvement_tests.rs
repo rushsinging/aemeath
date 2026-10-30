@@ -133,6 +133,61 @@ fn block_proposal_envelope_parses() {
     assert!(parse_block_proposal("我觉得不需要改").is_err());
 }
 
+/// 无 excerpt 的 signal 以 summary 兜底时 MUST 先按 lesson 摘录上限截断，
+/// NEVER 因长 retry fingerprint 导致整条 lesson 回写失败。
+#[tokio::test]
+async fn lesson_is_persisted_when_signal_summary_is_long() {
+    let target = id("long-summary");
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let signal_id = "retry_pattern:Bash:cargo-test-long-summary".to_string();
+    let response = format!(
+        r#"{{"decision":"propose","reason":"控制重复调用","signal_ids":["{signal_id}"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"long-summary"}},"content":{{"frontmatter":null,"body":"new"}}}}]}}}}"#
+    );
+    let llm = ScriptedLlm::new(vec![response]);
+    let evidence = crate::domain::evidence::EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![crate::domain::evidence::EvidenceSignal {
+            kind: crate::domain::evidence::SignalKind::RetryPattern,
+            signal_id: signal_id.clone(),
+            summary: "长".repeat(512),
+            excerpt: None,
+            occurrences: 3,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "s1.dataset".into(),
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(1),
+        evidence,
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("周期必须成功");
+    assert!(outcome.summary.contains("采纳 1"), " {}", outcome.summary);
+    let lessons = lesson_store.load_active().expect("lessons");
+    assert_eq!(lessons.len(), 1, "长 summary NEVER 静默丢 lesson");
+    assert!(
+        lessons[0].evidence[0].excerpt.chars().count() <= 200,
+        "证据摘录 MUST 有界：{}",
+        lessons[0].evidence[0].excerpt.chars().count()
+    );
+}
+
 /// 短 evidence ref：模型输出 E0/E1，runtime 解析回完整 signal id。
 #[test]
 fn block_proposal_short_evidence_refs_resolve_to_signal_ids() {
