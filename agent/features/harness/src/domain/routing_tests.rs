@@ -127,6 +127,26 @@ fn aggregate_run_outcome_has_no_component_route() {
 }
 
 #[test]
+fn builtin_tool_signal_never_falls_back_to_overlay_alone() {
+    let overlay = component_id(ComponentKind::SystemPromptOverlay, "global");
+    let decision = crate::domain::routing::route_signal(
+        &signal(
+            SignalKind::RepeatedFailure,
+            "repeated_failure:Bash:permission denied",
+        ),
+        &[overlay],
+        &crate::domain::routing::RouteContext::default(),
+    );
+    assert_eq!(
+        decision,
+        crate::domain::routing::RouteDecision::Unresolved {
+            reason: "缺少 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 兜底到 overlay"
+                .to_string(),
+        }
+    );
+}
+
+#[test]
 fn agent_signal_routes_to_sub_agents_config() {
     let sub_agents = component_id(ComponentKind::SubAgents, "default");
     let decision = crate::domain::routing::route_signal(

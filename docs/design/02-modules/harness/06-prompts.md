@@ -143,6 +143,7 @@ TwoPhase 不再把全部组件 chunk 与证据混合后让模型自由选择落�
 
 约束：
 
+- 内置工具纪律 signal MUST 至少存在 `tool-guidance` 或 `guardrails` 主候选；overlay 只能在主候选存在时作为低优先级候选参与。主候选缺失时 MUST unresolved，NEVER 让 always-on overlay 独自兜底（真实三轮运行曾把 overlay 从 1408 字符扩到 3999 字符）。
 - 宿主先按 signal/tool/skill/context 生成候选集；诊断只能在候选 index 内选择。
 - Skill 证据必须从来源上下文提取精确 skill 名；无法识别则 unresolved。
 - `run_outcome:aggregate` / `cycle_observation` 无组件路由，只观察。

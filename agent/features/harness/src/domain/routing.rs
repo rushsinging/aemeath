@@ -214,6 +214,22 @@ pub fn route_signal(
     }
 
     let tool = signal_tool(signal).to_string();
+    // 内置工具纪律的主职责面是 tool-guidance/guardrails；overlay 只能在
+    // 主候选存在时作为低优先级全局候选参与选择。主候选缺失时 MUST
+    // unresolved，NEVER 让 always-on overlay 独自兜底而持续膨胀。
+    if is_builtin_tool(&tool)
+        && !candidates.iter().any(|candidate| {
+            matches!(
+                candidate.kind,
+                ComponentKind::ToolGuidance | ComponentKind::Guardrails
+            )
+        })
+    {
+        return RouteDecision::Unresolved {
+            reason: "缺少 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 兜底到 overlay"
+                .to_string(),
+        };
+    }
     let mut routed: Vec<(ComponentRouteProfile, String)> = candidates
         .iter()
         .filter_map(|id| {
