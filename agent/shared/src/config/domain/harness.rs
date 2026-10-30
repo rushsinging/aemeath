@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub(crate) fn default_interval_secs() -> u64 {
-    1800
+    28_800
 }
 
 pub(crate) fn default_chunk_max_components() -> usize {
@@ -15,7 +15,7 @@ pub(crate) fn default_evidence_initial_window_days() -> u64 {
 }
 
 pub(crate) fn default_evidence_max_runs_per_cycle() -> usize {
-    20
+    50
 }
 
 pub(crate) fn default_evidence_block_runs() -> usize {

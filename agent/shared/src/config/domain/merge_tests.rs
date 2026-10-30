@@ -591,9 +591,9 @@ fn memory_default_ttl_secs_patch_overrides_and_defaults_to_30_days() {
 fn harness_rsi_defaults() {
     let config = Config::default();
     assert!(config.harness.rsi.enabled);
-    assert_eq!(config.harness.rsi.interval_secs, 1800);
+    assert_eq!(config.harness.rsi.interval_secs, 28_800);
     assert_eq!(config.harness.rsi.chunk_max_components, 8);
-    assert_eq!(config.harness.rsi.evidence_max_runs_per_cycle, 20);
+    assert_eq!(config.harness.rsi.evidence_max_runs_per_cycle, 50);
     assert_eq!(config.harness.rsi.evidence_block_runs, 5);
 }
 
