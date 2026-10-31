@@ -591,8 +591,28 @@ fn memory_default_ttl_secs_patch_overrides_and_defaults_to_30_days() {
 fn harness_rsi_defaults() {
     let config = Config::default();
     assert!(config.harness.rsi.enabled);
-    assert_eq!(config.harness.rsi.interval_secs, 1800);
+    assert_eq!(
+        config.harness.rsi.execution_mode,
+        crate::config::RsiExecutionMode::TwoPhase
+    );
+    assert_eq!(config.harness.rsi.interval_secs, 28_800);
     assert_eq!(config.harness.rsi.chunk_max_components, 8);
+    assert_eq!(config.harness.rsi.evidence_max_runs_per_cycle, 50);
+    assert_eq!(config.harness.rsi.evidence_block_runs, 5);
+}
+
+#[test]
+fn harness_rsi_run_step_patch_accepts_legacy_session_aliases() {
+    let patch: ConfigPatch = serde_json::from_str(
+        r#"{"harness":{"rsi":{
+            "evidence_max_sessions_per_cycle": 11,
+            "evidence_block_sessions": 2
+        }}}"#,
+    )
+    .expect("旧 sessions 键 MUST 兼容");
+    let merged = apply_patch(Config::default(), patch);
+    assert_eq!(merged.harness.rsi.evidence_max_runs_per_cycle, 11);
+    assert_eq!(merged.harness.rsi.evidence_block_runs, 2);
 }
 
 #[test]
@@ -606,8 +626,8 @@ fn harness_rsi_patch_merges_fields() {
                 interval_secs: Some(60),
                 chunk_max_components: Some(4),
                 evidence_initial_window_days: Some(7),
-                evidence_max_sessions_per_cycle: Some(10),
-                evidence_block_sessions: Some(3),
+                evidence_max_runs_per_cycle: Some(10),
+                evidence_block_runs: Some(3),
                 execution_mode: Some(crate::config::RsiExecutionMode::DiagnoseOnly),
             }),
         }),
@@ -621,8 +641,8 @@ fn harness_rsi_patch_merges_fields() {
     assert_eq!(merged.harness.rsi.interval_secs, 60);
     assert_eq!(merged.harness.rsi.chunk_max_components, 4);
     assert_eq!(merged.harness.rsi.evidence_initial_window_days, 7);
-    assert_eq!(merged.harness.rsi.evidence_max_sessions_per_cycle, 10);
-    assert_eq!(merged.harness.rsi.evidence_block_sessions, 3);
+    assert_eq!(merged.harness.rsi.evidence_max_runs_per_cycle, 10);
+    assert_eq!(merged.harness.rsi.evidence_block_runs, 3);
     assert_eq!(
         merged.harness.rsi.execution_mode,
         crate::config::RsiExecutionMode::DiagnoseOnly

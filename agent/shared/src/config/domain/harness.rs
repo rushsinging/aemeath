@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub(crate) fn default_interval_secs() -> u64 {
-    1800
+    28_800
 }
 
 pub(crate) fn default_chunk_max_components() -> usize {
@@ -14,11 +14,11 @@ pub(crate) fn default_evidence_initial_window_days() -> u64 {
     30
 }
 
-pub(crate) fn default_evidence_max_sessions_per_cycle() -> usize {
-    20
+pub(crate) fn default_evidence_max_runs_per_cycle() -> usize {
+    50
 }
 
-pub(crate) fn default_evidence_block_sessions() -> usize {
+pub(crate) fn default_evidence_block_runs() -> usize {
     5
 }
 
@@ -26,12 +26,14 @@ pub(crate) fn default_evidence_block_sessions() -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RsiExecutionMode {
-    /// 单阶段：证据 → 一次提案 → 落盘（v1 行为，默认保持兼容）。
-    #[default]
+    /// 单阶段：证据 → 一次提案 → 落盘（v1 兼容路径，带路由止血校验）。
     SinglePhase,
     /// 诊断优先：每块 1 次诊断只产出 issue，跨块汇总，执行派发由后续
     /// 强度门禁（#2092）决定——本模式当前**不落盘**。
     DiagnoseOnly,
+    /// 两阶段：宿主路由候选 → 诊断选择固定组件 → 执行只写该组件正文。
+    #[default]
+    TwoPhase,
 }
 
 /// RSI 维护 daemon 配置。
@@ -59,13 +61,21 @@ pub struct RsiConfig {
     #[serde(default = "default_evidence_initial_window_days")]
     pub evidence_initial_window_days: u64,
 
-    /// 每周期步长上限：最多处理的 session 数（超出留待下周期）。
-    #[serde(default = "default_evidence_max_sessions_per_cycle")]
-    pub evidence_max_sessions_per_cycle: usize,
+    /// 每周期步长上限：最多处理的 run 数（超出留待下周期）。
+    /// 旧配置键 `evidence_max_sessions_per_cycle` 只是兼容 alias。
+    #[serde(
+        default = "default_evidence_max_runs_per_cycle",
+        alias = "evidence_max_sessions_per_cycle"
+    )]
+    pub evidence_max_runs_per_cycle: usize,
 
-    /// 数据源分块粒度：每块 session 数上限。
-    #[serde(default = "default_evidence_block_sessions")]
-    pub evidence_block_sessions: usize,
+    /// 数据源分块粒度：每块 run 数上限。
+    /// 旧配置键 `evidence_block_sessions` 只是兼容 alias。
+    #[serde(
+        default = "default_evidence_block_runs",
+        alias = "evidence_block_sessions"
+    )]
+    pub evidence_block_runs: usize,
 
     /// 改进执行模式（#2078）：single_phase（默认，一次提案即落盘）/
     /// diagnose_only（每块仅诊断 + 跨块汇总，不落盘，执行由 #2092 派发）。
@@ -81,8 +91,8 @@ impl Default for RsiConfig {
             interval_secs: default_interval_secs(),
             chunk_max_components: default_chunk_max_components(),
             evidence_initial_window_days: default_evidence_initial_window_days(),
-            evidence_max_sessions_per_cycle: default_evidence_max_sessions_per_cycle(),
-            evidence_block_sessions: default_evidence_block_sessions(),
+            evidence_max_runs_per_cycle: default_evidence_max_runs_per_cycle(),
+            evidence_block_runs: default_evidence_block_runs(),
             execution_mode: RsiExecutionMode::default(),
         }
     }

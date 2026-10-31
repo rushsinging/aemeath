@@ -42,6 +42,11 @@
   - 通道 A：system prompt stable 段尾（prompt caching 友好、每 run 必见；代价：修改使缓存失效）
   - 通道 B：user-context 消息（与 AGENTS.md 同通道；改动不破缓存）
 - 注入内容：跨工具使用技巧 prose（工具选择、超时策略、分段读取、大结果处理）——RSI 证据最丰富（工具误用/重试信号）的槽位。
+- **落点隔离**：证据来源只来自项目布局 `<project>/<session>.dataset`；`scope=global` 只承接跨项目通用规律，单项目经验与项目 A → 项目 B 写入均被宿主路由与 prompt 契约双重禁止。
+- **项目 overlay 映射**：宿主从同项目 canonical session workspace 快照反解项目根；项目根存在 `AGENTS.md` 时优先映射它，否则映射 `CLAUDE.md`（与运行时注入优先级一致）。两者都缺失时不注册组件，NEVER 自动创建项目说明文件。
+- **schema 隔离**：参数类改进 NEVER 在 prose 中复述工具 schema 或枚举字段必填性；只写按错误与当前 schema 修正 payload 的通用纪律，避免 schema 漂移。
+- **正文预算**：RSI 产出超过注入预算时先追加一次 LLM 压缩；仍超预算整份作废，NEVER 硬截断。
+- **canonical bootstrap**：c2/c4 是宿主内建职责面。正式 RSI 装配缺失文件时由宿主原子创建最小骨架（标题一行），幂等且 NEVER 覆盖用户内容；dry-run 仅虚拟列出骨架，NEVER 写盘。
 
 ### c6 config
 - `aemeath.json` 进 watch 面；变更走 run 边界生效 + Remind 通知（复用既有 reload 策略）。

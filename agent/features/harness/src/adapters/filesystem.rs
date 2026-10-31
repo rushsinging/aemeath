@@ -15,11 +15,28 @@ use std::path::{Path, PathBuf};
 /// 通用文件组件注册表：构造方注入 id → 路径映射。
 pub struct FilesystemComponentRegistry {
     component_paths: HashMap<ComponentId, PathBuf>,
+    /// 内建组件的虚拟骨架：仅当映射文件缺失时参与 list/read，
+    /// 用于 RSI dry-run 呈现 canonical 组件；NEVER 覆盖磁盘已有内容。
+    bootstrap_defaults: HashMap<ComponentId, ComponentContent>,
 }
 
 impl FilesystemComponentRegistry {
     pub fn new(component_paths: HashMap<ComponentId, PathBuf>) -> Self {
-        Self { component_paths }
+        Self {
+            component_paths,
+            bootstrap_defaults: HashMap::new(),
+        }
+    }
+
+    /// 构造带内建骨架的 registry（dry-run / 首次装配用）。
+    pub fn with_bootstrap_defaults(
+        component_paths: HashMap<ComponentId, PathBuf>,
+        bootstrap_defaults: HashMap<ComponentId, ComponentContent>,
+    ) -> Self {
+        Self {
+            component_paths,
+            bootstrap_defaults,
+        }
     }
 
     fn path_of(&self, id: &ComponentId) -> Option<&Path> {
@@ -128,12 +145,23 @@ impl ComponentRegistry for FilesystemComponentRegistry {
     fn list(&self) -> Vec<ComponentId> {
         // list 语义 = 当前存在（文件在盘）的组件；已删除但保留注册的项不列出，
         // 使 ChangeSet Delete 预检的存在性与用户可见清单一致。
+        // 例外：带 bootstrap_defaults 的内建职责面缺失时虚拟列出，供 dry-run
+        // 路由/预演使用；真实落盘仍由显式 bootstrap 或 write 创建。
         let mut ids: Vec<ComponentId> = self
             .component_paths
             .iter()
             .filter(|(_, path)| path.exists())
             .map(|(id, _)| id.clone())
             .collect();
+        for id in self.bootstrap_defaults.keys() {
+            let path_missing = self
+                .component_paths
+                .get(id)
+                .is_none_or(|path| !path.exists());
+            if path_missing && !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
         ids.sort();
         ids
     }
@@ -142,13 +170,21 @@ impl ComponentRegistry for FilesystemComponentRegistry {
         let path = self.path_of(id).ok_or_else(|| {
             HarnessError::invalid(ERROR_DOMAIN, format!("组件未注册文件路径：{id}"))
         })?;
-        let text = std::fs::read_to_string(path).map_err(|error| {
-            HarnessError::storage(
+        match std::fs::read_to_string(path) {
+            Ok(text) => Self::parse_content(&text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.bootstrap_defaults.get(id).cloned().ok_or_else(|| {
+                    HarnessError::storage(
+                        ERROR_DOMAIN,
+                        format!("读取组件失败 {}: {error}", path.display()),
+                    )
+                })
+            }
+            Err(error) => Err(HarnessError::storage(
                 ERROR_DOMAIN,
                 format!("读取组件失败 {}: {error}", path.display()),
-            )
-        })?;
-        Self::parse_content(&text)
+            )),
+        }
     }
 
     fn validate(&self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError> {
@@ -166,12 +202,32 @@ impl ComponentRegistry for FilesystemComponentRegistry {
         let path = self.path_of(id).ok_or_else(|| {
             HarnessError::invalid(ERROR_DOMAIN, format!("组件未注册文件路径：{id}"))
         })?;
-        std::fs::read_to_string(path).map_err(|error| {
-            HarnessError::storage(
+        match std::fs::read_to_string(path) {
+            Ok(text) => Ok(text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => self
+                .bootstrap_defaults
+                .get(id)
+                .map(|content| {
+                    let mut text = String::new();
+                    if let Some(frontmatter) = &content.frontmatter {
+                        text.push_str("---\n");
+                        text.push_str(&serde_yml::to_string(frontmatter).unwrap_or_default());
+                        text.push_str("\n---\n");
+                    }
+                    text.push_str(&content.body);
+                    text
+                })
+                .ok_or_else(|| {
+                    HarnessError::storage(
+                        ERROR_DOMAIN,
+                        format!("读取组件文件失败 {}: {error}", path.display()),
+                    )
+                }),
+            Err(error) => Err(HarnessError::storage(
                 ERROR_DOMAIN,
                 format!("读取组件文件失败 {}: {error}", path.display()),
-            )
-        })
+            )),
+        }
     }
 
     /// 原始文本写（#2074：解析校验后原子写，保留原字节布局）。

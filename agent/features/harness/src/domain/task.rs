@@ -36,11 +36,12 @@ pub struct CycleOutcome {
     pub adopted: Vec<AdoptionRecord>,
 }
 
-/// 单条采纳记录（组件 + 提案依据）。
+/// 单条采纳记录（组件 + 提案依据 + 结构化证据来源）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptionRecord {
     pub id: crate::domain::component::ComponentId,
     pub reason: String,
+    pub evidence: Vec<crate::domain::lesson::EvidenceBinding>,
 }
 
 /// RSI 任务接口：一个完整改进周期（分块在实现内部组织）。
