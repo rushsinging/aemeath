@@ -30,6 +30,17 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
+/// 本次调用意图（input.goal）：存在 → header 用 `{名} · {goal}` 语义化，
+/// 否则回退参数 header（与 backend progress 的 goal 分层同构）。
+fn input_goal(input: &serde_json::Value) -> Option<String> {
+    input
+        .get("goal")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_ellipsis(value, 48))
+}
+
 fn mode_suffix(active_mode: &Option<String>, pending_mode: &Option<String>) -> String {
     let mut parts = Vec::new();
     if let Some(mode) = active_mode {
@@ -158,6 +169,9 @@ impl ToolDisplay for WorkflowCreateDisplay {
         "workflow_create"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        if let Some(goal) = input_goal(input) {
+            return format!("{} · {goal}", self.display_name());
+        }
         let preview = parse_input::<CreateInputJson>(input)
             .map(|args| truncate_ellipsis(&args.name, 40))
             .unwrap_or_default();
@@ -200,6 +214,9 @@ impl ToolDisplay for WorkflowListDisplay {
         "workflow_list"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        if let Some(goal) = input_goal(input) {
+            return format!("{} · {goal}", self.display_name());
+        }
         let filter = parse_input::<ListInputJson>(input)
             .and_then(|args| args.status)
             .unwrap_or_else(|| "all".to_owned());
@@ -251,6 +268,9 @@ impl ToolDisplay for WorkflowQueryDisplay {
         "workflow_query"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        if let Some(goal) = input_goal(input) {
+            return format!("{} · {goal}", self.display_name());
+        }
         let id = parse_input::<IdInputJson>(input)
             .map(|args| short_id(&args.workflow_id))
             .unwrap_or_default();
@@ -316,6 +336,9 @@ impl ToolDisplay for WorkflowUpdateDisplay {
         "workflow_update"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        if let Some(goal) = input_goal(input) {
+            return format!("{} · {goal}", self.display_name());
+        }
         match parse_input::<UpdateInputJson>(input) {
             Some(args) => format!(
                 "{} · {} {}",
@@ -354,6 +377,9 @@ impl ToolDisplay for WorkflowNodeUpdateDisplay {
         "workflow_node_update"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        if let Some(goal) = input_goal(input) {
+            return format!("{} · {goal}", self.display_name());
+        }
         match parse_input::<NodeUpdateInputJson>(input) {
             Some(args) => format!("{} · {} {}", self.display_name(), args.action, args.node_id),
             None => self.display_name().to_string(),
@@ -399,6 +425,9 @@ impl ToolDisplay for WorkflowReplanDisplay {
         "workflow_replan"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        if let Some(goal) = input_goal(input) {
+            return format!("{} · {goal}", self.display_name());
+        }
         let id = parse_input::<IdInputJson>(input)
             .map(|args| short_id(&args.workflow_id))
             .unwrap_or_default();

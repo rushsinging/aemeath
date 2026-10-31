@@ -128,3 +128,24 @@ fn update_header_includes_action_and_short_id() {
         .expect("result lines");
     assert_eq!(lines.last().unwrap(), "inactive (pending=replanning)");
 }
+
+/// goal 语义化：有 goal 时 header 取 `{名} · {goal}`，无 goal 回退参数 header。
+#[test]
+fn goal_semantic_header_takes_priority() {
+    let tool = display("workflow_node_update");
+    let with_goal = tool.format_header(
+        &json!({ "goal": "规划节点失败，准备重规划", "node_id": "wnd_0882gKCfnRw", "action": "fail" }),
+        None,
+    );
+    assert_eq!(with_goal, "Workflow Node · 规划节点失败，准备重规划");
+
+    let without_goal = tool.format_header(
+        &json!({ "node_id": "wnd_0882gKCfnRw", "action": "fail" }),
+        None,
+    );
+    assert_eq!(without_goal, "Workflow Node · fail wnd_0882gKCfnRw");
+
+    let create = display("workflow_create");
+    let header = create.format_header(&json!({ "goal": "建立交付流程", "name": "x" }), None);
+    assert_eq!(header, "Create Workflow · 建立交付流程");
+}

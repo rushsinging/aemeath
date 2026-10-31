@@ -160,6 +160,9 @@ pub struct WorkflowPendingRewritesInput {
 /// `workflow_create` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowCreateInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     /// 简短名称。
     pub name: String,
     /// 完成目标。
@@ -176,6 +179,9 @@ pub struct WorkflowCreateInput {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct WorkflowListInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     /// 按状态过滤；省略返回全部。
     pub status: Option<WorkflowStatusInput>,
     /// 分页大小，默认 20，上限 100。
@@ -187,6 +193,9 @@ pub struct WorkflowListInput {
 /// `workflow_query` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowQueryInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     /// 是否附带执行事实摘要；默认 false。
     #[serde(default)]
@@ -196,6 +205,9 @@ pub struct WorkflowQueryInput {
 /// `workflow_update` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowUpdateInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     pub action: WorkflowLifecycleActionInput,
     /// complete 必填交付摘要；fail 必填失败原因；cancel 必填理由；其他动作禁止。
@@ -208,6 +220,9 @@ pub struct WorkflowUpdateInput {
 /// `workflow_node_update` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowNodeUpdateInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     pub node_id: String,
     pub action: WorkflowNodeActionInput,
@@ -222,6 +237,9 @@ pub struct WorkflowNodeUpdateInput {
 /// `workflow_replan` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowReplanInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     pub boundary: WorkflowReplanBoundaryInput,
     /// continuation 新增节点；仅重组 Pending 时可为空。
