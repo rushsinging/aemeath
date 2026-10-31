@@ -94,7 +94,9 @@ pub struct WorkflowSuccessorInput {
 /// 节点定义。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowNodeInput {
-    pub node_id: String,
+    /// 节点序号（0 基，即 nodes 数组下标）；真正的 node id 由 Workflow 自动生成。
+    #[serde(default)]
+    pub index: usize,
     pub kind: WorkflowNodeKindInput,
     /// kind = work 时必填；confirm / complete 禁止。
     #[serde(default)]
@@ -108,8 +110,10 @@ pub struct WorkflowNodeInput {
 /// 静态 Edge；不含业务条件。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowEdgeInput {
-    pub from_node_id: String,
-    pub to_node_id: String,
+    /// 起点在 nodes 数组中的下标（LLM 不填 node id，由系统映射）。
+    pub from_index: usize,
+    /// 终点在 nodes 数组中的下标。
+    pub to_index: usize,
 }
 
 /// Replan 的历史边界。
@@ -160,8 +164,8 @@ pub struct WorkflowCreateInput {
     pub name: String,
     /// 完成目标。
     pub objective: String,
-    /// root 节点 id；必须是普通业务节点且唯一无前驱。
-    pub root_node_id: String,
+    /// root 在 nodes 数组中的下标（node id 由系统自动生成，LLM 不填 id）。
+    pub root_index: usize,
     /// 完整 DAG 的节点集合。
     pub nodes: Vec<WorkflowNodeInput>,
     /// 完整 DAG 的边集合。

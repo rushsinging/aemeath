@@ -175,12 +175,12 @@ fn create_input() -> serde_json::Value {
     json!({
         "name": "design",
         "objective": "ship",
-        "root_node_id": "root",
+        "root_index": 0,
         "nodes": [
-            { "node_id": "root", "kind": "work", "role": "planner", "description": "plan" },
-            { "node_id": "done", "kind": "complete", "description": "finish" }
+            { "index": 0, "kind": "work", "role": "planner", "description": "plan" },
+            { "index": 1, "kind": "complete", "description": "finish" }
         ],
-        "edges": [{ "from_node_id": "root", "to_node_id": "done" }]
+        "edges": [{ "from_index": 0, "to_index": 1 }]
     })
 }
 
@@ -193,7 +193,7 @@ fn workflow_tool_schemas_exposed() {
         backend: backend.clone(),
     }
     .input_schema();
-    for field in ["name", "objective", "root_node_id", "nodes", "edges"] {
+    for field in ["name", "objective", "root_index", "nodes", "edges"] {
         assert!(
             create_schema["properties"].get(field).is_some(),
             "create input schema missing {field}: {create_schema}"
@@ -297,7 +297,7 @@ async fn workflow_create_maps_input_and_result() {
         .unwrap()
         .clone()
         .expect("spec recorded");
-    assert_eq!(spec.root_node_id, "root");
+    assert_eq!(spec.root_node_id, "nd_1");
     assert_eq!(spec.nodes.len(), 2);
     assert_eq!(spec.nodes[0].kind, NodeKind::Work);
     assert_eq!(spec.nodes[0].role, Some(workflow::Role::Planner));
@@ -307,8 +307,8 @@ async fn workflow_create_maps_input_and_result() {
     let data = result.data.expect("data");
     assert_eq!(data.workflow_id, "wf_1");
     assert_eq!(data.status, "active");
-    assert_eq!(data.root_node_id, "root");
-    assert_eq!(data.complete_node_id, "done");
+    assert_eq!(data.root_node_id, "nd_1");
+    assert_eq!(data.complete_node_id, "nd_2");
     assert_eq!(data.node_count, 2);
 }
 

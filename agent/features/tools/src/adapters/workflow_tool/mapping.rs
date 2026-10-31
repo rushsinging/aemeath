@@ -142,25 +142,70 @@ pub(super) fn successors_from_input(
         .collect()
 }
 
-pub(super) fn edge_from_input(input: &WorkflowEdgeInput) -> EdgeDefinition {
-    EdgeDefinition {
-        from_node_id: input.from_node_id.clone(),
-        to_node_id: input.to_node_id.clone(),
-    }
+/// 按 nodes 下标映射生成 id（`nd_<下标+1>`，图内唯一、稳定可测）。
+///
+/// LLM 协议面 NEVER 携带 node id（#2091 口径：id 由 Workflow 自动填充）；
+/// 下标越界返回 `None`，由调用方转协议错误。
+pub(super) fn node_id_at(index: usize) -> String {
+    format!("nd_{}", index + 1)
 }
 
-pub(super) fn edges_from_input(input: &Option<Vec<WorkflowEdgeInput>>) -> Vec<EdgeDefinition> {
+pub(super) fn edge_from_indexes(
+    input: &WorkflowEdgeInput,
+    node_count: usize,
+) -> Option<EdgeDefinition> {
+    edge_from_indexes_with(input, node_count, node_id_at)
+}
+
+fn edge_from_indexes_with(
+    input: &WorkflowEdgeInput,
+    node_count: usize,
+    id_of: fn(usize) -> String,
+) -> Option<EdgeDefinition> {
+    if input.from_index >= node_count || input.to_index >= node_count {
+        return None;
+    }
+    Some(EdgeDefinition {
+        from_node_id: id_of(input.from_index),
+        to_node_id: id_of(input.to_index),
+    })
+}
+
+/// replan `new_nodes`：id 由系统按 `rn_<下标+1>` 生成（LLM 不填 id）。
+pub(super) fn replan_nodes_from_input(input: &[WorkflowNodeInput]) -> Vec<NodeDefinition> {
+    input
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            let mut definition = node_from_input(node);
+            definition.node_id = replan_node_id_at(index);
+            definition
+        })
+        .collect()
+}
+
+/// replan 新节点 id：`rn_<下标+1>`，与 create 生成的 `nd_` 原节点命名空间区分。
+pub(super) fn replan_node_id_at(index: usize) -> String {
+    format!("rn_{}", index + 1)
+}
+
+/// 解析 replan `new_edges`：下标成对出现在 `new_nodes` 内部或跨（new → rejoin target 由
+/// `rejoin_edges` 表达，此处仅处理 new_nodes 内部下标）；越界直接丢弃该边由 Kernel 兜底。
+pub(super) fn edges_from_indexes(
+    input: &Option<Vec<WorkflowEdgeInput>>,
+    node_count: usize,
+) -> Vec<EdgeDefinition> {
     input
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(edge_from_input)
+        .filter_map(|edge| edge_from_indexes_with(edge, node_count, replan_node_id_at))
         .collect()
 }
 
 pub(super) fn node_from_input(input: &WorkflowNodeInput) -> NodeDefinition {
     NodeDefinition {
-        node_id: input.node_id.clone(),
+        node_id: node_id_at(input.index),
         kind: match input.kind {
             crate::domain::types::workflow::WorkflowNodeKindInput::Work => NodeKind::Work,
             crate::domain::types::workflow::WorkflowNodeKindInput::Confirm => NodeKind::Confirm,

@@ -74,20 +74,30 @@ impl TypedTool for WorkflowCreateTool {
                 return TypedToolResult::error(format!("workflow_create: invalid input: {error}"));
             }
         };
+        let node_count = parsed.nodes.len();
         let complete_node_id = parsed
             .nodes
             .iter()
             .find(|node| node.kind == WorkflowNodeKindInput::Complete)
-            .map(|node| node.node_id.clone())
+            .map(|node| mapping::node_id_at(node.index))
             .unwrap_or_default();
-        let node_count = parsed.nodes.len();
-        let root_node_id = parsed.root_node_id.clone();
+        let root_node_id = mapping::node_id_at(parsed.root_index);
+        if parsed.root_index >= node_count {
+            return TypedToolResult::error("workflow_create: root_index 超出 nodes 下标范围");
+        }
+        let mut edges = Vec::with_capacity(parsed.edges.len());
+        for edge in &parsed.edges {
+            match mapping::edge_from_indexes(edge, node_count) {
+                Some(edge) => edges.push(edge),
+                None => return TypedToolResult::error("workflow_create: edge 下标超出 nodes 范围"),
+            }
+        }
         let spec = CreateWorkflowSpec {
             name: parsed.name,
             objective: parsed.objective,
-            root_node_id: parsed.root_node_id,
+            root_node_id: root_node_id.clone(),
             nodes: mapping::nodes_from_input(&parsed.nodes),
-            edges: parsed.edges.iter().map(mapping::edge_from_input).collect(),
+            edges,
         };
         match self.backend.create(spec).await {
             Ok(summary) => {
@@ -433,11 +443,12 @@ impl TypedTool for WorkflowReplanTool {
                 return TypedToolResult::error(format!("workflow_replan: invalid input: {error}"));
             }
         };
+        let parsed_new_nodes = parsed.new_nodes.unwrap_or_default();
         let command = ReplanWorkflowCommand {
             workflow_id: parsed.workflow_id,
             boundary: mapping::boundary_from_input(&parsed.boundary),
-            new_nodes: mapping::nodes_from_input(&parsed.new_nodes.unwrap_or_default()),
-            new_edges: mapping::edges_from_input(&parsed.new_edges),
+            new_nodes: mapping::replan_nodes_from_input(&parsed_new_nodes),
+            new_edges: mapping::edges_from_indexes(&parsed.new_edges, parsed_new_nodes.len()),
             entry_node_ids: parsed.entry_node_ids,
             rejoin_edges: mapping::rejoin_edges_from_input(&parsed.rejoin_edges),
             pending_rewrites: mapping::pending_rewrites_from_input(&parsed.pending_rewrites),
