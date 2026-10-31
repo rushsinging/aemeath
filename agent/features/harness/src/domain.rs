@@ -7,6 +7,8 @@ pub mod component;
 #[cfg(test)]
 mod component_tests;
 pub mod cycle_task;
+#[cfg(test)]
+mod cycle_task_tests;
 pub mod daemon_protocol;
 #[cfg(test)]
 mod daemon_protocol_tests;
@@ -24,6 +26,9 @@ mod lesson_tests;
 pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
+pub mod routing;
+#[cfg(test)]
+mod routing_tests;
 pub mod stream;
 pub mod stream_port;
 #[cfg(test)]
@@ -34,4 +39,9 @@ pub mod task;
 mod task_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(test)]
+mod two_phase_tests;
 pub mod versioning;
+pub mod virtual_registry;
+#[cfg(test)]
+mod virtual_registry_tests;

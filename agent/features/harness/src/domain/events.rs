@@ -9,6 +9,11 @@ use crate::domain::errors::HarnessError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 旧 JSONL 没有 attempts 字段；当时语义就是单次调用。
+fn default_llm_attempts() -> usize {
+    1
+}
+
 /// 单条过程事件（type 标记 + 载荷）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -24,6 +29,46 @@ pub enum RsiCycleEvent {
         block_index: usize,
         sessions_runs: Vec<String>,
         signals: Vec<String>,
+    },
+    RouteCandidates {
+        block_index: usize,
+        signal_id: String,
+        candidates: Vec<String>,
+        reason: String,
+    },
+    RouteSelected {
+        block_index: usize,
+        signal_id: String,
+        component: String,
+        stage: String,
+        reason: String,
+    },
+    RouteUnresolved {
+        block_index: usize,
+        signal_id: String,
+        reason: String,
+    },
+    ComponentRouteRejected {
+        block_index: usize,
+        component: String,
+        signal_ids: Vec<String>,
+        message: String,
+    },
+    ExecutionTargetFixed {
+        block_index: usize,
+        component: String,
+        signal_ids: Vec<String>,
+    },
+    LlmCall {
+        stage: String,
+        block_index: usize,
+        duration_ms: u64,
+        prompt_chars: usize,
+        response_chars: usize,
+        usage: crate::domain::improvement::RsiLlmUsage,
+        #[serde(default = "default_llm_attempts")]
+        attempts: usize,
+        error: Option<String>,
     },
     DiagnosisSummarized {
         issues: usize,

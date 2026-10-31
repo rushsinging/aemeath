@@ -14,6 +14,8 @@ fn entry(lesson: &str) -> Result<LessonEntry, crate::domain::errors::HarnessErro
             run_ref: "cycle-1".to_string(),
             signal: SignalKind::CycleObservation,
             excerpt: "组件正文缺失触发词".to_string(),
+            signal_id: String::new(),
+            source: None,
         }],
         1000,
     )
@@ -47,10 +49,38 @@ fn entry_enforces_excerpt_length_bound() {
             run_ref: "cycle-1".to_string(),
             signal: SignalKind::CycleObservation,
             excerpt: "摘".repeat(EXCERPT_MAX_CHARS + 1),
+            signal_id: String::new(),
+            source: None,
         }],
         1000,
     );
     assert!(result.is_err());
+}
+
+/// 旧 EvidenceBinding JSON 无 signal_id/source 时兼容读取；新字段可 round-trip。
+#[test]
+fn evidence_binding_source_fields_default_and_round_trip() {
+    let legacy: EvidenceBinding = serde_json::from_str(
+        r#"{"run_ref":"cycle-1","signal":"cycle_observation","excerpt":"旧证据"}"#,
+    )
+    .expect("旧证据绑定必须兼容");
+    assert!(legacy.signal_id.is_empty());
+    assert!(legacy.source.is_none());
+
+    let current = EvidenceBinding {
+        run_ref: "cycle-1".to_string(),
+        signal: SignalKind::RepeatedFailure,
+        excerpt: "重复失败".to_string(),
+        signal_id: "repeated_failure:Bash:x".to_string(),
+        source: Some(crate::domain::evidence::EvidenceSourceRef {
+            session_id: "s1.dataset".to_string(),
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+        }),
+    };
+    let serialized = serde_json::to_string(&current).expect("serialize");
+    let parsed: EvidenceBinding = serde_json::from_str(&serialized).expect("round-trip");
+    assert_eq!(parsed, current);
 }
 
 /// JSONL 往返：追加→读取等价；Active 过滤正确。
@@ -129,6 +159,8 @@ fn retire_for_component_supersedes_old_active_lessons() {
             run_ref: "cycle-1".to_string(),
             signal: SignalKind::CycleObservation,
             excerpt: "e".to_string(),
+            signal_id: String::new(),
+            source: None,
         }],
         1000,
     )
@@ -143,6 +175,8 @@ fn retire_for_component_supersedes_old_active_lessons() {
             run_ref: "cycle-1".to_string(),
             signal: SignalKind::CycleObservation,
             excerpt: "e".to_string(),
+            signal_id: String::new(),
+            source: None,
         }],
         1000,
     )
@@ -174,6 +208,8 @@ fn pending_lesson(id: &str, target_signal: &str) -> LessonEntry {
             run_ref: "cycle-1".to_string(),
             signal: SignalKind::RepeatedFailure,
             excerpt: "e".to_string(),
+            signal_id: String::new(),
+            source: None,
         }],
         1000,
     )

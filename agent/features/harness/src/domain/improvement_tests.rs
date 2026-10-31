@@ -3,8 +3,8 @@
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::errors::HarnessError;
 use crate::domain::improvement::{
-    build_block_prompt, chunk_materials, parse_block_proposal, run_improvement_cycle,
-    BlockProposal, ImprovementMaterials, RsiLlmPort,
+    build_block_prompt, chunk_materials, parse_block_proposal, parse_block_proposal_with_refs,
+    run_improvement_cycle, BlockProposal, ImprovementMaterials, RsiLlmPort,
 };
 use crate::domain::test_support::FakeRegistry;
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use share::config::RsiConfig;
 
 fn id(name: &str) -> ComponentId {
     ComponentId {
-        kind: ComponentKind::Skill,
+        kind: ComponentKind::ToolGuidance,
         name: ComponentName::new(name),
     }
 }
@@ -28,6 +28,24 @@ fn config(chunk: usize) -> RsiConfig {
     RsiConfig {
         chunk_max_components: chunk,
         ..RsiConfig::default()
+    }
+}
+
+fn evidence_with_signal() -> crate::domain::evidence::EvidenceBundle {
+    crate::domain::evidence::EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![crate::domain::evidence::EvidenceSignal {
+            kind: crate::domain::evidence::SignalKind::RepeatedFailure,
+            signal_id: "repeated_failure:Bash:cargo build failed".into(),
+            summary: "工具 Bash 重复失败 ×2".into(),
+            excerpt: Some("cargo build failed".into()),
+            occurrences: 2,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "s1.dataset".into(),
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
     }
 }
 
@@ -55,6 +73,48 @@ impl RsiLlmPort for ScriptedLlm {
             .cloned()
             .ok_or_else(|| HarnessError::unavailable(crate::constants::ERROR_DOMAIN, "桩耗尽"))
     }
+
+    async fn complete_with_usage(
+        &self,
+        prompt: &str,
+    ) -> Result<crate::domain::improvement::RsiLlmCompletion, HarnessError> {
+        Ok(crate::domain::improvement::RsiLlmCompletion {
+            text: self.complete(prompt).await?,
+            usage: crate::domain::improvement::RsiLlmUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(20),
+                reasoning_tokens: Some(3),
+                ..Default::default()
+            },
+            attempts: 1,
+        })
+    }
+}
+
+/// RSI 空响应最多重试一次；usage 聚合两次调用，成功时 attempts=2。
+#[tokio::test]
+async fn empty_llm_completion_retries_once_and_merges_usage() {
+    let llm = ScriptedLlm::new(vec![String::new(), "ok".to_string()]);
+    let completion = llm
+        .complete_with_empty_retry("prompt")
+        .await
+        .expect("第二次非空 MUST 成功");
+    assert_eq!(completion.text, "ok");
+    assert_eq!(completion.attempts, 2);
+    assert_eq!(completion.usage.input_tokens, Some(200));
+    assert_eq!(completion.usage.output_tokens, Some(40));
+    assert_eq!(completion.usage.reasoning_tokens, Some(6));
+}
+
+/// 第二次仍为空：MUST 失败，NEVER 把空文本交给 JSON 解析器。
+#[tokio::test]
+async fn empty_llm_completion_fails_after_one_retry() {
+    let llm = ScriptedLlm::new(vec![String::new(), String::new()]);
+    let error = llm
+        .complete_with_empty_retry("prompt")
+        .await
+        .expect_err("连续空文本 MUST 失败");
+    assert!(error.message().contains("空响应已重试一次"));
 }
 
 /// 分块：按 chunk_max_components 分组、上限至少 1。
@@ -82,16 +142,100 @@ fn materials_chunked_by_configured_size() {
 #[test]
 fn block_proposal_envelope_parses() {
     let propose = parse_block_proposal(
-        r#"{"decision":"propose","reason":"依据","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        r#"{"decision":"propose","reason":"依据","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
     )
     .expect("propose 必须可解析");
-    assert!(matches!(propose, BlockProposal::Propose { .. }));
+    match propose {
+        BlockProposal::Propose { signal_ids, .. } => assert_eq!(
+            signal_ids,
+            vec!["repeated_failure:Bash:cargo build failed".to_string()]
+        ),
+        other => panic!("预期 propose：{other:?}"),
+    }
 
     let no_change = parse_block_proposal(r#"{"decision":"no_change","reason":"证据不足"}"#)
         .expect("no_change 必须可解析");
     assert!(matches!(no_change, BlockProposal::NoChange { .. }));
 
     assert!(parse_block_proposal("我觉得不需要改").is_err());
+}
+
+/// 无 excerpt 的 signal 以 summary 兜底时 MUST 先按 lesson 摘录上限截断，
+/// NEVER 因长 retry fingerprint 导致整条 lesson 回写失败。
+#[tokio::test]
+async fn lesson_is_persisted_when_signal_summary_is_long() {
+    let target = id("long-summary");
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let signal_id = "retry_pattern:Bash:cargo-test-long-summary".to_string();
+    let response = format!(
+        r#"{{"decision":"propose","reason":"控制重复调用","signal_ids":["{signal_id}"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"long-summary"}},"content":{{"frontmatter":null,"body":"new"}}}}]}}}}"#
+    );
+    let llm = ScriptedLlm::new(vec![response]);
+    let evidence = crate::domain::evidence::EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![crate::domain::evidence::EvidenceSignal {
+            kind: crate::domain::evidence::SignalKind::RetryPattern,
+            signal_id: signal_id.clone(),
+            summary: "长".repeat(512),
+            excerpt: None,
+            occurrences: 3,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "s1.dataset".into(),
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(1),
+        evidence,
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("周期必须成功");
+    assert!(outcome.summary.contains("采纳 1"), " {}", outcome.summary);
+    let lessons = lesson_store.load_active().expect("lessons");
+    assert_eq!(lessons.len(), 1, "长 summary NEVER 静默丢 lesson");
+    assert!(
+        lessons[0].evidence[0].excerpt.chars().count() <= 200,
+        "证据摘录 MUST 有界：{}",
+        lessons[0].evidence[0].excerpt.chars().count()
+    );
+}
+
+/// 短 evidence ref：模型输出 E0/E1，runtime 解析回完整 signal id。
+#[test]
+fn block_proposal_short_evidence_refs_resolve_to_signal_ids() {
+    let propose = parse_block_proposal_with_refs(
+        r#"{"decision":"propose","reason":"依据","evidence_refs":["E0"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        &evidence_with_signal(),
+    )
+    .expect("短引用必须可解析");
+    match propose {
+        BlockProposal::Propose { signal_ids, .. } => assert_eq!(
+            signal_ids,
+            vec!["repeated_failure:Bash:cargo build failed".to_string()]
+        ),
+        other => panic!("预期 propose：{other:?}"),
+    }
+
+    let unknown = parse_block_proposal_with_refs(
+        r#"{"decision":"propose","reason":"依据","evidence_refs":["E9"],"change_set":{"edits":[]}}"#,
+        &evidence_with_signal(),
+    );
+    assert!(unknown.is_err(), "未知 evidence ref MUST 拒绝");
 }
 
 /// prompt 含组件材料与编辑契约要点。
@@ -106,7 +250,65 @@ fn block_prompt_carries_materials_and_contract() {
     assert!(prompt.contains("alpha"));
     assert!(prompt.contains("正文内容"));
     assert!(prompt.contains("no_change"));
+    assert!(prompt.contains("evidence_refs"));
     assert!(prompt.contains("未提及的组件自动保持原样"));
+}
+
+/// 项目/全局落点隔离：材料 MUST 标注 scope，证据 MUST 标注来源项目；
+/// 单项目或未知项目的项目特定经验 NEVER 落 global。
+#[test]
+fn block_prompt_carries_project_and_global_scope_contract() {
+    let overlay = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("global"),
+    };
+    let chunk = vec![
+        (overlay, body_content("global overlay")),
+        (id("alpha"), body_content("tool guidance")),
+    ];
+    let evidence = crate::domain::evidence::EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![crate::domain::evidence::EvidenceSignal {
+            kind: crate::domain::evidence::SignalKind::RepeatedFailure,
+            signal_id: "repeated_failure:Bash:project-specific".into(),
+            summary: "项目专属命令失败".into(),
+            excerpt: None,
+            occurrences: 3,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project-a/s1.dataset".into(),
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    let prompt = build_block_prompt(&chunk, &[], &evidence);
+    assert!(prompt.contains("\"scope\":\"global\""));
+    assert!(prompt.contains("项目: project-a"));
+    assert!(prompt.contains("单项目或项目归属未知的项目特定经验 NEVER 写入"));
+    assert!(prompt.contains("scope=global；没有同项目 scope 候选时选择 no_change"));
+    assert!(prompt.contains("项目 A 的证据 NEVER 写入项目 B"));
+}
+
+/// prompt 含组件注入预算：超预算由 LLM 压缩，NEVER 硬截断。
+#[test]
+fn block_prompt_states_component_body_budget() {
+    let chunk = vec![(id("alpha"), body_content("old"))];
+    let prompt = build_block_prompt(&chunk, &[], &evidence_with_signal());
+    assert!(prompt.contains("正文预算 3800 字符"));
+    assert!(prompt.contains("超预算时会被要求再压缩一轮"));
+    assert!(prompt.contains("NEVER 通过硬截断"));
+}
+
+/// 工具参数类改进 NEVER 在 prose 组件中复述 schema；schema 由宿主请求携带，
+/// prose 只能沉淀「按错误 + 当前 schema 修正」的通用纪律。
+#[test]
+fn block_prompt_forbids_rewriting_tool_schema() {
+    let chunk = vec![(id("alpha"), body_content("old"))];
+    let prompt = build_block_prompt(&chunk, &[], &evidence_with_signal());
+    assert!(prompt.contains("工具参数类问题 NEVER 复述或改写工具 schema"));
+    assert!(prompt.contains("NEVER 把可选字段写成必填"));
+    assert!(prompt.contains("只写「读取错误 + 核对当前 schema +"));
+    assert!(prompt.contains("修正 payload + 禁止无效原样重试」的通用纪律"));
 }
 
 /// 完整周期：两块（采纳 + 无变更）→ 汇总正确、未提及组件继承。
@@ -120,7 +322,7 @@ async fn cycle_adopts_and_summarizes_per_block() {
     ]);
     // 单阶段（#2078 修订）：每块一次提案调用
     let llm = ScriptedLlm::new(vec![
-        r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
         r#"{"decision":"no_change","reason":"证据不足"}"#.to_string(),
     ]);
 
@@ -135,7 +337,7 @@ async fn cycle_adopts_and_summarizes_per_block() {
         &llm,
         &lesson_store,
         &config(1),
-        Default::default(),
+        evidence_with_signal(),
         false,
         &mut Vec::new(),
         None,
@@ -150,6 +352,26 @@ async fn cycle_adopts_and_summarizes_per_block() {
     assert_eq!(lessons.len(), 1);
     assert!(!lessons[0].evidence.is_empty());
     assert_eq!(
+        lessons[0].verification.target_signal,
+        "repeated_failure:Bash:cargo build failed"
+    );
+    assert_eq!(
+        lessons[0].evidence[0].signal_id,
+        "repeated_failure:Bash:cargo build failed"
+    );
+    assert!(lessons[0].evidence[0]
+        .source
+        .as_ref()
+        .is_some_and(|source| source.step_id == "step-1"));
+    assert_eq!(
+        outcome.adopted[0].evidence[0].signal_id,
+        "repeated_failure:Bash:cargo build failed"
+    );
+    assert!(outcome.adopted[0].evidence[0]
+        .source
+        .as_ref()
+        .is_some_and(|source| source.run_id == "run-1"));
+    assert_eq!(
         registry
             .content_of(&mentioned)
             .map(|content| content.body.clone()),
@@ -163,6 +385,78 @@ async fn cycle_adopts_and_summarizes_per_block() {
     );
 }
 
+/// 路由门禁：合法 Bash signal 不允许落到无关 skill；NEVER 因 signal id 合法而放行。
+#[tokio::test]
+async fn builtin_tool_signal_cannot_route_to_unrelated_skill() {
+    let target = ComponentId {
+        kind: ComponentKind::Skill,
+        name: ComponentName::new("alpha"),
+    };
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"propose","reason":"误路由","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let events_dir = tempfile::tempdir().expect("tempdir");
+    let recorder = crate::domain::events::RsiEventRecorder::new(events_dir.path());
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(4),
+        evidence_with_signal(),
+        false,
+        &mut Vec::new(),
+        Some(&recorder),
+        None,
+    )
+    .await
+    .expect("周期必须成功");
+    assert!(
+        outcome.summary.contains("作废 1"),
+        "路由外组件 MUST 作废：{}",
+        outcome.summary
+    );
+    assert!(lesson_store.load_active().expect("lessons").is_empty());
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some("old".to_string())
+    );
+
+    let event_path = events_dir
+        .path()
+        .read_dir()
+        .expect("事件目录")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+        .expect("事件文件");
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(event_path)
+        .expect("读取事件")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("事件 JSON"))
+        .collect();
+    let rejected = events
+        .iter()
+        .find(|event| event["event"] == "component_route_rejected")
+        .expect("路由拒绝事件");
+    assert_eq!(rejected["component"], "skill/alpha");
+    assert_eq!(
+        rejected["signal_ids"][0],
+        "repeated_failure:Bash:cargo build failed"
+    );
+    assert!(events
+        .iter()
+        .any(|event| event["event"] == "route_unresolved"));
+}
+
 /// 块级幂等：一块解析失败（坏 JSON）只作废该块，其余块照常采纳。
 #[tokio::test]
 async fn malformed_block_discarded_without_blocking_others() {
@@ -173,7 +467,7 @@ async fn malformed_block_discarded_without_blocking_others() {
     ]);
     let llm = ScriptedLlm::new(vec![
         "这不是 JSON".to_string(),
-        r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
 
     let lesson_store = crate::domain::lesson::LessonStore::new(
@@ -187,7 +481,7 @@ async fn malformed_block_discarded_without_blocking_others() {
         &llm,
         &lesson_store,
         &config(1),
-        Default::default(),
+        evidence_with_signal(),
         false,
         &mut Vec::new(),
         None,
@@ -234,7 +528,7 @@ async fn empty_registry_yields_empty_cycle() {
 
 // ---- #2048 evidence 材料注入 ----
 
-/// prompt 含 evidence 块（signal id 可引用）与引用约束；空证据兜底。
+/// prompt 含 evidence 短引用块（E0/E1）与引用约束；空证据兜底。
 #[test]
 fn block_prompt_carries_evidence_block_and_reference_rule() {
     use crate::domain::evidence::{
@@ -245,6 +539,7 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
         SessionEventRecord {
             session_id: "s".into(),
             run_id: "r".into(),
+            step_id: "step-1".into(),
             tool_name: Some("Bash".into()),
             is_error: true,
             error_text: Some("exit code 1: boom".into()),
@@ -255,8 +550,15 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
     ];
     let evidence = aggregate_evidence(&events);
     let prompt = build_block_prompt(&chunk, &[], &evidence);
-    assert!(prompt.contains("repeated_failure:Bash:"));
-    assert!(prompt.contains("MUST 指出它回应"), "引用约束必须在 prompt");
+    assert!(prompt.contains("[E0]"), "短 evidence ref 必须进入 prompt");
+    assert!(
+        !prompt.contains("repeated_failure:Bash:"),
+        "prompt NEVER 要求模型复制完整 signal id"
+    );
+    assert!(
+        prompt.contains("MUST 在 evidence_refs"),
+        "引用约束必须在 prompt"
+    );
 
     let empty_prompt = build_block_prompt(&chunk, &[], &Default::default());
     assert!(empty_prompt.contains("（近期无执行证据）"), "空证据兜底");
@@ -270,6 +572,7 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
                 summary: "终态".into(),
                 excerpt: None,
                 occurrences: 1,
+                sources: Vec::new(),
             },
             EvidenceSignal {
                 kind: SignalKind::RepeatedFailure,
@@ -277,34 +580,482 @@ fn block_prompt_carries_evidence_block_and_reference_rule() {
                 summary: "失败".into(),
                 excerpt: None,
                 occurrences: 1,
+                sources: Vec::new(),
             },
         ],
         sessions_covered: 1,
     };
     let both_prompt = build_block_prompt(&chunk, &[], &bundle_with_both);
-    let failure_pos = both_prompt.find("repeated_failure:Bash:x").unwrap();
-    let outcome_pos = both_prompt.find("run_outcome:aggregate").unwrap();
+    let failure_pos = both_prompt.find("失败").unwrap();
+    let outcome_pos = both_prompt.find("终态").unwrap();
     assert!(failure_pos < outcome_pos, "repeated_failure 渲染在前");
 }
 
-/// lesson 绑定：reason 引用 signal id 时绑定真实 kind。
+/// 提案 signal 引用门禁：未知引用整份作废，NEVER 落盘或回写 lesson。
+#[tokio::test]
+async fn unknown_signal_reference_discards_whole_proposal() {
+    let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"propose","reason":"引用不存在信号","signal_ids":["repeated_failure:Grep:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(4),
+        evidence_with_signal(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("周期必须成功");
+    assert!(
+        outcome.summary.contains("作废 1"),
+        "未知 signal 引用必须作废：{}",
+        outcome.summary
+    );
+    assert!(lesson_store.load_active().expect("lessons").is_empty());
+    assert_eq!(
+        registry
+            .content_of(&id("alpha"))
+            .map(|content| content.body.clone()),
+        Some("old".to_string())
+    );
+}
+
+// ---- Compose 相似候选与 session 上下文 ----
+
+fn adoption_record(
+    name: &str,
+    reason: &str,
+    signal_id: &str,
+    source: Option<crate::domain::evidence::EvidenceSourceRef>,
+) -> crate::domain::task::AdoptionRecord {
+    crate::domain::task::AdoptionRecord {
+        id: id(name),
+        reason: reason.to_string(),
+        evidence: vec![crate::domain::lesson::EvidenceBinding {
+            run_ref: "cycle-1".to_string(),
+            signal: crate::domain::evidence::SignalKind::RepeatedFailure,
+            excerpt: reason.chars().take(200).collect(),
+            signal_id: signal_id.to_string(),
+            source,
+        }],
+    }
+}
+
+fn active_lesson(
+    name: &str,
+    lesson: &str,
+    signal_id: &str,
+    source: Option<crate::domain::evidence::EvidenceSourceRef>,
+) -> crate::domain::lesson::LessonEntry {
+    crate::domain::lesson::LessonEntry::new(
+        format!("lesson-{name}"),
+        "guardrails",
+        lesson.to_string(),
+        vec![crate::domain::lesson::EvidenceBinding {
+            run_ref: "cycle-old".to_string(),
+            signal: crate::domain::evidence::SignalKind::RepeatedFailure,
+            excerpt: lesson.chars().take(200).collect(),
+            signal_id: signal_id.to_string(),
+            source,
+        }],
+        1,
+    )
+    .expect("lesson")
+}
+
+fn source_ref(step_id: &str) -> crate::domain::evidence::EvidenceSourceRef {
+    crate::domain::evidence::EvidenceSourceRef {
+        session_id: "s1.dataset".to_string(),
+        run_id: "run-1".to_string(),
+        step_id: step_id.to_string(),
+    }
+}
+
+fn fake_stream_with_context(
+    step_id: &str,
+    text: &str,
+) -> crate::domain::stream_port::FakeEvidenceStream {
+    let stream = crate::domain::stream_port::FakeEvidenceStream::default();
+    stream.contexts.lock().expect("contexts").push(
+        crate::domain::evidence::SessionContextExcerpt {
+            source: source_ref(step_id),
+            text: text.to_string(),
+        },
+    );
+    stream
+}
+
+/// 中文提案/lesson 必须按 CJK bigram 召回，不能因整句单 token 漏检。
 #[test]
-fn lesson_signal_kind_bound_from_reason_reference() {
-    assert_eq!(
-        crate::domain::improvement::signal_kind_from_reason(
-            "回应 repeated_failure:Bash:exit-##-code 的证据"
-        ),
-        crate::domain::evidence::SignalKind::RepeatedFailure
+fn similar_candidates_recall_chinese_text_with_context() {
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前必须先读取文件内容并确认上下文",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
     );
-    assert_eq!(
-        crate::domain::improvement::signal_kind_from_reason("回应 retry_pattern:Edit:f 的证据"),
-        crate::domain::evidence::SignalKind::RetryPattern
+    let lesson = active_lesson(
+        "old",
+        "编辑文件前应读取目标内容，确认上下文后再落笔",
+        "repeated_failure:Edit:different-signal",
+        Some(source_ref("step-2")),
     );
-    assert_eq!(
-        crate::domain::improvement::signal_kind_from_reason("组件是空壳占位"),
-        crate::domain::evidence::SignalKind::CycleObservation,
-        "无引用兜底模型自述"
+    let stream = fake_stream_with_context("step-1", "提案来源上下文：修改 x.rs");
+    let pairs = crate::domain::improvement::select_similar_candidate_pairs(
+        std::slice::from_ref(&proposal),
+        std::slice::from_ref(&lesson),
+        crate::constants::COMPOSE_SIMILAR_PAIR_LIMIT,
+        &stream,
     );
+    assert_eq!(pairs.len(), 1, "不同 signal 下中文 bigram 必须召回候选");
+    assert!(pairs[0].score >= crate::constants::COMPOSE_SIMILARITY_CANDIDATE_THRESHOLD);
+    assert!(
+        pairs[0].left_context.is_some(),
+        "候选必须回读来源 session 上下文"
+    );
+}
+
+/// 语义无关的提案不应进入候选，避免无意义上下文注入。
+#[test]
+fn unrelated_candidates_are_not_recalled() {
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前必须先读取文件内容并确认上下文",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
+    );
+    let lesson = active_lesson(
+        "old",
+        "网络请求超时后应降低并发并检查凭据",
+        "run_outcome:aggregate",
+        None,
+    );
+    let stream = crate::domain::stream_port::FakeEvidenceStream::default();
+    let pairs = crate::domain::improvement::select_similar_candidate_pairs(
+        std::slice::from_ref(&proposal),
+        std::slice::from_ref(&lesson),
+        crate::constants::COMPOSE_SIMILAR_PAIR_LIMIT,
+        &stream,
+    );
+    assert!(pairs.is_empty(), "无关候选不得注入：{pairs:?}");
+}
+
+/// Compose prompt 必须携带候选对、双方上下文与缺失/不可合并规则。
+#[test]
+fn compose_similarity_block_carries_context_and_guardrails() {
+    let mut pair = crate::domain::improvement::SimilarCandidatePair {
+        left_label: "本周期提案：alpha".to_string(),
+        left_text: "编辑前先读取".to_string(),
+        right_label: "Active lesson：lesson-old".to_string(),
+        right_text: "落笔前确认上下文".to_string(),
+        left_source: Some(source_ref("step-1")),
+        right_source: Some(source_ref("step-2")),
+        left_context: Some("来源上下文 A：Bash 失败".to_string()),
+        right_context: None,
+        score: 0.62,
+    };
+    let block = crate::domain::improvement::render_compose_similarity_block(std::slice::from_mut(
+        &mut pair,
+    ));
+    assert!(block.contains("本周期提案：alpha"));
+    assert!(block.contains("Active lesson：lesson-old"));
+    assert!(block.contains("来源上下文 A：Bash 失败"));
+    assert!(
+        block.contains("s1.dataset/run-1/step-1"),
+        "prompt 必须保留完整来源三元组"
+    );
+    assert!(block.contains("上下文不可用"), "缺失上下文必须显式标注");
+    assert!(block.contains("相似度只是召回线索"));
+    assert!(block.contains("上下文不同或缺失"), "必须禁止据此合并");
+}
+
+/// Compose 相似上下文总预算有界：超长候选上下文被截断。
+#[test]
+fn compose_similarity_context_total_budget_is_bounded() {
+    let stream = crate::domain::stream_port::FakeEvidenceStream::default();
+    {
+        let mut contexts = stream.contexts.lock().expect("contexts");
+        for index in 0..6 {
+            contexts.push(crate::domain::evidence::SessionContextExcerpt {
+                source: source_ref(&format!("step-{index}")),
+                text: "长".repeat(3000),
+            });
+        }
+    }
+    let adoptions: Vec<_> = (0..6)
+        .map(|index| {
+            adoption_record(
+                &format!("alpha{index}"),
+                "编辑前必须先读取文件内容并确认上下文",
+                "repeated_failure:Edit:old_string",
+                Some(source_ref(&format!("step-{index}"))),
+            )
+        })
+        .collect();
+    let pairs = crate::domain::improvement::select_similar_candidate_pairs(
+        &adoptions,
+        &[],
+        crate::constants::COMPOSE_SIMILAR_PAIR_LIMIT,
+        &stream,
+    );
+    let total: usize = pairs
+        .iter()
+        .flat_map(|pair| [pair.left_context.as_deref(), pair.right_context.as_deref()])
+        .flatten()
+        .map(|text| text.chars().count())
+        .sum();
+    assert!(
+        total <= crate::constants::COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS,
+        "相似上下文总预算超限：{total}"
+    );
+}
+
+/// Compose 端到端装配：Active lesson 与 session 上下文必须进入真实 prompt。
+#[tokio::test]
+async fn compose_phase_passes_active_lessons_and_context_to_prompt() {
+    struct RecordingLlm {
+        prompt: std::sync::Mutex<String>,
+    }
+    #[async_trait]
+    impl RsiLlmPort for RecordingLlm {
+        async fn complete(&self, prompt: &str) -> Result<String, HarnessError> {
+            *self.prompt.lock().expect("prompt lock") = prompt.to_string();
+            Ok(r#"{"decision":"no_change","reason":"无矛盾"}"#.to_string())
+        }
+    }
+
+    let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("规则"))]);
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前先读取文件内容",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
+    );
+    let lesson = active_lesson(
+        "old",
+        "落笔前先读取文件并确认上下文",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-2")),
+    );
+    let stream = fake_stream_with_context("step-1", "来源上下文：Edit old_string 不匹配");
+    stream.contexts.lock().expect("contexts").push(
+        crate::domain::evidence::SessionContextExcerpt {
+            source: source_ref("step-2"),
+            text: "历史上下文：同场景反复失败".to_string(),
+        },
+    );
+    let llm = RecordingLlm {
+        prompt: std::sync::Mutex::new(String::new()),
+    };
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = crate::domain::improvement::run_compose_phase(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &[proposal],
+        std::slice::from_ref(&lesson),
+        &stream,
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("Compose 必须成功")
+    .expect("有采纳时 Compose 必须产出结果");
+    assert!(outcome.summary.contains("无变更"), "{}", outcome.summary);
+    let prompt = llm.prompt.lock().expect("prompt lock").clone();
+    assert!(
+        prompt.contains("Active lesson"),
+        "prompt 缺 lesson：{prompt}"
+    );
+    assert!(prompt.contains("候选 1"), "prompt 缺候选对：{prompt}");
+    assert!(
+        prompt.contains("来源上下文：Edit old_string 不匹配"),
+        "prompt 缺提案来源上下文：{prompt}"
+    );
+    assert!(
+        prompt.contains("历史上下文：同场景反复失败"),
+        "prompt 缺 lesson 来源上下文：{prompt}"
+    );
+}
+
+/// LLM usage MUST 进入过程事件；provider 未报告字段保持 null，NEVER 伪造。
+#[tokio::test]
+async fn llm_usage_is_recorded_in_cycle_events() {
+    let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前先读取文件内容",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
+    );
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"no_change","reason":"无冲突"}"#.to_string()
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let events_dir = tempfile::tempdir().expect("tempdir");
+    let recorder = crate::domain::events::RsiEventRecorder::new(events_dir.path());
+    let outcome = crate::domain::improvement::run_compose_phase(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &[proposal],
+        &[],
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        Some(&recorder),
+        None,
+    )
+    .await
+    .expect("Compose 必须成功")
+    .expect("Compose 结果");
+    assert!(outcome.summary.contains("无变更"), "{}", outcome.summary);
+
+    let path = events_dir
+        .path()
+        .read_dir()
+        .expect("事件目录")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+        .expect("事件文件");
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(path)
+        .expect("事件文件")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("事件 JSON"))
+        .collect();
+    let call = events
+        .iter()
+        .find(|event| event["event"] == "llm_call")
+        .expect("llm_call 事件");
+    assert_eq!(call["stage"], "compose");
+    assert_eq!(call["usage"]["input_tokens"], 100);
+    assert_eq!(call["usage"]["output_tokens"], 20);
+    assert_eq!(call["usage"]["reasoning_tokens"], 3);
+    assert!(call["prompt_chars"].as_u64().unwrap() > 0);
+    assert!(call["duration_ms"].as_u64().is_some());
+}
+
+/// Compose 修正必须继承被仲裁采纳的真实 signal/source，不能写成空绑定。
+#[tokio::test]
+async fn compose_correction_preserves_adoption_evidence() {
+    let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+    let proposal = adoption_record(
+        "alpha",
+        "编辑前先读取文件内容",
+        "repeated_failure:Edit:old_string",
+        Some(source_ref("step-1")),
+    );
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"propose","reason":"合并后精炼","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = crate::domain::improvement::run_compose_phase(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &[proposal],
+        &[],
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("Compose 必须成功")
+    .expect("Compose 结果");
+    assert!(outcome.summary.contains("已采纳"), "{}", outcome.summary);
+    let lessons = lesson_store.load_active().expect("lessons");
+    assert_eq!(lessons.len(), 1);
+    assert_eq!(
+        lessons[0].evidence[0].signal_id,
+        "repeated_failure:Edit:old_string"
+    );
+    assert!(lessons[0].evidence[0]
+        .source
+        .as_ref()
+        .is_some_and(|source| source.step_id == "step-1"));
+}
+
+/// Compose 只能修正本周期已采纳组件，且 signal_ids 非空时必须来自采纳证据。
+#[tokio::test]
+async fn compose_rejects_unadopted_component_and_unknown_signal() {
+    for response in [
+        r#"{"decision":"propose","reason":"越界","signal_ids":[],"change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"beta"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        r#"{"decision":"propose","reason":"未知信号","signal_ids":["repeated_failure:Edit:missing"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"alpha"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+    ] {
+        let mut registry = FakeRegistry::with_entries(vec![(id("alpha"), body_content("old"))]);
+        let proposal = adoption_record(
+            "alpha",
+            "编辑前先读取文件内容",
+            "repeated_failure:Edit:old_string",
+            Some(source_ref("step-1")),
+        );
+        let llm = ScriptedLlm::new(vec![response.to_string()]);
+        let lesson_store = crate::domain::lesson::LessonStore::new(
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("library.jsonl"),
+        );
+        let outcome = crate::domain::improvement::run_compose_phase(
+            &mut registry,
+            &llm,
+            &lesson_store,
+            &[proposal],
+            &[],
+            &crate::domain::stream_port::FakeEvidenceStream::default(),
+            false,
+            &mut Vec::new(),
+            None,
+            None,
+        )
+        .await
+        .expect("Compose 必须成功")
+        .expect("Compose 结果");
+        assert!(
+            outcome.summary.contains("证据引用无效"),
+            "{}",
+            outcome.summary
+        );
+        assert_eq!(
+            registry
+                .content_of(&id("alpha"))
+                .map(|content| content.body.clone()),
+            Some("old".to_string()),
+            "校验失败必须零落盘"
+        );
+        assert!(lesson_store.load_active().expect("lessons").is_empty());
+    }
 }
 
 // ---- dry-run 富预览（实在总结：前后规模 + 要点 + 依据）----
