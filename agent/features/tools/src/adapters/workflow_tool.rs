@@ -241,11 +241,31 @@ impl TypedTool for WorkflowQueryTool {
         };
         match self.backend.query(query).await {
             Ok(data) => {
-                let text = format!(
-                    "workflow_query: {} ({} nodes)",
+                // 新协议口径：LLM 不填 node id，节点 id 由系统生成——回显
+                // MUST 带真实节点 id，否则后续 node_update / replan 无法引用。
+                let mut text = format!(
+                    "workflow_query: {} [{}]",
                     data.workflow_id,
-                    data.nodes.len()
+                    mode_label_for(data.status, data.active_mode)
                 );
+                for node in &data.nodes {
+                    let role = node
+                        .role
+                        .map(|r| format!("{r:?}").to_lowercase())
+                        .unwrap_or_default();
+                    let role_part = if role.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {role}")
+                    };
+                    text.push_str(&format!(
+                        "\n  {} {}{} — {}",
+                        node.node_id,
+                        mapping::node_status_label(node.status),
+                        role_part,
+                        node.description
+                    ));
+                }
                 TypedToolResult::success(text, mapping::query_result(data))
             }
             Err(error) => business_error(&error),
@@ -331,6 +351,15 @@ impl TypedTool for WorkflowUpdateTool {
 
 fn status_text(status: workflow::WorkflowStatus) -> &'static str {
     mapping::status_label(status)
+}
+
+/// query 回显首行的 `status(mode)` 标签。
+fn mode_label_for(status: workflow::WorkflowStatus, mode: Option<workflow::ActiveMode>) -> String {
+    let base = mapping::status_label(status).to_owned();
+    match mode {
+        Some(mode) => format!("{base}({})", mapping::mode_label(mode)),
+        None => base,
+    }
 }
 
 /// `workflow_node_update`
