@@ -16,6 +16,12 @@ mod backend_tests;
 #[cfg(test)]
 mod replan_tests;
 
+pub mod autostart;
+
+#[cfg(test)]
+#[path = "application/autostart_tests.rs"]
+mod autostart_tests;
+
 #[cfg(test)]
 mod acceptance_tests;
 

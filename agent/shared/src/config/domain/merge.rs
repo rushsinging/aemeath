@@ -491,6 +491,16 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
         if let Some(enabled) = workflow.enabled {
             base.workflow.enabled = enabled;
         }
+        let autostart = workflow.autostart;
+        if let Some(enabled) = autostart.enabled {
+            base.workflow.autostart.enabled = enabled;
+        }
+        if let Some(threshold) = autostart.threshold {
+            base.workflow.autostart.threshold = threshold;
+        }
+        if let Some(timeout_ms) = autostart.timeout_ms {
+            base.workflow.autostart.timeout_ms = timeout_ms;
+        }
     }
     if let Some(hooks) = patch.hooks {
         base.hooks = merge_hooks(base.hooks, hooks);
@@ -638,10 +648,19 @@ pub(crate) fn apply_context_patch(
     base
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct WorkflowConfigPatch {
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub autostart: WorkflowAutostartConfigPatch,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
+pub struct WorkflowAutostartConfigPatch {
+    pub enabled: Option<bool>,
+    pub threshold: Option<f64>,
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

@@ -146,6 +146,7 @@ impl EnvAdapter {
             parse_bool_switch(source.get("AEMEATH_WORKFLOW_ENABLED")).map(|enabled| {
                 share::config::domain::merge::WorkflowConfigPatch {
                     enabled: Some(enabled),
+                    ..Default::default()
                 }
             });
         let scoring = {

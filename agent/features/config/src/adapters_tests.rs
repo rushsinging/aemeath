@@ -78,6 +78,7 @@ fn workflow_config_defaults_to_disabled() {
         share::config::domain::merge::ConfigPatch {
             workflow: Some(share::config::domain::merge::WorkflowConfigPatch {
                 enabled: Some(true),
+                ..Default::default()
             }),
             ..Default::default()
         },
