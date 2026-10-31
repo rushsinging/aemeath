@@ -17,6 +17,7 @@ description: Use when verifying an aemeath behavior end-to-end with the live TUI
 - **NEVER** 为验收跑 `./build_cli.sh`——会覆盖 `~/.local/bin/aemeath`，污染全局安装版。
 - **MUST** 在改动所在 worktree / checkout 目录启动，先 `git rev-parse --short=8 HEAD` 与 `git status -sb` 确认分支与脏区。
 - **MUST** 验收结论以屏幕可见证据 + 任务日志文件为准，**NEVER** 只信模型口头「通过」。
+- **MUST** 同一轮验收集中使用**一个** cmux 窗口（一个 workspace）：从启动到判定只用该 surface；**NEVER** 为同一验收目标并行开多个 workspace（多窗口会话互相干扰、浪费冷编译、且屏幕取证来源混乱）。只有当目标 worktree 或验收目标本身切换时才允许开新窗口，并在开新窗前关闭旧的验收 workspace。
 - 用词：**端到端验收 / LLM 驱动验收**；**NEVER** 使用「狗粮 / dogfood」等俚语对用户说话。
 
 ## 前置

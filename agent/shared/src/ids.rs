@@ -174,6 +174,11 @@ define_typed_id!(
     "Runtime-owned interaction request identity（typed `irq_`；兼容 legacy UUIDv7）。"
 );
 define_typed_id!(
+    WorkflowId,
+    "wfl",
+    "Workflow-owned graph identity（typed `wfl_`；兼容 legacy UUIDv7）。"
+);
+define_typed_id!(
     ToolCallId,
     "tcl",
     "Internal tool call identity（typed `tcl_`；兼容 legacy UUIDv7）。"

@@ -112,7 +112,7 @@ fn wire_runtime_tool_assembly(
         let reset: std::sync::Arc<dyn workflow::WorkflowSessionReset> = store.clone();
         let backend = std::sync::Arc::new(workflow::InMemoryWorkflowBackend::new(
             store,
-            Box::new(|| uuid::Uuid::now_v7().to_string()),
+            Box::new(|| share::ids::new_typed_id("wfl")),
             Box::new(|| chrono::Utc::now().to_rfc3339()),
         )) as std::sync::Arc<dyn workflow::WorkflowToolBackend>;
         (backend, probe, reset)
