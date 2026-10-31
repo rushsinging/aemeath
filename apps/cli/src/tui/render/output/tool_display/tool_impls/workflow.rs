@@ -164,7 +164,7 @@ impl ToolDisplay for WorkflowCreateDisplay {
         if preview.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {preview}", self.display_name())
+            format!("{} · {preview}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -202,11 +202,11 @@ impl ToolDisplay for WorkflowListDisplay {
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let filter = parse_input::<ListInputJson>(input)
             .and_then(|args| args.status)
-            .unwrap_or_default();
+            .unwrap_or_else(|| "all".to_owned());
         if filter.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} [{filter}]", self.display_name())
+            format!("{} · {filter}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -257,7 +257,7 @@ impl ToolDisplay for WorkflowQueryDisplay {
         if id.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {id}", self.display_name())
+            format!("{} · {id}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -318,7 +318,7 @@ impl ToolDisplay for WorkflowUpdateDisplay {
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         match parse_input::<UpdateInputJson>(input) {
             Some(args) => format!(
-                "{} {} {}",
+                "{} · {} {}",
                 self.display_name(),
                 args.action,
                 short_id(&args.workflow_id)
@@ -355,7 +355,7 @@ impl ToolDisplay for WorkflowNodeUpdateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         match parse_input::<NodeUpdateInputJson>(input) {
-            Some(args) => format!("{} {} {}", self.display_name(), args.action, args.node_id),
+            Some(args) => format!("{} · {} {}", self.display_name(), args.action, args.node_id),
             None => self.display_name().to_string(),
         }
     }
@@ -405,7 +405,7 @@ impl ToolDisplay for WorkflowReplanDisplay {
         if id.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {id}", self.display_name())
+            format!("{} · {id}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {

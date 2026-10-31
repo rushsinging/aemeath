@@ -26,7 +26,7 @@ fn six_workflow_displays_registered() {
 fn create_header_uses_friendly_name_and_result_ends_with_status() {
     let tool = display("workflow_create");
     let header = tool.format_header(&json!({ "name": "验收A" }), None);
-    assert_eq!(header, "Create Workflow 验收A");
+    assert_eq!(header, "Create Workflow · 验收A");
     let lines = tool
         .format_result_lines(Some(&json!({
             "workflow_id": "01a19272-4f99",
@@ -46,7 +46,7 @@ fn create_header_uses_friendly_name_and_result_ends_with_status() {
 fn list_renders_per_workflow_summary_and_total_tail() {
     let tool = display("workflow_list");
     let header = tool.format_header(&json!({ "status": "failed" }), None);
-    assert_eq!(header, "Workflows [failed]");
+    assert_eq!(header, "Workflows · failed");
     let lines = tool
         .format_result_lines(Some(&json!({
             "workflows": [{
@@ -72,7 +72,7 @@ fn node_update_fail_keeps_replanning_last() {
         &json!({ "workflow_id": "wf", "node_id": "root2", "action": "fail" }),
         None,
     );
-    assert_eq!(header, "Workflow Node fail root2");
+    assert_eq!(header, "Workflow Node · fail root2");
     let lines = tool
         .format_result_lines(Some(&json!({
             "node_id": "root2",
@@ -118,7 +118,7 @@ fn update_header_includes_action_and_short_id() {
         &json!({ "workflow_id": "01a19272-4f99-78e3", "action": "deactivate" }),
         None,
     );
-    assert_eq!(header, "Workflow State deactivate 01a19272");
+    assert_eq!(header, "Workflow State · deactivate 01a19272");
     let lines = tool
         .format_result_lines(Some(&json!({
             "status": "inactive",
