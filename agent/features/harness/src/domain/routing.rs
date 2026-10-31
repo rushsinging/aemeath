@@ -122,6 +122,32 @@ fn is_builtin_tool(tool: &str) -> bool {
     !matches!(tool, "" | "Skill" | "Agent")
 }
 
+fn project_overlay_matches_signal(id: &ComponentId, signal: &EvidenceSignal) -> bool {
+    let mut projects: Vec<String> = Vec::new();
+    for source in &signal.sources {
+        let project = source_project_label(&source.session_id);
+        if !projects.contains(&project) {
+            projects.push(project);
+        }
+    }
+    projects.len() == 1 && projects[0] == id.name.as_str()
+}
+
+fn source_project_label(session_id: &str) -> String {
+    let path = std::path::Path::new(session_id);
+    let mut segments = path.components().filter_map(|component| match component {
+        std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+        _ => None,
+    });
+    let Some(project) = segments.next() else {
+        return "unknown".to_string();
+    };
+    if segments.next().is_none() {
+        return "unknown".to_string();
+    }
+    project
+}
+
 fn profile_for(id: &ComponentId) -> ComponentRouteProfile {
     match id.kind {
         ComponentKind::ToolGuidance => ComponentRouteProfile {
@@ -179,6 +205,12 @@ fn profile_allows(
     signal: &EvidenceSignal,
     context: &RouteContext,
 ) -> bool {
+    if profile.id.kind == ComponentKind::SystemPromptOverlay
+        && profile.id.name.as_str() != "global"
+        && !project_overlay_matches_signal(&profile.id, signal)
+    {
+        return false;
+    }
     let tool = signal_tool(signal);
     profile.allowed_signals.iter().any(|pattern| match pattern {
         SignalRoutePattern::BuiltinTool(expected_kind) => {

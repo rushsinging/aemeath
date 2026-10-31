@@ -26,8 +26,8 @@
 
 ## 1.1 落点、schema 与预算安全契约（所有改进 prompt 共用）
 
-- 组件材料标注 `scope`（`global` 或 `project:<id>`），证据行标注来源项目；顶层 legacy dataset 标注 `unknown`。
-- `scope=global` 只承接跨项目通用规律；单项目或 unknown 的项目特定经验 NEVER 写 global；项目 A 证据 NEVER 写项目 B；没有同项目候选时输出 no_change/no_issue。
+- 组件材料标注 `scope`（`global` 或 `project:<id>`），证据行标注来源项目；RSI 数据源只含项目布局 dataset，顶层 legacy dataset NEVER 进入 prompt。
+- `scope=global` 只承接跨项目通用规律；单项目的项目特定经验 NEVER 写 global；项目 A 证据 NEVER 写项目 B；没有同项目候选时输出 no_change/no_issue。
 - 工具参数类问题 NEVER 复述或改写工具 schema（必填性、类型、枚举、示例）。只写「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
 - guardrails/tool-guidance body 预算 3800 字符，overlay 7800 字符。初次产出超预算时 runtime 追加一次压缩 prompt；仍超预算整份提案作废，NEVER 硬截断。
 

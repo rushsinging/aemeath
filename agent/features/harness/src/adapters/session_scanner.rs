@@ -102,8 +102,8 @@ impl SessionDatasetScanner {
             .components()
             .filter(|component| matches!(component, std::path::Component::Normal(_)))
             .count();
-        if normal_count != session_path.components().count()
-            || !(1..=2).contains(&normal_count)
+        if normal_count != 2
+            || normal_count != session_path.components().count()
             || !session_key.ends_with(".dataset")
         {
             return ScanReport::default();
@@ -266,16 +266,16 @@ impl SessionDatasetScanner {
             });
         }
     }
-    /// 在 datasets root 内安全定位 session；session id 支持顶层
-    /// `<session>.dataset` 与项目布局 `<project>/<session>.dataset`，全部
-    /// 组件 MUST 是 Normal，canonicalize 后仍在 root 内（防逃逸）。
+    /// 在 datasets root 内安全定位 session；session id 只支持项目布局
+    /// `<project>/<session>.dataset`，全部组件 MUST 是 Normal，canonicalize
+    /// 后仍在 root 内（防逃逸）。顶层 legacy key NEVER 进入生产回读。
     pub fn read_step_context_under_root(
         datasets_root: &std::path::Path,
         source: &EvidenceSourceRef,
     ) -> Option<SessionContextExcerpt> {
         let session_path = std::path::Path::new(&source.session_id);
         let component_count = session_path.components().count();
-        if !(1..=2).contains(&component_count)
+        if component_count != 2
             || !session_path
                 .components()
                 .all(|component| matches!(component, std::path::Component::Normal(_)))

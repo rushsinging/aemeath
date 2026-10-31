@@ -6,7 +6,7 @@
 use harness::adapters::daemon_serve::{run_rsi_daemon, RsiDaemonEndpoints};
 use harness::domain::task::TaskRegistry;
 use harness::ComponentRegistry;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// `aemeath rsi serve` 的退出结果。
 #[derive(Debug)]
@@ -250,6 +250,115 @@ pub(crate) enum ComponentBootstrapMode {
     Formal,
 }
 
+#[derive(serde::Deserialize)]
+struct ProjectSessionSnapshot {
+    workspace: ProjectWorkspaceSnapshot,
+}
+
+#[derive(serde::Deserialize)]
+struct ProjectWorkspaceSnapshot {
+    state: String,
+    value: ProjectWorkspaceValue,
+}
+
+#[derive(serde::Deserialize)]
+struct ProjectWorkspaceValue {
+    project_identity: share::session_types::ProjectIdentityData,
+}
+
+/// 从 `<agents>/session/<project-segment>/` 反解项目 overlay 落点。
+///
+/// 项目段本身是单向哈希，NEVER 从路径猜测项目根；权威来源是同目录 canonical
+/// session 的 workspace 快照。每个项目根按运行时注入优先级选择：
+/// `AGENTS.md` 存在则优先，否则 `CLAUDE.md`；两者都缺失时不注册项目组件，
+/// NEVER 自动创建项目说明文件。
+fn project_overlay_component_paths_under(
+    agents_dir: &Path,
+) -> HashMap<harness::ComponentId, std::path::PathBuf> {
+    let session_root = agents_dir.join("session");
+    let mut paths = HashMap::new();
+    let Ok(project_entries) = std::fs::read_dir(&session_root) else {
+        return paths;
+    };
+    for project_entry in project_entries.flatten() {
+        let project_dir = project_entry.path();
+        let Some(segment) = project_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if !project_dir.is_dir() || !is_project_layout_segment(segment.as_str()) {
+            continue;
+        }
+        let Some(root) = resolve_project_root_from_snapshots(&project_dir) else {
+            continue;
+        };
+        let agents_md = root.join("AGENTS.md");
+        let claude_md = root.join("CLAUDE.md");
+        let target = if agents_md.is_file() {
+            agents_md
+        } else if claude_md.is_file() {
+            claude_md
+        } else {
+            continue;
+        };
+        paths.insert(
+            harness::ComponentId {
+                kind: harness::ComponentKind::SystemPromptOverlay,
+                name: harness::ComponentName::new(segment),
+            },
+            target,
+        );
+    }
+    paths
+}
+
+fn resolve_project_root_from_snapshots(project_dir: &Path) -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<(u64, PathBuf)> = std::fs::read_dir(project_dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path.extension().is_none()
+                && !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+        })
+        .filter_map(|path| {
+            let size = path.metadata().ok()?.len();
+            Some((size, path))
+        })
+        .collect();
+    candidates.sort_by_key(|(size, _)| *size);
+    for (_, path) in candidates {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(snapshot) = serde_json::from_str::<ProjectSessionSnapshot>(&text) else {
+            continue;
+        };
+        if snapshot.workspace.state != "captured" {
+            continue;
+        }
+        let identity = snapshot.workspace.value.project_identity;
+        let root = match identity.git_common_dir.as_deref() {
+            Some(common_dir) => Path::new(common_dir)
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| Path::new(common_dir).to_path_buf()),
+            None => Path::new(&identity.initial_cwd).to_path_buf(),
+        };
+        if root.is_dir() {
+            return Some(root);
+        }
+    }
+    None
+}
+
 fn builtin_prose_component_paths_under(
     agents_dir: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
@@ -341,7 +450,8 @@ fn wire_component_registry_under(
     if mode == ComponentBootstrapMode::Formal {
         ensure_builtin_prose_components_at(agents_dir)?;
     }
-    let component_paths = builtin_prose_component_paths_under(agents_dir);
+    let mut component_paths = builtin_prose_component_paths_under(agents_dir);
+    component_paths.extend(project_overlay_component_paths_under(agents_dir));
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> = match mode {
         ComponentBootstrapMode::DryRun => Box::new(
             harness::adapters::filesystem::FilesystemComponentRegistry::with_bootstrap_defaults(
@@ -656,40 +766,47 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
 }
 
 /// 枚举 session dataset 根的流条目（mtime 全序原料）。
-/// 支持顶层 legacy `<session>.dataset` 与项目布局
-/// `<project>/<session>.dataset`；项目段保留在 session key 中，供 RSI
-/// 区分项目/全局落点。
+/// 只支持项目布局 `<project>/<session>.dataset`；顶层 legacy
+/// `<session>.dataset` 是旧设计，RSI NEVER 枚举。项目段保留在 session key
+/// 中，供 RSI 区分项目/全局落点。
 fn enumerate_session_entries(datasets_root: &std::path::Path) -> Vec<harness::SessionStreamEntry> {
     let mut entries = Vec::new();
-    let Ok(root_entries) = std::fs::read_dir(datasets_root) else {
+    let Ok(project_dirs) = std::fs::read_dir(datasets_root) else {
         return entries;
     };
-    for root_entry in root_entries.flatten() {
-        let root_path = root_entry.path();
-        if !root_path.is_dir() {
-            continue;
-        }
-        if root_path.extension().and_then(|ext| ext.to_str()) == Some("dataset") {
-            push_session_entry(&mut entries, &root_path, None);
-            continue;
-        }
-        let Ok(project_entries) = std::fs::read_dir(&root_path) else {
+    for project_entry in project_dirs.flatten() {
+        let project_path = project_entry.path();
+        let Some(project_segment) = project_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
-        for project_entry in project_entries.flatten() {
-            let dataset_path = project_entry.path();
+        if !project_path.is_dir() || !is_project_layout_segment(&project_segment) {
+            continue;
+        }
+        let Ok(dataset_entries) = std::fs::read_dir(&project_path) else {
+            continue;
+        };
+        for dataset_entry in dataset_entries.flatten() {
+            let dataset_path = dataset_entry.path();
             if dataset_path.is_dir()
                 && dataset_path.extension().and_then(|ext| ext.to_str()) == Some("dataset")
             {
-                push_session_entry(
-                    &mut entries,
-                    &dataset_path,
-                    root_path.file_name().and_then(|name| name.to_str()),
-                );
+                push_session_entry(&mut entries, &dataset_path, Some(&project_segment));
             }
         }
     }
     entries
+}
+
+/// session 存储的项目段：16 位小写 hex（project identity 稳定哈希）。
+fn is_project_layout_segment(value: &str) -> bool {
+    value.len() == 16
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn push_session_entry(

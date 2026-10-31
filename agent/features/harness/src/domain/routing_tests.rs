@@ -27,6 +27,62 @@ fn guardrails() -> ComponentId {
     component_id(ComponentKind::Guardrails, "default")
 }
 
+fn signal_with_session(kind: SignalKind, signal_id: &str, session_ids: &[&str]) -> EvidenceSignal {
+    EvidenceSignal {
+        sources: session_ids
+            .iter()
+            .map(|session_id| crate::domain::evidence::EvidenceSourceRef {
+                session_id: (*session_id).to_string(),
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+            })
+            .collect(),
+        ..signal(kind, signal_id)
+    }
+}
+
+#[test]
+fn project_overlay_only_accepts_matching_single_project_signal() {
+    let project_a = component_id(ComponentKind::SystemPromptOverlay, "0123456789abcdef");
+    let project_b = component_id(ComponentKind::SystemPromptOverlay, "fedcba9876543210");
+    let candidates = vec![tool_guidance(), project_a.clone(), project_b.clone()];
+    let only_a = signal_with_session(
+        SignalKind::RepeatedFailure,
+        "repeated_failure:Bash:project-a-only",
+        &["0123456789abcdef/s1.dataset"],
+    );
+    let decision = crate::domain::routing::route_signal(
+        &only_a,
+        &candidates,
+        &crate::domain::routing::RouteContext::default(),
+    );
+    match decision {
+        crate::domain::routing::RouteDecision::Choose { candidates, .. } => {
+            assert!(candidates.contains(&project_a));
+            assert!(!candidates.contains(&project_b));
+        }
+        other => panic!("预期候选集：{other:?}"),
+    }
+
+    let cross_project = signal_with_session(
+        SignalKind::RepeatedFailure,
+        "repeated_failure:Bash:cross-project",
+        &["0123456789abcdef/s1.dataset", "fedcba9876543210/s2.dataset"],
+    );
+    let decision = crate::domain::routing::route_signal(
+        &cross_project,
+        &candidates,
+        &crate::domain::routing::RouteContext::default(),
+    );
+    assert_eq!(
+        decision,
+        crate::domain::routing::RouteDecision::Exact {
+            component: tool_guidance(),
+            reason: "内置工具 Bash 的执行纪律问题".to_string(),
+        }
+    );
+}
+
 #[test]
 fn builtin_tool_failure_routes_to_guidance_or_guardrails() {
     let candidates = vec![tool_guidance(), guardrails()];

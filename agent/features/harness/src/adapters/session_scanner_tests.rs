@@ -269,19 +269,28 @@ fn read_step_context_is_bounded_for_large_steps() {
 #[test]
 fn read_step_context_under_root_rejects_path_escape() {
     let root = tempfile::tempdir().unwrap();
-    let dataset = make_dataset(root.path());
+    let dataset = make_dataset(&root.path().join("0123456789abcdef"));
+    let dataset_name = dataset
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("dataset name");
     let source = EvidenceSourceRef {
-        session_id: dataset
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("dataset name")
-            .to_string(),
+        session_id: format!("0123456789abcdef/{dataset_name}"),
         run_id: "run-1".into(),
         step_id: "step-1".into(),
     };
     assert!(
         SessionDatasetScanner::read_step_context_under_root(root.path(), &source).is_some(),
-        "合法 dataset 必须可读"
+        "合法项目布局 dataset 必须可读"
+    );
+    let legacy = EvidenceSourceRef {
+        session_id: dataset_name.to_string(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    assert!(
+        SessionDatasetScanner::read_step_context_under_root(root.path(), &legacy).is_none(),
+        "顶层 legacy dataset NEVER 进入生产回读"
     );
 
     for session_id in [

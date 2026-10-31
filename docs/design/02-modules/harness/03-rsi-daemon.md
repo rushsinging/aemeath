@@ -70,8 +70,9 @@ enum RsiControlAck {
 
 **项目/全局落点与预算收敛**：
 
-- 证据流支持项目布局 `<project>/<session>.dataset`，项目段保留在 `EvidenceSourceRef.session_id` 中；顶层 legacy session 显式标注 `unknown`，NEVER 伪造成某个项目或 global。
-- 诊断/执行 prompt 为组件材料标注 `scope=global` / `project:<id>`，并强制：单项目或 unknown 的项目特定经验 NEVER 写入 global；项目 A 证据 NEVER 写入项目 B；没有同项目候选时选择 no_issue。
+- 证据流只支持项目布局 `<project>/<session>.dataset`，项目段保留在 `EvidenceSourceRef.session_id` 中；顶层 legacy `<session>.dataset` 是旧设计，RSI NEVER 枚举或回读，也 NEVER 把它伪造成某个项目或 global。
+- 诊断/执行 prompt 为组件材料标注 `scope=global` / `project:<id>`，并强制：单项目的项目特定经验 NEVER 写入 global；项目 A 证据 NEVER 写入项目 B；没有同项目候选时选择 no_issue。
+- 项目 overlay 组件由宿主从同项目 canonical session 的 workspace 快照反解项目根，按运行时注入优先级映射 `AGENTS.md` 优先、`CLAUDE.md` 兜底；两者都缺失时不注册、不自动创建。
 - prose 组件 NEVER 复述或改写工具 schema（字段必填性、类型、枚举、示例）。工具 schema 由宿主在每次 provider 请求中权威携带；参数类改进只沉淀「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
 - RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 字符、overlay 7800 字符。超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。
 
