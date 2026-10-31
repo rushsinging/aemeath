@@ -94,7 +94,9 @@ pub struct WorkflowSuccessorInput {
 /// 节点定义。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowNodeInput {
-    pub node_id: String,
+    /// 节点序号（0 基，即 nodes 数组下标）；真正的 node id 由 Workflow 自动生成。
+    #[serde(default)]
+    pub index: usize,
     pub kind: WorkflowNodeKindInput,
     /// kind = work 时必填；confirm / complete 禁止。
     #[serde(default)]
@@ -108,8 +110,10 @@ pub struct WorkflowNodeInput {
 /// 静态 Edge；不含业务条件。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowEdgeInput {
-    pub from_node_id: String,
-    pub to_node_id: String,
+    /// 起点在 nodes 数组中的下标（LLM 不填 node id，由系统映射）。
+    pub from_index: usize,
+    /// 终点在 nodes 数组中的下标。
+    pub to_index: usize,
 }
 
 /// Replan 的历史边界。
@@ -127,8 +131,8 @@ pub struct WorkflowReplanBoundaryInput {
 /// continuation 的重入边。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowRejoinEdgeInput {
-    /// continuation 的出口节点。
-    pub from_node_id: String,
+    /// continuation 出口在 new_nodes 中的下标（新节点 id 由系统生成）。
+    pub from_index: usize,
     /// 既有 Pending 非 CompleteNode，不得是本轮新建节点或 CompleteNode。
     pub target_node_id: String,
 }
@@ -156,12 +160,15 @@ pub struct WorkflowPendingRewritesInput {
 /// `workflow_create` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowCreateInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     /// 简短名称。
     pub name: String,
     /// 完成目标。
     pub objective: String,
-    /// root 节点 id；必须是普通业务节点且唯一无前驱。
-    pub root_node_id: String,
+    /// root 在 nodes 数组中的下标（node id 由系统自动生成，LLM 不填 id）。
+    pub root_index: usize,
     /// 完整 DAG 的节点集合。
     pub nodes: Vec<WorkflowNodeInput>,
     /// 完整 DAG 的边集合。
@@ -172,6 +179,9 @@ pub struct WorkflowCreateInput {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct WorkflowListInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     /// 按状态过滤；省略返回全部。
     pub status: Option<WorkflowStatusInput>,
     /// 分页大小，默认 20，上限 100。
@@ -183,6 +193,9 @@ pub struct WorkflowListInput {
 /// `workflow_query` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowQueryInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     /// 是否附带执行事实摘要；默认 false。
     #[serde(default)]
@@ -192,6 +205,9 @@ pub struct WorkflowQueryInput {
 /// `workflow_update` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowUpdateInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     pub action: WorkflowLifecycleActionInput,
     /// complete 必填交付摘要；fail 必填失败原因；cancel 必填理由；其他动作禁止。
@@ -204,6 +220,9 @@ pub struct WorkflowUpdateInput {
 /// `workflow_node_update` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowNodeUpdateInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     pub node_id: String,
     pub action: WorkflowNodeActionInput,
@@ -218,6 +237,9 @@ pub struct WorkflowNodeUpdateInput {
 /// `workflow_replan` 输入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowReplanInput {
+    /// 本次调用意图（仅用于 TUI 卡片标题语义化展示，不参与校验）。
+    #[serde(default)]
+    pub goal: Option<String>,
     pub workflow_id: String,
     pub boundary: WorkflowReplanBoundaryInput,
     /// continuation 新增节点；仅重组 Pending 时可为空。
@@ -225,8 +247,8 @@ pub struct WorkflowReplanInput {
     pub new_nodes: Option<Vec<WorkflowNodeInput>>,
     #[serde(default)]
     pub new_edges: Option<Vec<WorkflowEdgeInput>>,
-    /// continuation 入口，至少一个。
-    pub entry_node_ids: Vec<String>,
+    /// continuation 入口在 new_nodes 中的下标，至少一个（id 由系统生成）。
+    pub entry_indexes: Vec<usize>,
     /// 汇入原 Graph 的重入边，至少一条。
     pub rejoin_edges: Vec<WorkflowRejoinEdgeInput>,
     #[serde(default)]
@@ -262,6 +284,9 @@ pub struct WorkflowSummaryResult {
 #[serde(default)]
 pub struct WorkflowCreateResult {
     pub workflow_id: String,
+    /// 节点 index → 系统生成的真实 node id（LLM 后续引用的唯一来源）。
+    #[serde(default)]
+    pub node_ids: Vec<String>,
     pub status: String,
     pub active_mode: Option<String>,
     pub root_node_id: String,

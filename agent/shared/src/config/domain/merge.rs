@@ -638,7 +638,7 @@ pub(crate) fn apply_context_patch(
     base
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct WorkflowConfigPatch {
     pub enabled: Option<bool>,
