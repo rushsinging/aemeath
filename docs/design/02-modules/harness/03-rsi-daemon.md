@@ -74,7 +74,8 @@ enum RsiControlAck {
 - 诊断/执行 prompt 为组件材料标注 `scope=global` / `project:<id>`，并强制：单项目的项目特定经验 NEVER 写入 global；项目 A 证据 NEVER 写入项目 B；没有同项目候选时选择 no_issue。
 - 项目 overlay 组件由宿主从同项目 canonical session 的 workspace 快照反解项目根，按运行时注入优先级映射 `AGENTS.md` 优先、`CLAUDE.md` 兜底；两者都缺失时不注册、不自动创建。
 - prose 组件 NEVER 复述或改写工具 schema（字段必填性、类型、枚举、示例）。工具 schema 由宿主在每次 provider 请求中权威携带；参数类改进只沉淀「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
-- RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 字符、overlay 7800 字符。超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。
+- RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 字符、overlay 7800 字符。初稿超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。既有组件正文已超预算时，执行阶段的第一任务就是语义压缩（合并重复规则、删除套话、保留条件与动作），NEVER 要求模型携带超长原文逐字重写。
+- LLM 稳定性契约：空文本响应最多重试一次，两次调用 usage 聚合且 `llm_call.attempts=2`；连续空文本显式失败。TwoPhase 诊断/执行 JSON 解析失败各重试一次紧凑 JSON；诊断重试仍失败则周期失败，执行重试仍失败则该任务作废，NEVER 把解析失败伪装成 no_issue 或空结果。
 
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 

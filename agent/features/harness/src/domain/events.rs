@@ -9,6 +9,11 @@ use crate::domain::errors::HarnessError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 旧 JSONL 没有 attempts 字段；当时语义就是单次调用。
+fn default_llm_attempts() -> usize {
+    1
+}
+
 /// 单条过程事件（type 标记 + 载荷）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -61,6 +66,8 @@ pub enum RsiCycleEvent {
         prompt_chars: usize,
         response_chars: usize,
         usage: crate::domain::improvement::RsiLlmUsage,
+        #[serde(default = "default_llm_attempts")]
+        attempts: usize,
         error: Option<String>,
     },
     DiagnosisSummarized {

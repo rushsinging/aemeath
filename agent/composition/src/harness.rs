@@ -145,12 +145,6 @@ impl ProductionRsiLlm {
                 _ => None,
             })
             .collect::<String>();
-        if text.trim().is_empty() {
-            return Err(HarnessError::unavailable(
-                "harness",
-                "RSI 模型返回空文本（结构化输出任务勿用高思考档——harness.rsi.* 档位独立配置随信号装配接入）",
-            ));
-        }
         let usage = response
             .token_usage
             .map(|usage| RsiLlmUsage {
@@ -161,14 +155,20 @@ impl ProductionRsiLlm {
                 reasoning_tokens: usage.reasoning_tokens,
             })
             .unwrap_or_default();
-        Ok(RsiLlmCompletion { text, usage })
+        // 空文本在这里保持 Ok，由 RsiLlmPort::complete_with_empty_retry 统一
+        // 重试一次；连续空文本才折叠为 Unavailable 错误。
+        Ok(RsiLlmCompletion {
+            text,
+            usage,
+            attempts: 1,
+        })
     }
 }
 
 #[async_trait]
 impl RsiLlmPort for ProductionRsiLlm {
     async fn complete(&self, prompt: &str) -> Result<String, HarnessError> {
-        Ok(self.invoke_text(prompt).await?.text)
+        Ok(self.complete_with_empty_retry(prompt).await?.text)
     }
 
     async fn complete_with_usage(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {

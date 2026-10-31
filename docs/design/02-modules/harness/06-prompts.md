@@ -29,7 +29,9 @@
 - 组件材料标注 `scope`（`global` 或 `project:<id>`），证据行标注来源项目；RSI 数据源只含项目布局 dataset，顶层 legacy dataset NEVER 进入 prompt。
 - `scope=global` 只承接跨项目通用规律；单项目的项目特定经验 NEVER 写 global；项目 A 证据 NEVER 写项目 B；没有同项目候选时输出 no_change/no_issue。
 - 工具参数类问题 NEVER 复述或改写工具 schema（必填性、类型、枚举、示例）。只写「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
-- guardrails/tool-guidance body 预算 3800 字符，overlay 7800 字符。初次产出超预算时 runtime 追加一次压缩 prompt；仍超预算整份提案作废，NEVER 硬截断。
+- guardrails/tool-guidance body 预算 3800 字符，overlay 7800 字符。初次产出超预算时 runtime 追加一次压缩 prompt；仍超预算整份提案作废，NEVER 硬截断。既有正文已超预算时，执行 prompt 的第一任务是语义压缩，而非逐字保留超长原文。
+- 空文本响应最多重试一次；成功时 usage 聚合并在 `llm_call.attempts` 记录 2，连续空文本显式失败。
+- TwoPhase 诊断/执行 JSON 解析失败各追加一次紧凑 JSON 重试：诊断重试仍失败则周期失败；执行重试仍失败则该任务作废。NEVER 把解析失败当作 no_issue、空 issues 或空正文继续收口。
 
 ## 2. 改进块提示词
 

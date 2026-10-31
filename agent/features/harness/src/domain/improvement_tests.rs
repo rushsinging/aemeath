@@ -86,8 +86,35 @@ impl RsiLlmPort for ScriptedLlm {
                 reasoning_tokens: Some(3),
                 ..Default::default()
             },
+            attempts: 1,
         })
     }
+}
+
+/// RSI 空响应最多重试一次；usage 聚合两次调用，成功时 attempts=2。
+#[tokio::test]
+async fn empty_llm_completion_retries_once_and_merges_usage() {
+    let llm = ScriptedLlm::new(vec![String::new(), "ok".to_string()]);
+    let completion = llm
+        .complete_with_empty_retry("prompt")
+        .await
+        .expect("第二次非空 MUST 成功");
+    assert_eq!(completion.text, "ok");
+    assert_eq!(completion.attempts, 2);
+    assert_eq!(completion.usage.input_tokens, Some(200));
+    assert_eq!(completion.usage.output_tokens, Some(40));
+    assert_eq!(completion.usage.reasoning_tokens, Some(6));
+}
+
+/// 第二次仍为空：MUST 失败，NEVER 把空文本交给 JSON 解析器。
+#[tokio::test]
+async fn empty_llm_completion_fails_after_one_retry() {
+    let llm = ScriptedLlm::new(vec![String::new(), String::new()]);
+    let error = llm
+        .complete_with_empty_retry("prompt")
+        .await
+        .expect_err("连续空文本 MUST 失败");
+    assert!(error.message().contains("空响应已重试一次"));
 }
 
 /// 分块：按 chunk_max_components 分组、上限至少 1。

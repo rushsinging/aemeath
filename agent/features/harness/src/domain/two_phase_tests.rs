@@ -147,6 +147,169 @@ async fn two_phase_routes_candidate_then_executes_fixed_component() {
         .is_some_and(|source| source.step_id == "step-1"));
 }
 
+/// TwoPhase 诊断 JSON 解析失败 MUST 重试一次；重试成功继续执行。
+#[tokio::test]
+async fn two_phase_diagnosis_parse_failure_retries_once() {
+    let target = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let malformed = r#"{"decision":"diagnose","issues":[{"evidence_ref":"E0""#;
+    let valid = r#"{"decision":"diagnose","reason":"Bash 连续失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重复失败","direction":"收敛重试","route_reason":"工具纪律"}]}"#;
+    let llm = TwoPhaseLlm::new(vec![
+        malformed.to_string(),
+        valid.to_string(),
+        r#"{"decision":"propose","reason":"补充诊断规则","evidence_refs":["E0"],"body":"Bash 失败后 MUST 先诊断。"}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("诊断重试成功后周期 MUST 继续");
+
+    assert_eq!(outcome.outcome.summary, "采纳 1 / 无变更 0 / 作废 0");
+    assert_eq!(llm.call_count(), 3);
+    let retry_prompt = llm.prompt(1);
+    assert!(retry_prompt.contains("诊断应答解析失败"));
+    assert!(retry_prompt.contains("最多输出 8 条 issues"));
+    assert!(retry_prompt.contains("每个字符串字段不超过 80 个字符"));
+}
+
+/// 诊断解析重试仍失败：MUST 显式失败，NEVER 当作 no_issue/空结果收口。
+#[tokio::test]
+async fn two_phase_diagnosis_parse_failure_fails_after_one_retry() {
+    let target = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let malformed = r#"{"decision":"diagnose","issues":[{"evidence_ref":"E0""#;
+    let llm = TwoPhaseLlm::new(vec![malformed.to_string(), malformed.to_string()]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let result = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await;
+    let error = match result {
+        Ok(_) => panic!("连续解析失败 MUST 显式失败"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("诊断应答解析失败"));
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some("old".to_string())
+    );
+    assert!(lesson_store.load_active().expect("lessons").is_empty());
+}
+
+/// TwoPhase 执行 JSON 解析失败 MUST 重试一次；重试成功采用重试稿。
+#[tokio::test]
+async fn two_phase_execution_parse_failure_retries_once() {
+    let target = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let malformed = r#"{"decision":"propose","reason":"截断","evidence_refs":["E0"],"body":"开头"#;
+    let valid = r#"{"decision":"propose","reason":"完整规则","evidence_refs":["E0"],"body":"Bash 失败后 MUST 先诊断。"}"#;
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Bash 连续失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重复失败","direction":"收敛重试","route_reason":"工具纪律"}]}"#.to_string(),
+        malformed.to_string(),
+        valid.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("执行重试成功后周期 MUST 继续");
+    assert_eq!(outcome.outcome.summary, "采纳 1 / 无变更 0 / 作废 0");
+    let retry_prompt = llm.prompt(2);
+    assert!(retry_prompt.contains("执行应答解析失败"));
+    assert!(retry_prompt.contains("紧凑 JSON"));
+    assert!(retry_prompt.contains("body 不超过 3800 字符"));
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some("Bash 失败后 MUST 先诊断。".to_string())
+    );
+}
+
+/// 执行解析重试仍失败：该任务作废且零写入，NEVER 硬截断采用半截 JSON。
+#[tokio::test]
+async fn two_phase_execution_parse_failure_discards_after_retry() {
+    let target = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content("old"))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let malformed = r#"{"decision":"propose","reason":"截断","evidence_refs":["E0"],"body":"开头"#;
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Bash 连续失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重复失败","direction":"收敛重试","route_reason":"工具纪律"}]}"#.to_string(),
+        malformed.to_string(),
+        malformed.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("单任务作废不影响周期收口");
+    assert_eq!(outcome.outcome.summary, "采纳 0 / 无变更 0 / 作废 1");
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some("old".to_string())
+    );
+    assert!(lesson_store.load_active().expect("lessons").is_empty());
+}
+
 /// TwoPhase 执行超预算：MUST 追加一次 LLM 压缩，采用压缩稿；
 /// NEVER 硬截断后落盘。
 #[tokio::test]
@@ -248,6 +411,53 @@ async fn two_phase_rejects_body_still_oversized_after_compaction() {
         Some("old".to_string())
     );
     assert!(lesson_store.load_active().expect("lessons").is_empty());
+}
+
+/// 既有组件正文已超预算时，执行 prompt MUST 把「语义压缩」作为第一任务，
+/// NEVER 要求模型携带超长原文逐字重写后等待二次压缩。
+#[tokio::test]
+async fn two_phase_oversized_existing_body_gets_compaction_first_prompt() {
+    let target = tool_guidance();
+    let mut registry =
+        FakeRegistry::with_entries(vec![(target.clone(), body_content(&"长".repeat(3801)))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let response = serde_json::json!({
+        "decision": "propose",
+        "reason": "压缩既有正文并补齐工具纪律",
+        "evidence_refs": ["E0"],
+        "body": "Bash 失败后 MUST 先诊断；无新信息 NEVER 原样重试。",
+    })
+    .to_string();
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Bash 连续失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重复失败","direction":"收敛规则","route_reason":"工具纪律"}]}"#.to_string(),
+        response,
+        r#"{"decision":"no_change","reason":"单块无冲突"}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "采纳 1 / 无变更 0 / 作废 0");
+    let execution_prompt = llm.prompt(1);
+    assert!(execution_prompt.contains("当前正文已超过预算"));
+    assert!(execution_prompt.contains("第一任务是语义压缩"));
+    assert!(execution_prompt.contains("合并重复规则"));
+    assert!(!execution_prompt.contains("正文必须保留与任务无关的既有规则"));
 }
 
 #[tokio::test]

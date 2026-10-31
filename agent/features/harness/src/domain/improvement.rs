@@ -34,6 +34,8 @@ pub struct RsiLlmUsage {
 pub struct RsiLlmCompletion {
     pub text: String,
     pub usage: RsiLlmUsage,
+    /// 实际 provider 调用次数（空响应重试一次时为 2）。
+    pub attempts: usize,
 }
 
 impl RsiLlmCompletion {
@@ -41,7 +43,26 @@ impl RsiLlmCompletion {
         Self {
             text: text.into(),
             usage: RsiLlmUsage::default(),
+            attempts: 1,
         }
+    }
+}
+
+fn add_optional_usage(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn merge_retry_usage(left: RsiLlmUsage, right: RsiLlmUsage) -> RsiLlmUsage {
+    RsiLlmUsage {
+        input_tokens: add_optional_usage(left.input_tokens, right.input_tokens),
+        output_tokens: add_optional_usage(left.output_tokens, right.output_tokens),
+        cache_read_tokens: add_optional_usage(left.cache_read_tokens, right.cache_read_tokens),
+        cache_write_tokens: add_optional_usage(left.cache_write_tokens, right.cache_write_tokens),
+        reasoning_tokens: add_optional_usage(left.reasoning_tokens, right.reasoning_tokens),
     }
 }
 
@@ -55,6 +76,32 @@ pub trait RsiLlmPort: Send + Sync {
     /// 单轮文本补全并保留 token usage（生产端口 MUST 覆写）。
     async fn complete_with_usage(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
         Ok(RsiLlmCompletion::text(self.complete(prompt).await?))
+    }
+
+    /// 结构化输出空响应最多重试一次；第二次仍空才失败。
+    ///
+    /// 这是 RSI 对 provider 偶发「只返回 thinking / 空文本」的确定性兜底；
+    /// usage 按两次调用聚合，NEVER 静默丢掉第一次已报告的消耗。
+    async fn complete_with_empty_retry(
+        &self,
+        prompt: &str,
+    ) -> Result<RsiLlmCompletion, HarnessError> {
+        let first = self.complete_with_usage(prompt).await?;
+        if !first.text.trim().is_empty() {
+            return Ok(first);
+        }
+        let second = self.complete_with_usage(prompt).await?;
+        if second.text.trim().is_empty() {
+            return Err(HarnessError::unavailable(
+                crate::constants::ERROR_DOMAIN,
+                "RSI 模型连续返回空文本（空响应已重试一次）",
+            ));
+        }
+        Ok(RsiLlmCompletion {
+            text: second.text,
+            usage: merge_retry_usage(first.usage, second.usage),
+            attempts: 2,
+        })
     }
 }
 
@@ -727,7 +774,7 @@ async fn complete_with_usage_event(
 ) -> Result<RsiLlmCompletion, HarnessError> {
     let started = std::time::Instant::now();
     let prompt_chars = prompt.chars().count();
-    let result = llm.complete_with_usage(prompt).await;
+    let result = llm.complete_with_empty_retry(prompt).await;
     let duration_ms = started.elapsed().as_millis() as u64;
     let event = match &result {
         Ok(completion) => crate::domain::events::RsiCycleEvent::LlmCall {
@@ -737,6 +784,7 @@ async fn complete_with_usage_event(
             prompt_chars,
             response_chars: completion.text.chars().count(),
             usage: completion.usage,
+            attempts: completion.attempts,
             error: None,
         },
         Err(error) => crate::domain::events::RsiCycleEvent::LlmCall {
@@ -746,6 +794,7 @@ async fn complete_with_usage_event(
             prompt_chars,
             response_chars: 0,
             usage: RsiLlmUsage::default(),
+            attempts: 0,
             error: Some(error.message().chars().take(120).collect()),
         },
     };
@@ -1697,19 +1746,47 @@ pub async fn run_two_phase_cycle(
     let diagnosis_completion =
         complete_with_usage_event(llm, &diagnosis_prompt, "two_phase_diagnosis", 0, recorder)
             .await?;
-    let parsed_issues = match parse_two_phase_diagnosis(&diagnosis_completion.text) {
-        Ok(TwoPhaseDiagnosisProposal::Diagnose { issues, .. }) => issues,
-        Ok(TwoPhaseDiagnosisProposal::NoIssue { .. }) => Vec::new(),
-        Err(error) => {
+    let mut parsed_diagnosis = parse_two_phase_diagnosis(&diagnosis_completion.text);
+    if let Err(error) = parsed_diagnosis.as_ref() {
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                block_index: 0,
+                stage: "two_phase_diagnosis".to_string(),
+                message: error.message().chars().take(120).collect(),
+            });
+        }
+        let retry_prompt = format!(
+            r#"{diagnosis_prompt}
+
+上一轮诊断应答解析失败：{error}。
+重新输出完整 JSON，并严格遵守：
+- 最多输出 8 条 issues；
+- problem / direction / route_reason 每个字符串字段不超过 80 个字符；
+- 只保留最重要、可行动的问题；
+- 输出 compact JSON，NEVER 输出 Markdown、注释或多余文字。"#
+        );
+        let retry_completion =
+            complete_with_usage_event(llm, &retry_prompt, "two_phase_diagnosis_retry", 0, recorder)
+                .await?;
+        parsed_diagnosis = parse_two_phase_diagnosis(&retry_completion.text);
+        if let Err(retry_error) = parsed_diagnosis.as_ref() {
             if let Some(recorder) = recorder {
                 recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
                     block_index: 0,
-                    stage: "two_phase_diagnosis".to_string(),
-                    message: error.message().chars().take(120).collect(),
+                    stage: "two_phase_diagnosis_retry".to_string(),
+                    message: retry_error.message().chars().take(120).collect(),
                 });
             }
-            Vec::new()
+            return Err(HarnessError::invalid(
+                crate::constants::ERROR_DOMAIN,
+                format!("诊断应答解析失败（已重试一次）：{}", retry_error.message()),
+            ));
         }
+    }
+    let parsed_issues = match parsed_diagnosis {
+        Ok(TwoPhaseDiagnosisProposal::Diagnose { issues, .. }) => issues,
+        Ok(TwoPhaseDiagnosisProposal::NoIssue { .. }) => Vec::new(),
+        Err(error) => return Err(error),
     };
 
     let mut diagnosed_issues = Vec::new();
@@ -1827,6 +1904,13 @@ pub async fn run_two_phase_cycle(
             })
             .collect::<Vec<_>>()
             .join("");
+        let body_budget = component_body_budget_chars(&component_id);
+        let existing_body_over_budget = content.body.chars().count() > body_budget;
+        let preservation_requirement = if existing_body_over_budget {
+            "- 当前正文已超过预算；第一任务是语义压缩，把既有规则收敛到预算内：\n  合并重复规则、删除套话、压缩表述，保留可执行条件与动作及必要语义；\n  若无法在不丢必要语义的前提下压入预算，选择 no_change。"
+        } else {
+            "- 正文必须保留与任务无关的既有规则。"
+        };
         let execution_prompt = format!(
             r#"你是 harness 组件执行器（固定组件）。目标组件由诊断阶段确定，你只能输出完整正文；NEVER 输出组件 id、action 或 change_set。
 
@@ -1841,10 +1925,10 @@ pub async fn run_two_phase_cycle(
 
 要求：
 - evidence_refs 只能使用 E0/E1 等上方短引用；
-- 正文必须保留与任务无关的既有规则；
+{preservation_requirement}
 - 不得把单项目经验写入 global，也不得把项目 A 内容写入项目 B；
 - 工具参数类任务 NEVER 复述或改写工具 schema，NEVER 枚举必填字段或
-  示例；只写按错误与当前 schema 修正 payload 的通用纪律；
+示例；只写按错误与当前 schema 修正 payload 的通用纪律；
 - 输出必须是完整 body，不是 diff；超预算时会再压缩一轮，NEVER 硬截断。
 
 只输出一个 JSON 对象：
@@ -1853,8 +1937,9 @@ pub async fn run_two_phase_cycle(
 {{"decision":"no_change","reason":"<一句话>"}}
 不要输出 JSON 以外的任何文字。"#,
             component_scope = component_scope_label(&component_id),
-            body_budget = component_body_budget_chars(&component_id),
-            body = content.body
+            body_budget = body_budget,
+            body = content.body,
+            preservation_requirement = preservation_requirement,
         );
         let execution_completion = complete_with_usage_event(
             llm,
@@ -1864,7 +1949,44 @@ pub async fn run_two_phase_cycle(
             recorder,
         )
         .await?;
-        let execution = match parse_fixed_component_execution(&execution_completion.text) {
+        let mut execution_parse = parse_fixed_component_execution(&execution_completion.text);
+        if let Err(error) = execution_parse.as_ref() {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "two_phase_execution".to_string(),
+                    message: error.message().chars().take(120).collect(),
+                });
+            }
+            let retry_prompt = format!(
+                r#"{execution_prompt}
+
+上一轮执行应答解析失败：{error}。
+重新输出完整紧凑 JSON，并严格遵守：
+- body 不超过 {body_budget} 字符；
+- 合并重复规则、删除套话，只保留可执行条件与动作；
+- NEVER 输出 Markdown、注释、转义换行以外的多余文字。"#
+            );
+            let retry_completion = complete_with_usage_event(
+                llm,
+                &retry_prompt,
+                "two_phase_execution_retry",
+                block_index,
+                recorder,
+            )
+            .await?;
+            execution_parse = parse_fixed_component_execution(&retry_completion.text);
+            if let Err(retry_error) = execution_parse.as_ref() {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                        block_index,
+                        stage: "two_phase_execution_retry".to_string(),
+                        message: retry_error.message().chars().take(120).collect(),
+                    });
+                }
+            }
+        }
+        let execution = match execution_parse {
             Ok(FixedComponentExecutionProposal::Propose {
                 reason,
                 evidence_refs,
