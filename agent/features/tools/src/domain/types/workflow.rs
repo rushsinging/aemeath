@@ -131,8 +131,8 @@ pub struct WorkflowReplanBoundaryInput {
 /// continuation 的重入边。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct WorkflowRejoinEdgeInput {
-    /// continuation 的出口节点。
-    pub from_node_id: String,
+    /// continuation 出口在 new_nodes 中的下标（新节点 id 由系统生成）。
+    pub from_index: usize,
     /// 既有 Pending 非 CompleteNode，不得是本轮新建节点或 CompleteNode。
     pub target_node_id: String,
 }
@@ -229,8 +229,8 @@ pub struct WorkflowReplanInput {
     pub new_nodes: Option<Vec<WorkflowNodeInput>>,
     #[serde(default)]
     pub new_edges: Option<Vec<WorkflowEdgeInput>>,
-    /// continuation 入口，至少一个。
-    pub entry_node_ids: Vec<String>,
+    /// continuation 入口在 new_nodes 中的下标，至少一个（id 由系统生成）。
+    pub entry_indexes: Vec<usize>,
     /// 汇入原 Graph 的重入边，至少一条。
     pub rejoin_edges: Vec<WorkflowRejoinEdgeInput>,
     #[serde(default)]
@@ -266,6 +266,9 @@ pub struct WorkflowSummaryResult {
 #[serde(default)]
 pub struct WorkflowCreateResult {
     pub workflow_id: String,
+    /// 节点 index → 系统生成的真实 node id（LLM 后续引用的唯一来源）。
+    #[serde(default)]
+    pub node_ids: Vec<String>,
     pub status: String,
     pub active_mode: Option<String>,
     pub root_node_id: String,

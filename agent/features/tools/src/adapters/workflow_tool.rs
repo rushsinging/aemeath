@@ -75,19 +75,21 @@ impl TypedTool for WorkflowCreateTool {
             }
         };
         let node_count = parsed.nodes.len();
+        if parsed.root_index >= node_count {
+            return TypedToolResult::error("workflow_create: root_index 超出 nodes 下标范围");
+        }
+        let (definitions, node_ids) = mapping::nodes_from_input(&parsed.nodes);
         let complete_node_id = parsed
             .nodes
             .iter()
             .find(|node| node.kind == WorkflowNodeKindInput::Complete)
-            .map(|node| mapping::node_id_at(node.index))
+            .and_then(|node| node_ids.get(node.index))
+            .cloned()
             .unwrap_or_default();
-        let root_node_id = mapping::node_id_at(parsed.root_index);
-        if parsed.root_index >= node_count {
-            return TypedToolResult::error("workflow_create: root_index 超出 nodes 下标范围");
-        }
+        let root_node_id = node_ids[parsed.root_index].clone();
         let mut edges = Vec::with_capacity(parsed.edges.len());
         for edge in &parsed.edges {
-            match mapping::edge_from_indexes(edge, node_count) {
+            match mapping::edge_from_indexes(edge, &node_ids) {
                 Some(edge) => edges.push(edge),
                 None => return TypedToolResult::error("workflow_create: edge 下标超出 nodes 范围"),
             }
@@ -96,7 +98,7 @@ impl TypedTool for WorkflowCreateTool {
             name: parsed.name,
             objective: parsed.objective,
             root_node_id: root_node_id.clone(),
-            nodes: mapping::nodes_from_input(&parsed.nodes),
+            nodes: definitions,
             edges,
         };
         match self.backend.create(spec).await {
@@ -105,7 +107,13 @@ impl TypedTool for WorkflowCreateTool {
                 let text = format!("workflow_create: {workflow_id} created (active/executing)");
                 TypedToolResult::success(
                     text,
-                    mapping::create_result(summary, root_node_id, complete_node_id, node_count),
+                    mapping::create_result(
+                        summary,
+                        node_ids,
+                        root_node_id,
+                        complete_node_id,
+                        node_count,
+                    ),
                 )
             }
             Err(error) => business_error(&error),
@@ -473,13 +481,19 @@ impl TypedTool for WorkflowReplanTool {
             }
         };
         let parsed_new_nodes = parsed.new_nodes.unwrap_or_default();
+        let (new_definitions, new_node_ids) = mapping::nodes_from_input(&parsed_new_nodes);
+        let entry_node_ids = parsed
+            .entry_indexes
+            .iter()
+            .filter_map(|index| new_node_ids.get(*index).cloned())
+            .collect::<Vec<_>>();
         let command = ReplanWorkflowCommand {
             workflow_id: parsed.workflow_id,
             boundary: mapping::boundary_from_input(&parsed.boundary),
-            new_nodes: mapping::replan_nodes_from_input(&parsed_new_nodes),
-            new_edges: mapping::edges_from_indexes(&parsed.new_edges, parsed_new_nodes.len()),
-            entry_node_ids: parsed.entry_node_ids,
-            rejoin_edges: mapping::rejoin_edges_from_input(&parsed.rejoin_edges),
+            new_nodes: new_definitions,
+            new_edges: mapping::edges_from_indexes(&parsed.new_edges, &new_node_ids),
+            entry_node_ids,
+            rejoin_edges: mapping::rejoin_edges_from_input(&parsed.rejoin_edges, &new_node_ids),
             pending_rewrites: mapping::pending_rewrites_from_input(&parsed.pending_rewrites),
         };
         match self.backend.replan(command).await {

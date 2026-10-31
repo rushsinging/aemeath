@@ -142,70 +142,47 @@ pub(super) fn successors_from_input(
         .collect()
 }
 
-/// 按 nodes 下标映射生成 id（`wnd_<下标+1>`，图内唯一、稳定可测）。
-///
-/// LLM 协议面 NEVER 携带 node id（#2091 口径：id 由 Workflow 自动填充）；
-/// 下标越界返回 `None`，由调用方转协议错误。
-pub(super) fn node_id_at(index: usize) -> String {
-    format!("wnd_{}", index + 1)
+/// 为节点生成 shared typed id（`wnd_` 前缀雪花，`wfl_` 同款逻辑：
+/// 字典序 = 时间序、全局唯一，replan 新节点与旧图 NEVER 相撞）。
+pub(super) fn new_node_id() -> String {
+    share::ids::new_typed_id("wnd")
 }
 
+/// 按下标从生成 id 数组取两端（越界 None）。
 pub(super) fn edge_from_indexes(
     input: &WorkflowEdgeInput,
-    node_count: usize,
+    ids: &[String],
 ) -> Option<EdgeDefinition> {
-    edge_from_indexes_with(input, node_count, node_id_at)
-}
-
-fn edge_from_indexes_with(
-    input: &WorkflowEdgeInput,
-    node_count: usize,
-    id_of: fn(usize) -> String,
-) -> Option<EdgeDefinition> {
-    if input.from_index >= node_count || input.to_index >= node_count {
-        return None;
-    }
     Some(EdgeDefinition {
-        from_node_id: id_of(input.from_index),
-        to_node_id: id_of(input.to_index),
+        from_node_id: ids.get(input.from_index)?.clone(),
+        to_node_id: ids.get(input.to_index)?.clone(),
     })
-}
-
-/// replan `new_nodes`：id 由系统按 `wrn_<下标+1>` 生成（LLM 不填 id）。
-pub(super) fn replan_nodes_from_input(input: &[WorkflowNodeInput]) -> Vec<NodeDefinition> {
-    input
-        .iter()
-        .enumerate()
-        .map(|(index, node)| {
-            let mut definition = node_from_input(node);
-            definition.node_id = replan_node_id_at(index);
-            definition
-        })
-        .collect()
-}
-
-/// replan 新节点 id：`wrn_<下标+1>`，与 create 生成的 `wnd_` 原节点命名空间区分。
-pub(super) fn replan_node_id_at(index: usize) -> String {
-    format!("wrn_{}", index + 1)
 }
 
 /// 解析 replan `new_edges`：下标成对出现在 `new_nodes` 内部或跨（new → rejoin target 由
 /// `rejoin_edges` 表达，此处仅处理 new_nodes 内部下标）；越界直接丢弃该边由 Kernel 兜底。
 pub(super) fn edges_from_indexes(
     input: &Option<Vec<WorkflowEdgeInput>>,
-    node_count: usize,
+    ids: &[String],
 ) -> Vec<EdgeDefinition> {
     input
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .filter_map(|edge| edge_from_indexes_with(edge, node_count, replan_node_id_at))
+        .filter_map(|edge| {
+            let from = ids.get(edge.from_index)?;
+            let to = ids.get(edge.to_index)?;
+            Some(EdgeDefinition {
+                from_node_id: from.clone(),
+                to_node_id: to.clone(),
+            })
+        })
         .collect()
 }
 
 pub(super) fn node_from_input(input: &WorkflowNodeInput) -> NodeDefinition {
     NodeDefinition {
-        node_id: node_id_at(input.index),
+        node_id: new_node_id(),
         kind: match input.kind {
             crate::domain::types::workflow::WorkflowNodeKindInput::Work => NodeKind::Work,
             crate::domain::types::workflow::WorkflowNodeKindInput::Confirm => NodeKind::Confirm,
@@ -217,8 +194,18 @@ pub(super) fn node_from_input(input: &WorkflowNodeInput) -> NodeDefinition {
     }
 }
 
-pub(super) fn nodes_from_input(input: &[WorkflowNodeInput]) -> Vec<NodeDefinition> {
-    input.iter().map(node_from_input).collect()
+/// create/replan 通用：逐节点生成雪花 id；返回 (定义, 生成 id 顺序表)。
+pub(super) fn nodes_from_input(input: &[WorkflowNodeInput]) -> (Vec<NodeDefinition>, Vec<String>) {
+    let mut ids = Vec::with_capacity(input.len());
+    let definitions = input
+        .iter()
+        .map(|node| {
+            let definition = node_from_input(node);
+            ids.push(definition.node_id.clone());
+            definition
+        })
+        .collect();
+    (definitions, ids)
 }
 
 pub(super) fn boundary_from_input(input: &WorkflowReplanBoundaryInput) -> ReplanBoundary {
@@ -233,12 +220,17 @@ pub(super) fn boundary_from_input(input: &WorkflowReplanBoundaryInput) -> Replan
     }
 }
 
-pub(super) fn rejoin_edges_from_input(input: &[WorkflowRejoinEdgeInput]) -> Vec<RejoinEdge> {
+pub(super) fn rejoin_edges_from_input(
+    input: &[WorkflowRejoinEdgeInput],
+    new_node_ids: &[String],
+) -> Vec<RejoinEdge> {
     input
         .iter()
-        .map(|edge| RejoinEdge {
-            from_node_id: edge.from_node_id.clone(),
-            target_node_id: edge.target_node_id.clone(),
+        .filter_map(|edge| {
+            Some(RejoinEdge {
+                from_node_id: new_node_ids.get(edge.from_index)?.clone(),
+                target_node_id: edge.target_node_id.clone(),
+            })
         })
         .collect()
 }
@@ -287,6 +279,7 @@ fn summary_to_result(summary: WorkflowSummaryData) -> WorkflowSummaryResult {
 
 pub(super) fn create_result(
     summary: WorkflowSummaryData,
+    node_ids: Vec<String>,
     root_node_id: String,
     complete_node_id: String,
     node_count: usize,
@@ -294,6 +287,7 @@ pub(super) fn create_result(
     let create_summary = summary_to_result(summary);
     WorkflowCreateResult {
         workflow_id: create_summary.workflow_id,
+        node_ids,
         status: create_summary.status,
         active_mode: create_summary.active_mode,
         root_node_id,
