@@ -55,6 +55,19 @@ fn synthetic_bootstrap_registry_lists_missing_builtin_components_for_dry_run() {
 }
 
 #[test]
+fn session_enumeration_includes_project_scoped_datasets() {
+    let root = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(root.path().join("legacy.dataset")).unwrap();
+    std::fs::create_dir_all(root.path().join("project-a/scoped.dataset")).unwrap();
+    std::fs::create_dir_all(root.path().join("project-a/not-a-dataset")).unwrap();
+    let entries = super::enumerate_session_entries(root.path());
+    let keys: Vec<_> = entries.into_iter().map(|entry| entry.session_key).collect();
+    assert!(keys.contains(&"legacy.dataset".to_string()));
+    assert!(keys.contains(&"project-a/scoped.dataset".to_string()));
+    assert!(!keys.contains(&"project-a/not-a-dataset".to_string()));
+}
+
+#[test]
 fn component_path_map_contains_builtin_prose_components() {
     let root = Path::new("/agents");
     let paths = super::builtin_prose_component_paths_under(root);

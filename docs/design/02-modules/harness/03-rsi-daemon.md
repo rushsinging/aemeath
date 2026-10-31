@@ -68,6 +68,13 @@ enum RsiControlAck {
 
 **内建 prose 组件 bootstrap**：`guardrails/default` 与 `tool-guidance/default` 是宿主 canonical 职责面，不属于 RSI 动态创建的任意组件。正式 `rsi run` / `rsi serve` 装配时若文件缺失，宿主原子创建最小骨架（`# Guardrails\n` / `# Tool Guidance\n`），幂等且 NEVER 覆盖用户文件；`rsi run --dry-run` 只在虚拟 registry 中列出缺失骨架并参与路由/执行预览，NEVER 写盘。`rsi history` / `rsi rollback` 保持只读装配，不触发创建。
 
+**项目/全局落点与预算收敛**：
+
+- 证据流支持项目布局 `<project>/<session>.dataset`，项目段保留在 `EvidenceSourceRef.session_id` 中；顶层 legacy session 显式标注 `unknown`，NEVER 伪造成某个项目或 global。
+- 诊断/执行 prompt 为组件材料标注 `scope=global` / `project:<id>`，并强制：单项目或 unknown 的项目特定经验 NEVER 写入 global；项目 A 证据 NEVER 写入项目 B；没有同项目候选时选择 no_issue。
+- prose 组件 NEVER 复述或改写工具 schema（字段必填性、类型、枚举、示例）。工具 schema 由宿主在每次 provider 请求中权威携带；参数类改进只沉淀「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
+- RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 字符、overlay 7800 字符。超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。
+
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 
 ### 两种执行模式

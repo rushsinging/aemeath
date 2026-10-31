@@ -49,6 +49,13 @@ pub(crate) const COMPOSE_SIMILARITY_CANDIDATE_THRESHOLD: f64 = 0.28;
 /// Compose 相似候选注入的 session 上下文总字符预算。
 pub(crate) const COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS: usize = 12_000;
 
+/// RSI 可落盘的内建 prose 组件 body 预算（低于 runtime 4000 注入预算，
+/// 为 source 标签包装保留余量；超限走 LLM 压缩，NEVER 硬截断）。
+pub(crate) const RSI_BUILTIN_COMPONENT_BODY_BUDGET_CHARS: usize = 3800;
+
+/// RSI 可落盘的 overlay body 预算（低于 runtime 8000 注入预算）。
+pub(crate) const RSI_OVERLAY_COMPONENT_BODY_BUDGET_CHARS: usize = 7800;
+
 /// checkpoint 落盘文件名（`~/.agents/harness/checkpoint.json`，#2049）。
 pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";
 

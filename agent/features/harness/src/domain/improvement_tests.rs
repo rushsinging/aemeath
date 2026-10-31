@@ -227,6 +227,63 @@ fn block_prompt_carries_materials_and_contract() {
     assert!(prompt.contains("未提及的组件自动保持原样"));
 }
 
+/// 项目/全局落点隔离：材料 MUST 标注 scope，证据 MUST 标注来源项目；
+/// 单项目或未知项目的项目特定经验 NEVER 落 global。
+#[test]
+fn block_prompt_carries_project_and_global_scope_contract() {
+    let overlay = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("global"),
+    };
+    let chunk = vec![
+        (overlay, body_content("global overlay")),
+        (id("alpha"), body_content("tool guidance")),
+    ];
+    let evidence = crate::domain::evidence::EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![crate::domain::evidence::EvidenceSignal {
+            kind: crate::domain::evidence::SignalKind::RepeatedFailure,
+            signal_id: "repeated_failure:Bash:project-specific".into(),
+            summary: "项目专属命令失败".into(),
+            excerpt: None,
+            occurrences: 3,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project-a/s1.dataset".into(),
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    let prompt = build_block_prompt(&chunk, &[], &evidence);
+    assert!(prompt.contains("\"scope\":\"global\""));
+    assert!(prompt.contains("项目: project-a"));
+    assert!(prompt.contains("单项目或项目归属未知的项目特定经验 NEVER 写入"));
+    assert!(prompt.contains("scope=global；没有同项目 scope 候选时选择 no_change"));
+    assert!(prompt.contains("项目 A 的证据 NEVER 写入项目 B"));
+}
+
+/// prompt 含组件注入预算：超预算由 LLM 压缩，NEVER 硬截断。
+#[test]
+fn block_prompt_states_component_body_budget() {
+    let chunk = vec![(id("alpha"), body_content("old"))];
+    let prompt = build_block_prompt(&chunk, &[], &evidence_with_signal());
+    assert!(prompt.contains("正文预算 3800 字符"));
+    assert!(prompt.contains("超预算时会被要求再压缩一轮"));
+    assert!(prompt.contains("NEVER 通过硬截断"));
+}
+
+/// 工具参数类改进 NEVER 在 prose 组件中复述 schema；schema 由宿主请求携带，
+/// prose 只能沉淀「按错误 + 当前 schema 修正」的通用纪律。
+#[test]
+fn block_prompt_forbids_rewriting_tool_schema() {
+    let chunk = vec![(id("alpha"), body_content("old"))];
+    let prompt = build_block_prompt(&chunk, &[], &evidence_with_signal());
+    assert!(prompt.contains("工具参数类问题 NEVER 复述或改写工具 schema"));
+    assert!(prompt.contains("NEVER 把可选字段写成必填"));
+    assert!(prompt.contains("只写「读取错误 + 核对当前 schema +"));
+    assert!(prompt.contains("修正 payload + 禁止无效原样重试」的通用纪律"));
+}
+
 /// 完整周期：两块（采纳 + 无变更）→ 汇总正确、未提及组件继承。
 #[tokio::test]
 async fn cycle_adopts_and_summarizes_per_block() {

@@ -82,17 +82,50 @@ pub struct ScanReport {
 
 impl SessionDatasetScanner {
     pub fn scan_dataset(dataset_dir: &std::path::Path) -> ScanReport {
-        let mut report = ScanReport::default();
-        let Ok(entries) = std::fs::read_dir(dataset_dir.join("members")) else {
-            return report;
-        };
-        // 保留 dataset 目录名（含 .dataset 后缀）：EvidenceSourceRef 可直接
-        // 相对 datasets_root 回定位，NEVER 依赖主进程内存态。
+        // 顶层 legacy 布局：session id 就是 dataset 目录名。
         let session_id = dataset_dir
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("unknown")
             .to_string();
+        Self::scan_dataset_as(dataset_dir, &session_id)
+    }
+
+    /// 项目布局：session id 保留 `<project>/<session>.dataset` 相对键，
+    /// 供 RSI 区分项目/全局落点；路径逃逸返回空报告。
+    pub fn scan_dataset_under_root(
+        datasets_root: &std::path::Path,
+        session_key: &str,
+    ) -> ScanReport {
+        let session_path = std::path::Path::new(session_key);
+        let normal_count = session_path
+            .components()
+            .filter(|component| matches!(component, std::path::Component::Normal(_)))
+            .count();
+        if normal_count != session_path.components().count()
+            || !(1..=2).contains(&normal_count)
+            || !session_key.ends_with(".dataset")
+        {
+            return ScanReport::default();
+        }
+        let dataset_dir = datasets_root.join(session_path);
+        let Ok(root_canonical) = datasets_root.canonicalize() else {
+            return ScanReport::default();
+        };
+        let Ok(dataset_canonical) = dataset_dir.canonicalize() else {
+            return ScanReport::default();
+        };
+        if !dataset_canonical.starts_with(&root_canonical) {
+            return ScanReport::default();
+        }
+        Self::scan_dataset_as(&dataset_dir, session_key)
+    }
+
+    fn scan_dataset_as(dataset_dir: &std::path::Path, session_id: &str) -> ScanReport {
+        let mut report = ScanReport::default();
+        let Ok(entries) = std::fs::read_dir(dataset_dir.join("members")) else {
+            return report;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() || !member_path_is_inside(&dataset_dir.join("members"), &path) {
@@ -140,7 +173,7 @@ impl SessionDatasetScanner {
                 continue;
             }
             Self::extract_step_events(
-                &session_id,
+                session_id,
                 cursor_run_id,
                 cursor_step_id,
                 step,
@@ -233,14 +266,16 @@ impl SessionDatasetScanner {
             });
         }
     }
-    /// 在 datasets root 内安全定位 session；session id MUST 是单一 Normal
-    /// `.dataset` 成员，canonicalize 后仍在 root 内（防 `..`/绝对路径/symlink 逃逸）。
+    /// 在 datasets root 内安全定位 session；session id 支持顶层
+    /// `<session>.dataset` 与项目布局 `<project>/<session>.dataset`，全部
+    /// 组件 MUST 是 Normal，canonicalize 后仍在 root 内（防逃逸）。
     pub fn read_step_context_under_root(
         datasets_root: &std::path::Path,
         source: &EvidenceSourceRef,
     ) -> Option<SessionContextExcerpt> {
         let session_path = std::path::Path::new(&source.session_id);
-        if session_path.components().count() != 1
+        let component_count = session_path.components().count();
+        if !(1..=2).contains(&component_count)
             || !session_path
                 .components()
                 .all(|component| matches!(component, std::path::Component::Normal(_)))

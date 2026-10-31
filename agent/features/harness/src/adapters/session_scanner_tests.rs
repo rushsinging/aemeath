@@ -125,6 +125,36 @@ fn scan_extracts_paired_tool_events_and_outcomes() {
         .all(|event| event.session_id.contains("0199abcd") && event.run_id == "run-1"));
 }
 
+/// 项目布局 dataset 的 session id MUST 保留项目段：
+/// `project/<session>.dataset` 是 RSI 区分项目/全局落点的最小身份。
+#[test]
+fn scan_dataset_under_root_preserves_project_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let dataset = make_dataset(&root.path().join("project-a"));
+    let session_key = format!(
+        "project-a/{}",
+        dataset
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+    );
+    let report = SessionDatasetScanner::scan_dataset_under_root(root.path(), &session_key);
+    assert!(!report.events.is_empty());
+    assert!(report
+        .events
+        .iter()
+        .all(|event| event.session_id == session_key));
+
+    let source = EvidenceSourceRef {
+        session_id: session_key.clone(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    let excerpt = SessionDatasetScanner::read_step_context_under_root(root.path(), &source)
+        .expect("项目布局来源 MUST 可回读");
+    assert!(excerpt.text.contains("[step-1]"));
+}
+
 /// cursor 身份缺失或不一致时跳过成员，NEVER 生成 unknown 来源绑定错误上下文。
 #[test]
 fn scan_skips_missing_or_mismatched_step_identity() {

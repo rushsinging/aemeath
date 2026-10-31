@@ -572,9 +572,11 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
                 .insert(run_ref.run_id.as_str());
         }
         for (session_key, run_ids) in by_session {
-            let report = harness::adapters::session_scanner::SessionDatasetScanner::scan_dataset(
-                &self.datasets_root.join(session_key),
-            );
+            let report =
+                harness::adapters::session_scanner::SessionDatasetScanner::scan_dataset_under_root(
+                    &self.datasets_root,
+                    session_key,
+                );
             events.extend(
                 report
                     .events
@@ -642,22 +644,11 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
                     .all(|run_id| progress.processed_run_ids.contains(run_id));
             }
         }
-        let live: std::collections::BTreeSet<String> = std::fs::read_dir(&self.datasets_root)
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .filter(|entry| {
-                        entry.path().is_dir()
-                            && entry
-                                .path()
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .is_some_and(|ext| ext == "dataset")
-                    })
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let live: std::collections::BTreeSet<String> =
+            enumerate_session_entries(&self.datasets_root)
+                .into_iter()
+                .map(|entry| entry.session_key)
+                .collect();
         if let Err(error) = harness::save_stream_state(&self.harness_dir, &state, &live) {
             log::warn!(target: crate::LOG_TARGET, "checkpoint 推进失败（下周期将重读本块）：{}", error.message());
         }
@@ -665,39 +656,69 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
 }
 
 /// 枚举 session dataset 根的流条目（mtime 全序原料）。
+/// 支持顶层 legacy `<session>.dataset` 与项目布局
+/// `<project>/<session>.dataset`；项目段保留在 session key 中，供 RSI
+/// 区分项目/全局落点。
 fn enumerate_session_entries(datasets_root: &std::path::Path) -> Vec<harness::SessionStreamEntry> {
-    let Ok(entries) = std::fs::read_dir(datasets_root) else {
-        return Vec::new();
+    let mut entries = Vec::new();
+    let Ok(root_entries) = std::fs::read_dir(datasets_root) else {
+        return entries;
     };
-    entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_dir()
-                && path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext| ext == "dataset")
-        })
-        .map(|path| {
-            let session_key = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("")
-                .to_string();
-            let updated_at_secs = path
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|duration| duration.as_secs())
-                .unwrap_or(0);
-            harness::SessionStreamEntry {
-                session_key,
-                updated_at_secs,
+    for root_entry in root_entries.flatten() {
+        let root_path = root_entry.path();
+        if !root_path.is_dir() {
+            continue;
+        }
+        if root_path.extension().and_then(|ext| ext.to_str()) == Some("dataset") {
+            push_session_entry(&mut entries, &root_path, None);
+            continue;
+        }
+        let Ok(project_entries) = std::fs::read_dir(&root_path) else {
+            continue;
+        };
+        for project_entry in project_entries.flatten() {
+            let dataset_path = project_entry.path();
+            if dataset_path.is_dir()
+                && dataset_path.extension().and_then(|ext| ext.to_str()) == Some("dataset")
+            {
+                push_session_entry(
+                    &mut entries,
+                    &dataset_path,
+                    root_path.file_name().and_then(|name| name.to_str()),
+                );
             }
-        })
-        .collect()
+        }
+    }
+    entries
+}
+
+fn push_session_entry(
+    entries: &mut Vec<harness::SessionStreamEntry>,
+    dataset_path: &std::path::Path,
+    project_segment: Option<&str>,
+) {
+    let Some(session_name) = dataset_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let session_key = match project_segment {
+        Some(project) => format!("{project}/{session_name}"),
+        None => session_name,
+    };
+    let updated_at_secs = dataset_path
+        .metadata()
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    entries.push(harness::SessionStreamEntry {
+        session_key,
+        updated_at_secs,
+    });
 }
 
 /// 最小配置加载：默认值 + `~/.agents/aemeath.json` patch 层合并。

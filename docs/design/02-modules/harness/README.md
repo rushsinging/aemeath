@@ -27,3 +27,4 @@
 8. **提示词即产品**（2026-10-25）：改进块与 Compose 两处 prompt 是 RSI 质量的第一真相源，全文与设计理由见 [06-prompts.md](06-prompts.md)；改动任一 prompt MUST 同步该分片并附真模型 e2e 证据。
 11. **signal → 组件受限路由**（2026-10-30）：宿主先生成候选组件，诊断只能在候选 index 内选择，执行阶段固定组件且 NEVER 输出 component id/action；Skill 证据按来源上下文精确匹配，未知归属 unresolved，NEVER 兜底写入全局组件。模型只复制 E0/E1 短证据编号，完整 signal id 由 runtime 映射并持久化。
 12. **canonical prose bootstrap**（2026-10-31）：`guardrails/default` 与 `tool-guidance/default` 是宿主内建职责面；正式 RSI 装配缺失时自动创建最小骨架且 NEVER 覆盖用户文件，dry-run 仅虚拟可见并零写盘。RSI 仍不可动态创建任意组件。
+13. **落点与预算安全**（2026-10-31）：证据来源保留项目段，global 只承接跨项目通用规律，项目 A NEVER 写项目 B；工具参数类改进 NEVER 复述 schema；超注入预算 MUST 先 LLM 压缩一轮，仍超则整份作废，NEVER 硬截断。

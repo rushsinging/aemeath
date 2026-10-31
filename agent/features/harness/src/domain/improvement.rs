@@ -5,9 +5,12 @@
 //! [`ImprovementMaterials`] 是唯一装配点，接入时扩字段即可。
 
 use crate::application::ComponentRegistry;
-use crate::constants::{ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND};
+use crate::constants::{
+    ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_CHARS,
+    RSI_OVERLAY_COMPONENT_BODY_BUDGET_CHARS,
+};
 use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet};
-use crate::domain::component::{ComponentContent, ComponentId};
+use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
@@ -80,6 +83,58 @@ pub enum BlockProposal {
     },
     /// 无变更：证据不支持任何编辑（合法结果）。
     NoChange { reason: String },
+}
+
+/// 组件落点 scope：global 组件只承接跨项目通用规律；overlay 的非 global
+/// 实例按项目实例对待（项目组件互不可写）。
+pub(crate) fn component_scope_label(id: &ComponentId) -> String {
+    match id.kind {
+        ComponentKind::SystemPromptOverlay if id.name.as_str() == "global" => "global".to_string(),
+        ComponentKind::SystemPromptOverlay => format!("project:{}", id.name.as_str()),
+        // 当前 registry 只装配全局 guardrails/tool-guidance/skills/sub-agents；
+        // 项目实例接入时 MUST 在装配层给出 project scope，而不是复用 global。
+        _ => "global".to_string(),
+    }
+}
+
+/// RSI 组件 body 预算。低于 runtime 注入预算，为标签包装保留余量；
+/// 超限 MUST 经 LLM 再压缩一轮，NEVER 硬截断。
+pub(crate) fn component_body_budget_chars(id: &ComponentId) -> usize {
+    match id.kind {
+        ComponentKind::SystemPromptOverlay => RSI_OVERLAY_COMPONENT_BODY_BUDGET_CHARS,
+        _ => RSI_BUILTIN_COMPONENT_BODY_BUDGET_CHARS,
+    }
+}
+
+/// 从 dataset 相对路径提取项目段；顶层 legacy session 无项目段，显式
+/// 标注 unknown，NEVER 伪造成 global 或某个项目。
+pub(crate) fn source_project_label(session_id: &str) -> String {
+    let path = std::path::Path::new(session_id);
+    let mut segments = path.components().filter_map(|component| match component {
+        std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+        _ => None,
+    });
+    let Some(project) = segments.next() else {
+        return "unknown".to_string();
+    };
+    if segments.next().is_none() {
+        return "unknown".to_string();
+    }
+    project
+}
+
+fn evidence_project_labels(signal: &crate::domain::evidence::EvidenceSignal) -> Vec<String> {
+    let mut projects: Vec<String> = Vec::new();
+    for source in &signal.sources {
+        let project = source_project_label(&source.session_id);
+        if !projects.contains(&project) {
+            projects.push(project);
+        }
+    }
+    if projects.is_empty() {
+        projects.push("unknown".to_string());
+    }
+    projects
 }
 
 /// 按块大小分组组件材料。
@@ -208,6 +263,7 @@ pub fn build_diagnosis_prompt_with_strength(
         .map(|(id, content)| {
             serde_json::json!({
                 "id": id,
+                "scope": component_scope_label(id),
                 "frontmatter": content.frontmatter,
                 "body": content.body,
             })
@@ -235,6 +291,9 @@ pub fn build_diagnosis_prompt_with_strength(
 判断标准：
 - 每条 task 的 target_signal MUST 逐字出现在上面的证据块中；无法对应的
   问题 NEVER 提出。
+- 落点隔离：scope=global 只承接跨项目通用规律；单项目或项目归属
+  unknown 的项目特定经验 NEVER 提出 global task。项目 A 证据 NEVER
+  写入项目 B；没有同项目候选时选择 no_issue。
 - 证据不足或组件现状已覆盖该场景时选择 no_issue——正当答案。
 - 一个组件可有多条 task；总数不超过证据中不同 signal 的个数。
 - 优先修：重复失败（repeated_failure）、同参重试（retry_pattern）、
@@ -327,6 +386,8 @@ pub fn build_execution_prompt(
         .map(|(id, content)| {
             serde_json::json!({
                 "id": id,
+                "scope": component_scope_label(id),
+                "body_budget_chars": component_body_budget_chars(id),
                 "frontmatter": content.frontmatter,
                 "body": content.body,
             })
@@ -345,7 +406,14 @@ pub fn build_execution_prompt(
 - **可执行**：规则必须写清「什么条件下」+「必须/禁止做什么」。
 - **不破坏**：只改任务指向的部分；与任务无关的现有规则 MUST 原样保留。
 - **不冲突**：新规则不得与现有内容矛盾；重复时只补差异部分。
-- **成本意识**：always-on 组件每轮付费，用最短篇幅表达完整语义。
+- **落点隔离**：不得把单项目经验写入 global，也不得把项目 A 内容写入
+  项目 B；目标 scope 与证据项目不匹配时返回 no_change。
+- **schema 隔离**：工具参数类任务 NEVER 复述或改写工具 schema；
+  NEVER 枚举字段必填性/类型/示例，只写按错误与当前 schema 修正 payload
+  的通用纪律。
+- **成本意识**：always-on 组件每轮付费，用最短篇幅表达完整语义；
+  guardrails/tool_guidance 正文预算 3800 字符，global overlay 预算
+  7800 字符；超预算会再压缩一轮，NEVER 硬截断。
 - 每条编辑的 reason MUST 引用该任务的 target_signal。
 
 编辑契约：
@@ -422,6 +490,7 @@ pub fn build_block_prompt(
     for (id, content) in chunk {
         components_json.push(serde_json::json!({
             "id": id,
+            "scope": component_scope_label(id),
             "frontmatter": content.frontmatter,
             "body": content.body,
         }));
@@ -437,6 +506,14 @@ pub fn build_block_prompt(
 
 历史经验（此前采纳的改进结论，供参考、可被新证据推翻）：
 {lessons_block}
+
+落点隔离（MUST 先判断再编辑）：
+- 每个组件材料都有 scope；scope=global 只能承接跨项目通用规律。
+- 证据行标注来源项目。单项目或项目归属未知的项目特定经验 NEVER 写入
+  scope=global；没有同项目 scope 候选时选择 no_change。
+- 项目 A 的证据 NEVER 写入项目 B；无法确认项目归属时按 unknown 保守处理。
+- CLAUDE.md/AGENTS.md 的项目层与全局层是不同落点； NEVER 把项目经验
+  提升到全局，也 NEVER 把全局通用规律伪装成项目差异。
 
 任务：基于执行证据判断组件是否存在值得改进的问题（缺失、冗余、错误、
   空壳占位、重复失败未覆盖的规则）。空壳占位（TODO、无实际内容的正文）
@@ -455,6 +532,8 @@ pub fn build_block_prompt(
 - **不冲突**：新规则不得与现有内容矛盾；与已有条款重复时只补差异部分。
 - **成本意识**：always-on 组件（guardrails/tool_guidance/overlay）每轮
   对话都要付费，越简洁越好——用最短的篇幅表达完整语义。
+- **正文预算**：guardrails/tool_guidance 正文预算 3800 字符，global overlay
+  预算 7800 字符；超预算时会被要求再压缩一轮，NEVER 通过硬截断交付。
 
 改进时优先关注的失效模式（证据命中哪类就修哪类，未命中不臆测）：
 **证据中的每一类 repeated_failure 都应至少得到一条对应规则（除非现有规则
@@ -463,6 +542,10 @@ pub fn build_block_prompt(
   无效工具调用）、always-on 段落膨胀——规则能合并就合并，能删就删。
 - **工具异常调用**：用错工具（搜代码该 Grep 却用 Bash cat）、参数错误、
   同参数机械重试、忽略 stderr/错误详情就下结论。
+  工具参数类问题 NEVER 复述或改写工具 schema（字段必填性、类型、枚举、
+  示例）；schema 由宿主在每次请求中权威携带，prose 组件写 schema 只会
+  漂移。NEVER 把可选字段写成必填；只写「读取错误 + 核对当前 schema +
+  修正 payload + 禁止无效原样重试」的通用纪律。
 - **skills 异常**：description 缺少触发词导致该用未用；不该触发时误触发；
   skill 步骤与当前工具面不符（过时）。
 - **subagent 异常**：简单任务过度委派（成本失控）；委派 prompt 不自包含导致
@@ -727,6 +810,90 @@ struct AcceptedBlock {
     evidence: Vec<EvidenceBinding>,
 }
 
+/// 单阶段兼容路径的预算收敛：超预算 draft 追加一次 LLM 压缩；
+/// 仍超预算整份提案作废，NEVER 硬截断。
+async fn compact_block_proposal_budgets(
+    proposal: BlockProposal,
+    llm: &dyn RsiLlmPort,
+    block_index: usize,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Option<BlockProposal> {
+    let BlockProposal::Propose {
+        reason,
+        signal_ids,
+        mut change_set,
+    } = proposal
+    else {
+        return Some(proposal);
+    };
+    let evidence_context = signal_ids.join(", ");
+    for index in 0..change_set.edits.len() {
+        let (component_id, draft, budget) = match &change_set.edits[index] {
+            crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
+                let budget = component_body_budget_chars(id);
+                if content.body.chars().count() <= budget {
+                    continue;
+                }
+                (id.clone(), content.body.clone(), budget)
+            }
+            crate::domain::changeset::ComponentEdit::Delete { .. } => continue,
+        };
+        let prompt = format!(
+            r#"你是 harness 组件压缩器。以下是超预算的完整组件草稿：
+{draft}
+
+证据任务：{evidence_context}
+目标组件：{component_id}
+目标 scope：{component_scope}
+硬性预算：正文不超过 {budget} 字符。
+
+要求：
+- 再压缩一轮：合并重复规则、删除套话、保留可执行条件与动作；
+- NEVER 硬截断；预算内放不下时明确 no_change；
+- 输出仍是完整正文。
+
+只输出一个 JSON 对象：
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+或：
+{{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
+不要输出 JSON 以外的任何文字。"#,
+            component_scope = component_scope_label(&component_id),
+        );
+        let completion =
+            complete_with_usage_event(llm, &prompt, "block_compaction", block_index, recorder)
+                .await
+                .ok()?;
+        let compacted = match parse_fixed_component_execution(&completion.text) {
+            Ok(FixedComponentExecutionProposal::Propose { body, .. })
+                if body.chars().count() <= budget =>
+            {
+                Some(body)
+            }
+            _ => None,
+        };
+        let Some(body) = compacted else {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "block_budget".to_string(),
+                    message: format!("压缩一轮后仍超过 {budget} 字符，整份提案作废"),
+                });
+            }
+            return None;
+        };
+        if let crate::domain::changeset::ComponentEdit::Upsert { content, .. } =
+            &mut change_set.edits[index]
+        {
+            content.body = body;
+        }
+    }
+    Some(BlockProposal::Propose {
+        reason,
+        signal_ids,
+        change_set,
+    })
+}
+
 /// 单块执行：LLM 提案 → 解析 → registry 预检/落盘。
 /// 返回 (applied, outcome_label)；解析失败或校验作废都只作废该块。
 #[allow(clippy::too_many_arguments)]
@@ -800,6 +967,11 @@ async fn run_block(
                 "提案证据引用校验失败：{}", error.message());
             return (None, "作废（证据引用无效）");
         }
+    };
+    let proposal = match compact_block_proposal_budgets(proposal, llm, block_index, recorder).await
+    {
+        Some(proposal) => proposal,
+        None => return (None, "作废（正文超预算）"),
     };
     if let crate::domain::improvement::BlockProposal::Propose {
         signal_ids,
@@ -1449,9 +1621,10 @@ pub async fn run_two_phase_cycle(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "- [{}] {} | {}{} | 候选: {}",
+                "- [{}] {} | 项目: {} | {}{} | 候选: {}",
                 plan.fact.evidence_ref,
                 plan.fact.signal.kind.as_str(),
+                evidence_project_labels(&plan.fact.signal).join(","),
                 plan.fact.signal.summary,
                 plan.fact
                     .signal
@@ -1464,7 +1637,19 @@ pub async fn run_two_phase_cycle(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let materials_block = serde_json::to_string(&candidate_materials).map_err(|error| {
+    let candidate_components_json: Vec<serde_json::Value> = candidate_materials
+        .iter()
+        .map(|(id, content)| {
+            serde_json::json!({
+                "id": id,
+                "scope": component_scope_label(id),
+                "body_budget_chars": component_body_budget_chars(id),
+                "frontmatter": content.frontmatter,
+                "body": content.body,
+            })
+        })
+        .collect();
+    let materials_block = serde_json::to_string(&candidate_components_json).map_err(|error| {
         HarnessError::invalid(ERROR_DOMAIN, format!("候选组件序列化失败：{error}"))
     })?;
     let lessons_block = if lessons.is_empty() {
@@ -1492,6 +1677,16 @@ pub async fn run_two_phase_cycle(
 - evidence_ref：E0/E1 等短引用
 - component_candidate：候选编号数字（如 0 表示 C0）
 - problem / direction / route_reason
+
+落点隔离（MUST）：
+- scope=global 候选只承接跨项目通用规律；单项目或 unknown 的项目特定
+  证据 MUST no_issue，NEVER 落 global。
+- 项目 A 证据 NEVER 选择项目 B 候选；没有同项目候选时 no_issue。
+- AGENTS.md/CLAUDE.md 的全局层与项目层是不同落点； NEVER 混写。
+- 工具参数类问题 NEVER 复述或改写工具 schema；direction 只能要求
+  「读取错误 + 核对当前 schema + 修正 payload + 禁止无效原样重试」，
+  NEVER 指定哪些字段必填/可选。
+- evidence_ref 只填一个 E 编号（如 E6），NEVER 写 "E0/E1" 这类列表。
 
 只输出一个 JSON 对象：
 {{"decision":"diagnose","reason":"<一句话>","issues":[{{"evidence_ref":"E0","component_candidate":0,"problem":"<问题>","direction":"<方向>","route_reason":"<选择该组件的原因>"}}]}}
@@ -1636,6 +1831,8 @@ pub async fn run_two_phase_cycle(
             r#"你是 harness 组件执行器（固定组件）。目标组件由诊断阶段确定，你只能输出完整正文；NEVER 输出组件 id、action 或 change_set。
 
 目标组件：{component_id}
+目标 scope：{component_scope}
+正文预算：{body_budget} 字符
 当前内容：
 {body}
 
@@ -1645,13 +1842,18 @@ pub async fn run_two_phase_cycle(
 要求：
 - evidence_refs 只能使用 E0/E1 等上方短引用；
 - 正文必须保留与任务无关的既有规则；
-- 输出必须是完整 body，不是 diff。
+- 不得把单项目经验写入 global，也不得把项目 A 内容写入项目 B；
+- 工具参数类任务 NEVER 复述或改写工具 schema，NEVER 枚举必填字段或
+  示例；只写按错误与当前 schema 修正 payload 的通用纪律；
+- 输出必须是完整 body，不是 diff；超预算时会再压缩一轮，NEVER 硬截断。
 
 只输出一个 JSON 对象：
 {{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<一句话>"}}
 不要输出 JSON 以外的任何文字。"#,
+            component_scope = component_scope_label(&component_id),
+            body_budget = component_body_budget_chars(&component_id),
             body = content.body
         );
         let execution_completion = complete_with_usage_event(
@@ -1672,9 +1874,78 @@ pub async fn run_two_phase_cycle(
                     discarded += issues.len();
                     continue;
                 }
+                let mut final_body = body;
+                if final_body.chars().count() > component_body_budget_chars(&component_id) {
+                    let budget = component_body_budget_chars(&component_id);
+                    let compaction_prompt = format!(
+                        r#"你是 harness 组件压缩器。以下是超预算的完整组件草稿：
+{draft}
+
+诊断任务：
+{issue_block}
+
+目标组件：{component_id}
+目标 scope：{component_scope}
+硬性预算：正文不超过 {budget} 字符。
+
+要求：
+- 再压缩一轮：合并重复规则、删除套话、保留可执行条件与动作；
+- NEVER 硬截断；预算内放不下的问题优先级由诊断任务给出；
+- 输出仍是完整正文。
+
+只输出一个 JSON 对象：
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+或：
+{{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
+不要输出 JSON 以外的任何文字。"#,
+                        draft = final_body,
+                        component_scope = component_scope_label(&component_id),
+                    );
+                    let compaction_completion = complete_with_usage_event(
+                        llm,
+                        &compaction_prompt,
+                        "two_phase_execution_compaction",
+                        block_index,
+                        recorder,
+                    )
+                    .await?;
+                    let compacted =
+                        match parse_fixed_component_execution(&compaction_completion.text) {
+                            Ok(FixedComponentExecutionProposal::Propose {
+                                evidence_refs,
+                                body,
+                                ..
+                            }) => {
+                                if execution_evidence_refs_invalid(&evidence_refs, issues.len())
+                                    || body.chars().count() > budget
+                                {
+                                    None
+                                } else {
+                                    Some(body)
+                                }
+                            }
+                            _ => None,
+                        };
+                    let Some(compacted_body) = compacted else {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                    block_index,
+                                    stage: "two_phase_execution_budget".to_string(),
+                                    message: format!(
+                                        "压缩一轮后仍超过 {budget} 字符，整份提案作废"
+                                    ),
+                                },
+                            );
+                        }
+                        discarded += issues.len();
+                        continue;
+                    };
+                    final_body = compacted_body;
+                }
                 let new_content = ComponentContent {
                     frontmatter: content.frontmatter.clone(),
-                    body,
+                    body: final_body,
                 };
                 if let Err(error) = registry.validate(&component_id, &new_content) {
                     if let Some(recorder) = recorder {
@@ -1959,8 +2230,9 @@ fn render_evidence_block_with_strength(
                 })
                 .unwrap_or_default();
             format!(
-                "- {} | {}{}{}",
+                "- {} | 项目: {} | {}{}{}",
                 signal.signal_id,
+                evidence_project_labels(signal).join(","),
                 signal.summary,
                 strength,
                 signal
@@ -1984,9 +2256,10 @@ fn render_route_evidence_block(evidence: &crate::domain::evidence::EvidenceBundl
         .iter()
         .map(|fact| {
             format!(
-                "- [{}] {} | {}{}",
+                "- [{}] {} | 项目: {} | {}{}",
                 fact.evidence_ref,
                 fact.signal.kind.as_str(),
+                evidence_project_labels(&fact.signal).join(","),
                 fact.signal.summary,
                 fact.signal
                     .excerpt
@@ -2011,8 +2284,9 @@ fn render_evidence_block(evidence: &crate::domain::evidence::EvidenceBundle) -> 
         .into_iter()
         .map(|signal| {
             format!(
-                "- {} | {}{}",
+                "- {} | 项目: {} | {}{}",
                 signal.signal_id,
+                evidence_project_labels(signal).join(","),
                 signal.summary,
                 signal
                     .excerpt

@@ -24,6 +24,13 @@
 
 > 当前默认执行模式为 **two_phase**：宿主先生成受限候选，诊断选择固定组件，执行只写正文。`single_phase` 保留为兼容回退路径，并同样接受路由门禁校验。两条路径共用落盘链路（校验 → 整份作废 → 原子写 → lesson 回写 → 事件流）。
 
+## 1.1 落点、schema 与预算安全契约（所有改进 prompt 共用）
+
+- 组件材料标注 `scope`（`global` 或 `project:<id>`），证据行标注来源项目；顶层 legacy dataset 标注 `unknown`。
+- `scope=global` 只承接跨项目通用规律；单项目或 unknown 的项目特定经验 NEVER 写 global；项目 A 证据 NEVER 写项目 B；没有同项目候选时输出 no_change/no_issue。
+- 工具参数类问题 NEVER 复述或改写工具 schema（必填性、类型、枚举、示例）。只写「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
+- guardrails/tool-guidance body 预算 3800 字符，overlay 7800 字符。初次产出超预算时 runtime 追加一次压缩 prompt；仍超预算整份提案作废，NEVER 硬截断。
+
 ## 2. 改进块提示词
 
 ### 2.1 结构（四段材料 + 任务 + 契约 + 输出格式）
