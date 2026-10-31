@@ -142,12 +142,12 @@ pub(super) fn successors_from_input(
         .collect()
 }
 
-/// 按 nodes 下标映射生成 id（`nd_<下标+1>`，图内唯一、稳定可测）。
+/// 按 nodes 下标映射生成 id（`wnd_<下标+1>`，图内唯一、稳定可测）。
 ///
 /// LLM 协议面 NEVER 携带 node id（#2091 口径：id 由 Workflow 自动填充）；
 /// 下标越界返回 `None`，由调用方转协议错误。
 pub(super) fn node_id_at(index: usize) -> String {
-    format!("nd_{}", index + 1)
+    format!("wnd_{}", index + 1)
 }
 
 pub(super) fn edge_from_indexes(
@@ -171,7 +171,7 @@ fn edge_from_indexes_with(
     })
 }
 
-/// replan `new_nodes`：id 由系统按 `rn_<下标+1>` 生成（LLM 不填 id）。
+/// replan `new_nodes`：id 由系统按 `wrn_<下标+1>` 生成（LLM 不填 id）。
 pub(super) fn replan_nodes_from_input(input: &[WorkflowNodeInput]) -> Vec<NodeDefinition> {
     input
         .iter()
@@ -184,9 +184,9 @@ pub(super) fn replan_nodes_from_input(input: &[WorkflowNodeInput]) -> Vec<NodeDe
         .collect()
 }
 
-/// replan 新节点 id：`rn_<下标+1>`，与 create 生成的 `nd_` 原节点命名空间区分。
+/// replan 新节点 id：`wrn_<下标+1>`，与 create 生成的 `wnd_` 原节点命名空间区分。
 pub(super) fn replan_node_id_at(index: usize) -> String {
-    format!("rn_{}", index + 1)
+    format!("wrn_{}", index + 1)
 }
 
 /// 解析 replan `new_edges`：下标成对出现在 `new_nodes` 内部或跨（new → rejoin target 由

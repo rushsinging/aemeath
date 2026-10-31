@@ -497,8 +497,8 @@ Input
 ├─ nodes: [NodeInput]                 必填，≥1；LLM 不填 node id
 └─ edges: [{ from_index, to_index }]  必填；下标引用 nodes；单 Node Graph 允许空数组
 
-node id 由系统自动生成（`nd_<下标+1>`，图内唯一）；create 结果返回真实
-id，后续 node_update / rejoin 引用真实 id。replan 新节点同理用 `rn_<序号>`。
+node id 由系统自动生成（`wnd_<下标+1>`，图内唯一）；create 结果返回真实
+id，后续 node_update / rejoin 引用真实 id。replan 新节点同理用 `wrn_<序号>`。
 
 Output
 ├─ workflow_id

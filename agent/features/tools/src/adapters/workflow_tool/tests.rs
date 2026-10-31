@@ -297,7 +297,7 @@ async fn workflow_create_maps_input_and_result() {
         .unwrap()
         .clone()
         .expect("spec recorded");
-    assert_eq!(spec.root_node_id, "nd_1");
+    assert_eq!(spec.root_node_id, "wnd_1");
     assert_eq!(spec.nodes.len(), 2);
     assert_eq!(spec.nodes[0].kind, NodeKind::Work);
     assert_eq!(spec.nodes[0].role, Some(workflow::Role::Planner));
@@ -307,8 +307,8 @@ async fn workflow_create_maps_input_and_result() {
     let data = result.data.expect("data");
     assert_eq!(data.workflow_id, "wf_1");
     assert_eq!(data.status, "active");
-    assert_eq!(data.root_node_id, "nd_1");
-    assert_eq!(data.complete_node_id, "nd_2");
+    assert_eq!(data.root_node_id, "wnd_1");
+    assert_eq!(data.complete_node_id, "wnd_2");
     assert_eq!(data.node_count, 2);
 }
 
