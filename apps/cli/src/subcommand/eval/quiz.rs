@@ -573,3 +573,7 @@ fn load_case_messages(
 #[cfg(test)]
 #[path = "quiz_tests.rs"]
 mod quiz_tests;
+
+#[cfg(test)]
+#[path = "quiz_contract_tests.rs"]
+mod quiz_contract_tests;

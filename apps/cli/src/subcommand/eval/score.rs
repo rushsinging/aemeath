@@ -200,3 +200,7 @@ pub(crate) fn run(
 #[cfg(test)]
 #[path = "score_tests.rs"]
 mod score_tests;
+
+#[cfg(test)]
+#[path = "score_contract_tests.rs"]
+mod score_contract_tests;
