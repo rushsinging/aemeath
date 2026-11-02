@@ -21,7 +21,6 @@ pub use atomic_dataset::{
     DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData,
 };
 pub use blob_recovery::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
-pub use published_language::{
-    DurabilityData, StorageError, StorageErrorKind, StorageKeyData, StorageNamespaceData,
-};
+pub use published_language::{DurabilityData, StorageKeyData, StorageNamespaceData};
+pub(crate) use published_language::{StorageError, StorageErrorKind};
 pub use safe_path::SafePathSegmentData;

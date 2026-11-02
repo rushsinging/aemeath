@@ -7,8 +7,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use storage::{
     AtomicBlobPort, BlobReadData, DeleteOptionsData, DeleteOutcomeData, GenerationData,
-    PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageError,
-    StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
+    PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageKeyData,
+    TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 
 /// 内存 Blob 替身：HashMap 存储 + 读世代语义（Previous → NotFound）+
@@ -73,7 +73,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
         &self,
         key: &StorageKeyData,
         generation: GenerationData,
-    ) -> Result<ReadOutcomeData, StorageError> {
+    ) -> Result<ReadOutcomeData, share::error::DomainError> {
         self.reads.lock().unwrap().push(generation);
         if generation == GenerationData::Previous {
             return Ok(ReadOutcomeData::NotFound);
@@ -88,9 +88,9 @@ impl AtomicBlobPort for InMemoryBlobPort {
         key: &StorageKeyData,
         bytes: &[u8],
         options: WriteOptionsData,
-    ) -> Result<WriteReceiptData, StorageError> {
+    ) -> Result<WriteReceiptData, share::error::DomainError> {
         if let Some(message) = self.write_failure.lock().unwrap().take() {
-            return Err(StorageError::new(storage::StorageErrorKind::Io, message));
+            return Err(share::error::DomainError::storage("storage", message));
         }
         self.values
             .lock()
@@ -105,7 +105,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
     async fn promote_previous(
         &self,
         _key: &StorageKeyData,
-    ) -> Result<PromoteOutcomeData, StorageError> {
+    ) -> Result<PromoteOutcomeData, share::error::DomainError> {
         Ok(*self.promote_outcome.lock().unwrap())
     }
     async fn quarantine(
@@ -114,7 +114,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
         _generation: GenerationData,
         _scope: TransactionScopeData,
         _reason: QuarantineReason,
-    ) -> Result<QuarantineOutcomeData, StorageError> {
+    ) -> Result<QuarantineOutcomeData, share::error::DomainError> {
         self.quarantines
             .lock()
             .unwrap()
@@ -129,7 +129,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
         &self,
         key: &StorageKeyData,
         options: DeleteOptionsData,
-    ) -> Result<DeleteOutcomeData, StorageError> {
+    ) -> Result<DeleteOutcomeData, share::error::DomainError> {
         self.delete_options.lock().unwrap().push(options);
         let removed = self.values.lock().unwrap().remove(key).is_some();
         Ok(DeleteOutcomeData::new(removed, false, false))
@@ -137,7 +137,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
     async fn list_primary(
         &self,
         _namespace: storage::StorageNamespaceData,
-    ) -> Result<Vec<storage::StorageEntryData>, StorageError> {
+    ) -> Result<Vec<storage::StorageEntryData>, share::error::DomainError> {
         Ok(Vec::new())
     }
 }

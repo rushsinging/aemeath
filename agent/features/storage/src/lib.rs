@@ -7,7 +7,7 @@
 //! | 工厂 | `wire_file_system_blob`、`wire_file_system_dataset`（原 file_system_* 更名 wire_ 前缀类；返回 `Arc<dyn 端口>`） |
 //! | 角色和职能 | `AtomicBlobPort`（追加日志端口）、`AtomicDatasetPort`（原子集端口）、`SafeStorageRoot`/`SafeStorageDir`/`SafeOpenOptions`/`SafeStorageFileType`（安全文件系统句柄） |
 //! | 数据和生命周期 | 29 个 Data：标识 7（StorageKeyData/DatasetKeyData 同构但语义域不同——类型安全优先不合）、载荷 9（含 SafeStorageEntryData 泄漏补导出）、回执 10、选项 3（#1865 E：原自述 28 实数 29 已校正） |
-//! | Error | `StorageError`{kind,message}（事实形态，**判定保留不折叠**——memory/config 穷尽 match kind 的控制流依赖 + kind 为 storage 专有语义域）、`StorageErrorKind`（6 变体）、`CorruptTransactionError`（+`CorruptionReason`/`QuarantineDisposition` 载荷链）——Error 类不 Data 化 |
+//! | Error | 跨界统一 `share::error::DomainError`（#1865 C 折叠：`StorageError`/`StorageErrorKind` 降 pub(crate)，语义映射 InvalidKey→Invalid / UnsupportedDurability→Unavailable / 其余→Storage，`impl From<StorageError>` 为唯一折叠点）；`CorruptTransactionError`（+`CorruptionReason`/`QuarantineDisposition`）作为事务损坏载荷词汇保留 |
 //!
 //! #1865 收敛记录：A 恢复决策单点（`domain::blob_recovery` 为唯一策略表，adapter 只采集
 //! 证据并执行决策；JournalPhase 单点带 serde，TransactionDigest 删除）；B 死面清理
@@ -21,6 +21,9 @@
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod constants;
 pub(crate) use constants::LOG_TARGET;
+/// #1865 C：事实错误降 pub(crate)（折叠为 DomainError 后不再根导出），
+/// crate 内旧路径保持可用。
+pub(crate) use domain::{StorageError, StorageErrorKind};
 
 mod adapters;
 mod domain;
@@ -32,7 +35,7 @@ use std::sync::Arc;
 /// Composition wiring 唯一 blob 构造入口：concrete adapter 不进入稳定公开面。
 pub fn wire_file_system_blob(
     root: impl AsRef<std::path::Path>,
-) -> Result<Arc<dyn AtomicBlobPort>, StorageError> {
+) -> Result<Arc<dyn AtomicBlobPort>, share::error::DomainError> {
     log::debug!(target: crate::LOG_TARGET, "wire_file_system_blob init enter");
     match FileSystemBlobAdapter::new(root) {
         Ok(adapter) => {
@@ -41,7 +44,7 @@ pub fn wire_file_system_blob(
         }
         Err(error) => {
             log::error!(target: crate::LOG_TARGET, "wire_file_system_blob init failed");
-            Err(error)
+            Err(share::error::DomainError::from(error))
         }
     }
 }
@@ -49,7 +52,7 @@ pub fn wire_file_system_blob(
 /// Composition wiring 唯一 dataset 构造入口：concrete adapter 不进入稳定公开面。
 pub fn wire_file_system_dataset(
     root: impl AsRef<std::path::Path>,
-) -> Result<Arc<dyn AtomicDatasetPort>, StorageError> {
+) -> Result<Arc<dyn AtomicDatasetPort>, share::error::DomainError> {
     log::debug!(target: crate::LOG_TARGET, "wire_file_system_dataset init enter");
     match FileSystemDatasetAdapter::new(root) {
         Ok(adapter) => {
@@ -58,7 +61,7 @@ pub fn wire_file_system_dataset(
         }
         Err(error) => {
             log::error!(target: crate::LOG_TARGET, "wire_file_system_dataset init failed");
-            Err(error)
+            Err(share::error::DomainError::from(error))
         }
     }
 }
@@ -73,8 +76,8 @@ pub use domain::{
     DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData, DeleteOptionsData,
     DeleteOutcomeData, DurabilityData, GenerationData, PromoteOutcomeData, QuarantineDisposition,
     QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData, ReadOutcomeData,
-    SafePathSegmentData, StorageEntryData, StorageError, StorageErrorKind, StorageKeyData,
-    StorageNamespaceData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
+    SafePathSegmentData, StorageEntryData, StorageKeyData, StorageNamespaceData,
+    TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 pub use ports::{AtomicBlobPort, AtomicDatasetPort};
 

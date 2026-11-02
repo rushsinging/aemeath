@@ -494,7 +494,7 @@ impl BackgroundProcessRuntime {
         &self,
         blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
         session_id: String,
-    ) -> Result<(), storage::StorageError> {
+    ) -> Result<(), share::error::DomainError> {
         // 提前构造 key 验证 session id 合法（fail fast）。
         ledger_key(&session_id)?;
         let _ = self.persistence.set((blob, session_id));
@@ -502,14 +502,13 @@ impl BackgroundProcessRuntime {
     }
 
     /// 全量快照落盘（终态推进后调用；任务量小，原子写可接受）。
-    pub(crate) async fn persist_snapshot(&self) -> Result<(), storage::StorageError> {
+    pub(crate) async fn persist_snapshot(&self) -> Result<(), share::error::DomainError> {
         let Some((blob, session_id)) = self.persistence.get() else {
             return Ok(());
         };
         let key = ledger_key(session_id)?;
-        let bytes = serde_json::to_vec(&self.supervisor().snapshots()).map_err(|error| {
-            storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())
-        })?;
+        let bytes = serde_json::to_vec(&self.supervisor().snapshots())
+            .map_err(|error| share::error::DomainError::storage("storage", error.to_string()))?;
         blob.write_atomic(
             &key,
             &bytes,
@@ -525,7 +524,7 @@ impl BackgroundProcessRuntime {
         &self,
         blob: &std::sync::Arc<dyn storage::AtomicBlobPort>,
         session_id: &str,
-    ) -> Result<usize, storage::StorageError> {
+    ) -> Result<usize, share::error::DomainError> {
         let key = ledger_key(session_id)?;
         let bytes = match blob.read(&key, storage::GenerationData::Primary).await? {
             storage::ReadOutcomeData::Found(entry) => entry.bytes().to_vec(),
@@ -547,7 +546,7 @@ impl BackgroundProcessRuntime {
         };
         let records: Vec<crate::domain::background_process::BackgroundProcessRecord> =
             serde_json::from_slice(&bytes).map_err(|error| {
-                storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())
+                share::error::DomainError::storage("storage", error.to_string())
             })?;
         let restored = self.supervisor().restore_records(records);
         Ok(restored)
@@ -555,10 +554,10 @@ impl BackgroundProcessRuntime {
 }
 
 /// 账本 key：`background-process/<session-id>`。
-fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {
+fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, share::error::DomainError> {
     let segment: storage::SafePathSegmentData = session_id
         .parse()
-        .map_err(|error: storage::StorageError| error)?;
+        .map_err(|error: share::error::DomainError| error)?;
     storage::StorageKeyData::new(
         storage::StorageNamespaceData::BackgroundProcess,
         vec![segment],
@@ -566,10 +565,12 @@ fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::Stor
 }
 
 /// 旧账本 key（`background-task/<session-id>`，resume 读旧兜底）。
-fn legacy_ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {
+fn legacy_ledger_key(
+    session_id: &str,
+) -> Result<storage::StorageKeyData, share::error::DomainError> {
     let segment: storage::SafePathSegmentData = session_id
         .parse()
-        .map_err(|error: storage::StorageError| error)?;
+        .map_err(|error: share::error::DomainError| error)?;
     storage::StorageKeyData::new(
         storage::StorageNamespaceData::LegacyBackgroundTask,
         vec![segment],

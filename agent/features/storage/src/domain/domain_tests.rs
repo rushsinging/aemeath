@@ -36,7 +36,7 @@ fn storage_key_requires_at_least_one_segment() {
     let error = StorageKeyData::new(StorageNamespaceData::Session, Vec::new())
         .expect_err("empty keys must be rejected");
 
-    assert_eq!(error.kind(), &crate::domain::StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn dataset_key_with_empty_segments_is_rejected() {
     let error = DatasetKeyData::new(StorageNamespaceData::Memory, Vec::new())
         .expect_err("dataset keys with no segments must be rejected");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn dataset_manifest_with_duplicate_member_names_is_rejected() {
     ])
     .expect_err("duplicate member names must be rejected");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn incremental_dataset_rejects_duplicate_new_and_reused_member_names() {
     )
     .expect_err("one member cannot be both replaced and reused");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -318,7 +318,10 @@ fn incremental_dataset_removal_names_are_canonical_and_unique() {
         .expect("empty change set should be valid")
         .with_removed_members(vec![active.clone(), active])
         .expect_err("duplicate removal names must be rejected");
-    assert_eq!(duplicate_error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(
+        duplicate_error.category(),
+        share::error::ErrorCategory::Invalid
+    );
 }
 
 #[test]
@@ -341,7 +344,7 @@ fn incremental_dataset_rejects_reused_member_from_another_revision() {
     let error = DatasetChangeSetData::new(expected_revision, Vec::new(), vec![reused])
         .expect_err("a reused member must belong to the expected generation");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -362,7 +365,7 @@ fn incremental_dataset_rejects_member_named_as_removed() {
     .with_removed_members(vec![active])
     .expect_err("a target member cannot also be removed");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]

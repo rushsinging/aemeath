@@ -124,7 +124,7 @@ fn map_codec_open_error(error: MemoryOpenError) -> MemoryOpenerError {
     }
 }
 
-fn map_storage_open_error(error: storage_api::StorageError) -> MemoryOpenerError {
+fn map_storage_open_error(error: share::error::DomainError) -> MemoryOpenerError {
     match map_storage_error(&error) {
         MemoryStorageErrorKind::PermissionDenied => MemoryOpenerError::PermissionDenied,
         MemoryStorageErrorKind::CorruptTransaction => MemoryOpenerError::CorruptTransaction,
@@ -214,22 +214,18 @@ fn dataset_key(segment: &str) -> storage_api::DatasetKeyData {
         .expect("Memory dataset segment always forms a valid dataset key")
 }
 
-/// Anti-corruption mapping: Storage's published failures do not cross the
-/// Memory boundary.
-pub fn map_storage_error(error: &storage_api::StorageError) -> MemoryStorageErrorKind {
-    match error.kind() {
-        storage_api::StorageErrorKind::PermissionDenied => MemoryStorageErrorKind::PermissionDenied,
-        storage_api::StorageErrorKind::ConcurrentWrite => MemoryStorageErrorKind::ConcurrentWrite,
-        storage_api::StorageErrorKind::CorruptTransaction(_) => {
-            MemoryStorageErrorKind::CorruptTransaction
+/// Anti-corruption mapping（#1865 C）：storage 只发布语义三档
+/// （Storage/Invalid/Unavailable），Memory 不依赖其实现细节 kind。
+pub fn map_storage_error(error: &share::error::DomainError) -> MemoryStorageErrorKind {
+    match error.category() {
+        share::error::ErrorCategory::Invalid => MemoryStorageErrorKind::Serialization,
+        share::error::ErrorCategory::Storage | share::error::ErrorCategory::Unavailable => {
+            MemoryStorageErrorKind::Io
         }
-        storage_api::StorageErrorKind::InvalidKey => MemoryStorageErrorKind::Serialization,
-        storage_api::StorageErrorKind::Io
-        | storage_api::StorageErrorKind::UnsupportedDurability => MemoryStorageErrorKind::Io,
     }
 }
 
-fn storage_error(error: storage_api::StorageError) -> MemoryError {
+fn storage_error(error: share::error::DomainError) -> MemoryError {
     MemoryError::Storage {
         kind: map_storage_error(&error),
     }

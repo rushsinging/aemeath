@@ -69,12 +69,12 @@ impl StorageKeyData {
     pub fn new(
         namespace: StorageNamespaceData,
         segments: Vec<SafePathSegmentData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         if segments.is_empty() {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "存储键至少需要一个路径段",
-            ));
+            )));
         }
         Ok(Self {
             namespace,
@@ -101,8 +101,10 @@ impl StorageKeyData {
     }
 }
 
+/// 语义映射（#1865 C）：InvalidKey→Invalid（调用方可修正）、UnsupportedDurability
+/// →Unavailable（能力不可用）、其余→Storage（底层存储失败）。
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StorageErrorKind {
+pub(crate) enum StorageErrorKind {
     InvalidKey,
     Io,
     PermissionDenied,
@@ -112,7 +114,7 @@ pub enum StorageErrorKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StorageError {
+pub(crate) struct StorageError {
     kind: StorageErrorKind,
     message: String,
 }
@@ -130,6 +132,21 @@ impl StorageError {
     }
 }
 
+impl StorageError {
+    /// 语义分类（DomainError 折叠的单一映射点）。
+    pub(crate) fn category(&self) -> share::error::ErrorCategory {
+        use share::error::ErrorCategory;
+        match self.kind {
+            StorageErrorKind::InvalidKey => ErrorCategory::Invalid,
+            StorageErrorKind::UnsupportedDurability => ErrorCategory::Unavailable,
+            StorageErrorKind::Io
+            | StorageErrorKind::PermissionDenied
+            | StorageErrorKind::ConcurrentWrite
+            | StorageErrorKind::CorruptTransaction(_) => ErrorCategory::Storage,
+        }
+    }
+}
+
 impl fmt::Display for StorageError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
@@ -137,3 +154,12 @@ impl fmt::Display for StorageError {
 }
 
 impl Error for StorageError {}
+
+/// 边界折叠（#1865 C）：storage 内部事实错误 → 全仓唯一跨界错误类型。
+/// 消费方只按语义三档做控制流（NEVER 依赖 storage 的实现细节 kind）。
+impl From<StorageError> for share::error::DomainError {
+    fn from(error: StorageError) -> Self {
+        share::error::DomainError::from_parts("storage", error.category(), error.message.clone())
+            .with_source(std::sync::Arc::new(error))
+    }
+}

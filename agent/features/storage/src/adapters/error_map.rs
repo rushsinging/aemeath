@@ -5,10 +5,9 @@
 //! 文案与严格度漂移。收敛于此：kind 判定（PermissionDenied → Io）与无跟随
 //! 校验逻辑只维护一份，adapter 侧只保留业务上下文。
 
+use crate::domain::{StorageError, StorageErrorKind};
 use cap_std::fs::Dir;
 use std::path::Path;
-
-use crate::{StorageError, StorageErrorKind};
 
 /// 通用 I/O 错误映射：权限拒绝单独成类，其余归 Io。
 pub(super) fn map_io(error: std::io::Error) -> StorageError {

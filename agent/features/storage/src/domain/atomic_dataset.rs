@@ -30,12 +30,12 @@ impl DatasetKeyData {
     pub fn new(
         namespace: StorageNamespaceData,
         segments: Vec<SafePathSegmentData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         if segments.is_empty() {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "数据集键至少需要一个路径段",
-            ));
+            )));
         }
 
         Ok(Self {
@@ -147,7 +147,7 @@ impl DatasetChangeSetData {
         expected_revision: DatasetRevisionData,
         mut new_members: Vec<DatasetMemberChangeData>,
         mut reused_members: Vec<DatasetMemberReferenceData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         new_members.sort_by(|left, right| left.member().name().cmp(right.member().name()));
         reused_members.sort_by(|left, right| left.name.cmp(&right.name));
         let mut names = new_members
@@ -157,16 +157,16 @@ impl DatasetChangeSetData {
             .collect::<Vec<_>>();
         names.sort();
         if names.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(duplicate_member_error());
+            return Err(share::error::DomainError::from(duplicate_member_error()));
         }
         if reused_members
             .iter()
             .any(|member| member.source_revision != expected_revision)
         {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "复用成员必须来自期望的数据集修订号",
-            ));
+            )));
         }
         Ok(Self {
             expected_revision,
@@ -179,7 +179,7 @@ impl DatasetChangeSetData {
     pub fn with_removed_members(
         mut self,
         mut removed_members: Vec<SafePathSegmentData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         removed_members.sort();
         reject_duplicate_names(&removed_members)?;
         let target_names = self
@@ -192,10 +192,10 @@ impl DatasetChangeSetData {
             .iter()
             .any(|name| target_names.contains(name))
         {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "同一数据集成员不能同时保留和删除",
-            ));
+            )));
         }
         self.removed_members = removed_members;
         Ok(self)

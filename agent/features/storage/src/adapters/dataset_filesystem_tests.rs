@@ -5,7 +5,7 @@ use crate::domain::{
     revision_member_digest, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
     DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
     DatasetReadOutcomeData, DatasetRevisionData, DurabilityData, SafePathSegmentData,
-    StorageErrorKind, StorageNamespaceData, WriteOptionsData,
+    StorageNamespaceData, WriteOptionsData,
 };
 use crate::ports::AtomicDatasetPort;
 use crate::test_log;
@@ -519,8 +519,8 @@ async fn incremental_commit_rejects_reused_member_when_primary_bytes_do_not_matc
         .expect_err("mismatched reuse evidence must be rejected");
 
     assert!(matches!(
-        error.kind(),
-        StorageErrorKind::CorruptTransaction(_)
+        error.category(),
+        share::error::ErrorCategory::Storage
     ));
     let requested = [SafePathSegmentData::from_str("active").expect("safe member name")];
     let DatasetReadOutcomeData::Found(read) = adapter
@@ -578,8 +578,8 @@ async fn incremental_commit_rejects_reused_member_missing_from_primary_manifest(
         .expect_err("missing source member must be rejected");
 
     assert!(matches!(
-        error.kind(),
-        StorageErrorKind::CorruptTransaction(_)
+        error.category(),
+        share::error::ErrorCategory::Storage
     ));
 
     let _ = std::fs::remove_dir_all(&root);

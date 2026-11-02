@@ -253,7 +253,10 @@ impl FileSystemBlobAdapter {
             }
             if metadata.file_type().is_file() {
                 prefix_segments.push(segment);
-                let key = StorageKeyData::new(namespace, prefix_segments.clone())?;
+                let key =
+                    StorageKeyData::new(namespace, prefix_segments.clone()).map_err(|error| {
+                        StorageError::new(StorageErrorKind::InvalidKey, error.message())
+                    })?;
                 prefix_segments.pop();
                 entries.push(StorageEntryData::new(key, metadata.len() as usize));
             } else {
@@ -561,11 +564,8 @@ impl FileSystemBlobAdapter {
             }
         }
     }
-}
 
-#[async_trait]
-impl AtomicBlobPort for FileSystemBlobAdapter {
-    async fn read(
+    async fn read_inner(
         &self,
         key: &StorageKeyData,
         generation: GenerationData,
@@ -594,7 +594,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         Ok(ReadOutcomeData::Found(BlobReadData::new(generation, bytes)))
     }
 
-    async fn write_atomic(
+    async fn write_atomic_inner(
         &self,
         key: &StorageKeyData,
         bytes: &[u8],
@@ -603,7 +603,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         self.write_sync(key, bytes, options)
     }
 
-    async fn promote_previous(
+    async fn promote_previous_inner(
         &self,
         key: &StorageKeyData,
     ) -> Result<PromoteOutcomeData, StorageError> {
@@ -652,7 +652,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         )))
     }
 
-    async fn quarantine(
+    async fn quarantine_inner(
         &self,
         key: &StorageKeyData,
         generation: GenerationData,
@@ -680,7 +680,8 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
             Ok(_) => {}
         }
 
-        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())?;
+        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())
+            .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.message()))?;
         let target = quarantine_name(&primary_name, id.as_str());
         parent.rename(&source, &parent, target).map_err(map_io)?;
         Ok(QuarantineOutcomeData::Moved(QuarantineReceiptData::new(
@@ -688,7 +689,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         )))
     }
 
-    async fn delete_all_generations(
+    async fn delete_all_generations_inner(
         &self,
         key: &StorageKeyData,
         options: DeleteOptionsData,
@@ -716,11 +717,75 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         ))
     }
 
-    async fn list_primary(
+    async fn list_primary_inner(
         &self,
         namespace: StorageNamespaceData,
     ) -> Result<Vec<StorageEntryData>, StorageError> {
         self.list_primary_sync(namespace)
+    }
+}
+
+#[async_trait]
+impl AtomicBlobPort for FileSystemBlobAdapter {
+    async fn read(
+        &self,
+        key: &StorageKeyData,
+        generation: GenerationData,
+    ) -> Result<ReadOutcomeData, share::error::DomainError> {
+        self.read_inner(key, generation)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn write_atomic(
+        &self,
+        key: &StorageKeyData,
+        bytes: &[u8],
+        options: WriteOptionsData,
+    ) -> Result<WriteReceiptData, share::error::DomainError> {
+        self.write_atomic_inner(key, bytes, options)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn promote_previous(
+        &self,
+        key: &StorageKeyData,
+    ) -> Result<PromoteOutcomeData, share::error::DomainError> {
+        self.promote_previous_inner(key)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn quarantine(
+        &self,
+        key: &StorageKeyData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
+        reason: QuarantineReason,
+    ) -> Result<QuarantineOutcomeData, share::error::DomainError> {
+        self.quarantine_inner(key, generation, scope, reason)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn delete_all_generations(
+        &self,
+        key: &StorageKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, share::error::DomainError> {
+        self.delete_all_generations_inner(key, options)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn list_primary(
+        &self,
+        namespace: StorageNamespaceData,
+    ) -> Result<Vec<StorageEntryData>, share::error::DomainError> {
+        self.list_primary_inner(namespace)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 }
 

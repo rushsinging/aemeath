@@ -13,7 +13,7 @@ impl SafePathSegmentData {
 }
 
 impl FromStr for SafePathSegmentData {
-    type Err = StorageError;
+    type Err = share::error::DomainError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let invalid = value.is_empty()
@@ -24,10 +24,10 @@ impl FromStr for SafePathSegmentData {
             || value.contains('\\')
             || value.contains('\0');
         if invalid {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "路径段不安全",
-            ));
+            )));
         }
         Ok(Self(value.to_owned()))
     }

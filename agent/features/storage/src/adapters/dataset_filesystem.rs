@@ -214,7 +214,11 @@ impl FileSystemDatasetAdapter {
                 .map_err(map_io)?;
             segments.push(name);
             if proto::exists(&child, Path::new(PRIMARY_DIR).join(MANIFEST_FILE).as_path())? {
-                result.push(DatasetKeyData::new(namespace, segments.clone())?);
+                result.push(
+                    DatasetKeyData::new(namespace, segments.clone()).map_err(|error| {
+                        StorageError::new(StorageErrorKind::InvalidKey, error.message())
+                    })?,
+                );
             }
             self.collect_dataset_keys(&child, namespace, segments, result)?;
             segments.pop();
@@ -1063,7 +1067,10 @@ impl FileSystemDatasetAdapter {
         let member_names = revision_evidence
             .iter()
             .map(|(name, _, _)| SafePathSegmentData::from_str(name))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error: share::error::DomainError| {
+                StorageError::new(StorageErrorKind::InvalidKey, error.message())
+            })?;
         let member_evidence = revision_evidence
             .iter()
             .zip(member_names)
@@ -1303,8 +1310,9 @@ impl FileSystemDatasetAdapter {
             .filter(|name| !target_names.contains(*name))
             .cloned()
             .collect();
-        let changes = DatasetChangeSetData::new(expected.clone(), replacements, Vec::new())?
-            .with_removed_members(removed_members)?;
+        let changes = DatasetChangeSetData::new(expected.clone(), replacements, Vec::new())
+            .and_then(|changes| changes.with_removed_members(removed_members))
+            .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.message()))?;
         self.commit_incremental_sync(dir, &changes)
     }
 
@@ -1318,7 +1326,9 @@ impl FileSystemDatasetAdapter {
     ) -> Result<(), StorageError> {
         let mut members = Vec::with_capacity(record.成员集合.len());
         for name in &record.成员集合 {
-            let segment = SafePathSegmentData::from_str(name)?;
+            let segment = SafePathSegmentData::from_str(name).map_err(|error| {
+                StorageError::new(StorageErrorKind::InvalidKey, error.message())
+            })?;
             let member_record = record
                 .成员证据
                 .iter()
@@ -1538,7 +1548,8 @@ impl FileSystemDatasetAdapter {
             ));
         }
         reject_symlink(dir, &generation_dir)?;
-        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())?;
+        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())
+            .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.message()))?;
         let target = PathBuf::from(format!(
             "{}.quarantine.{}",
             generation_dir.to_string_lossy(),
@@ -1549,6 +1560,87 @@ impl FileSystemDatasetAdapter {
         Ok(QuarantineOutcomeData::Moved(QuarantineReceiptData::new(
             id, generation, scope, reason,
         )))
+    }
+
+    async fn list_datasets_inner(
+        &self,
+        namespace: crate::domain::StorageNamespaceData,
+    ) -> Result<Vec<DatasetKeyData>, StorageError> {
+        self.list_datasets_sync(namespace)
+    }
+
+    async fn delete_all_generations_inner(
+        &self,
+        dataset: &DatasetKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, StorageError> {
+        self.delete_all_generations_sync(dataset, options)
+    }
+
+    async fn read_manifest_inner(
+        &self,
+        dataset: &DatasetKeyData,
+    ) -> Result<DatasetManifestData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.current_manifest(&dir)
+    }
+
+    async fn read_consistent_inner(
+        &self,
+        dataset: &DatasetKeyData,
+        members: &[SafePathSegmentData],
+    ) -> Result<DatasetReadOutcomeData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.read_generation(&dir, PRIMARY_DIR, members)
+    }
+
+    async fn read_previous_inner(
+        &self,
+        dataset: &DatasetKeyData,
+        members: &[SafePathSegmentData],
+    ) -> Result<DatasetReadOutcomeData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.read_generation(&dir, PREVIOUS_DIR, members)
+    }
+
+    async fn commit_atomic_inner(
+        &self,
+        dataset: &DatasetKeyData,
+        expected: &DatasetRevisionData,
+        members: &[DatasetMemberData],
+        _options: WriteOptionsData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.commit_sync(&dir, expected, members)
+    }
+
+    async fn commit_incremental_inner(
+        &self,
+        dataset: &DatasetKeyData,
+        changes: &DatasetChangeSetData,
+        _options: WriteOptionsData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.commit_incremental_sync(&dir, changes)
+    }
+
+    async fn promote_previous_inner(
+        &self,
+        dataset: &DatasetKeyData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.promote_sync(&dir)
+    }
+
+    async fn quarantine_inner(
+        &self,
+        dataset: &DatasetKeyData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
+        reason: QuarantineReason,
+    ) -> Result<QuarantineOutcomeData, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.quarantine_sync(&dir, generation, scope, reason)
     }
 }
 
@@ -1641,7 +1733,9 @@ fn manifest_from_record(
             .成员集合
             .iter()
             .map(|name| {
-                let safe_name = SafePathSegmentData::from_str(name)?;
+                let safe_name = SafePathSegmentData::from_str(name).map_err(|error| {
+                    StorageError::new(StorageErrorKind::InvalidKey, error.message())
+                })?;
                 let bytes = proto::read_file(dir, &blobs.join(name))?.ok_or_else(|| {
                     StorageError::new(StorageErrorKind::Io, "数据集 manifest 引用的成员不存在")
                 })?;
@@ -1660,7 +1754,9 @@ fn manifest_from_record(
             .map(|member| {
                 Ok(DatasetMemberReferenceData::from_manifest_member(
                     revision.clone(),
-                    SafePathSegmentData::from_str(&member.名称)?,
+                    SafePathSegmentData::from_str(&member.名称).map_err(|error| {
+                        StorageError::new(StorageErrorKind::InvalidKey, error.message())
+                    })?,
                     member.字节数,
                     proto::decode_revision(&member.修订摘要)?,
                 ))
@@ -1672,7 +1768,10 @@ fn manifest_from_record(
         .成员集合
         .iter()
         .map(|name| SafePathSegmentData::from_str(name))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error: share::error::DomainError| {
+            StorageError::new(StorageErrorKind::InvalidKey, error.message())
+        })?;
     if manifest.members() != persisted_names {
         return Err(StorageError::new(
             StorageErrorKind::Io,
@@ -1687,42 +1786,49 @@ impl AtomicDatasetPort for FileSystemDatasetAdapter {
     async fn list_datasets(
         &self,
         namespace: crate::domain::StorageNamespaceData,
-    ) -> Result<Vec<DatasetKeyData>, StorageError> {
-        self.list_datasets_sync(namespace)
+    ) -> Result<Vec<DatasetKeyData>, share::error::DomainError> {
+        self.list_datasets_inner(namespace)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn delete_all_generations(
         &self,
         dataset: &DatasetKeyData,
         options: DeleteOptionsData,
-    ) -> Result<DeleteOutcomeData, StorageError> {
-        self.delete_all_generations_sync(dataset, options)
+    ) -> Result<DeleteOutcomeData, share::error::DomainError> {
+        self.delete_all_generations_inner(dataset, options)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn read_manifest(
         &self,
         dataset: &DatasetKeyData,
-    ) -> Result<DatasetManifestData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.current_manifest(&dir)
+    ) -> Result<DatasetManifestData, share::error::DomainError> {
+        self.read_manifest_inner(dataset)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn read_consistent(
         &self,
         dataset: &DatasetKeyData,
         members: &[SafePathSegmentData],
-    ) -> Result<DatasetReadOutcomeData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.read_generation(&dir, PRIMARY_DIR, members)
+    ) -> Result<DatasetReadOutcomeData, share::error::DomainError> {
+        self.read_consistent_inner(dataset, members)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn read_previous(
         &self,
         dataset: &DatasetKeyData,
         members: &[SafePathSegmentData],
-    ) -> Result<DatasetReadOutcomeData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.read_generation(&dir, PREVIOUS_DIR, members)
+    ) -> Result<DatasetReadOutcomeData, share::error::DomainError> {
+        self.read_previous_inner(dataset, members)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn commit_atomic(
@@ -1731,9 +1837,10 @@ impl AtomicDatasetPort for FileSystemDatasetAdapter {
         expected: &DatasetRevisionData,
         members: &[DatasetMemberData],
         _options: WriteOptionsData,
-    ) -> Result<DatasetCommitReceiptData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.commit_sync(&dir, expected, members)
+    ) -> Result<DatasetCommitReceiptData, share::error::DomainError> {
+        self.commit_atomic_inner(dataset, expected, members, _options)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn commit_incremental(
@@ -1741,17 +1848,19 @@ impl AtomicDatasetPort for FileSystemDatasetAdapter {
         dataset: &DatasetKeyData,
         changes: &DatasetChangeSetData,
         _options: WriteOptionsData,
-    ) -> Result<DatasetCommitReceiptData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.commit_incremental_sync(&dir, changes)
+    ) -> Result<DatasetCommitReceiptData, share::error::DomainError> {
+        self.commit_incremental_inner(dataset, changes, _options)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn promote_previous(
         &self,
         dataset: &DatasetKeyData,
-    ) -> Result<DatasetCommitReceiptData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.promote_sync(&dir)
+    ) -> Result<DatasetCommitReceiptData, share::error::DomainError> {
+        self.promote_previous_inner(dataset)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 
     async fn quarantine(
@@ -1760,9 +1869,10 @@ impl AtomicDatasetPort for FileSystemDatasetAdapter {
         generation: GenerationData,
         scope: TransactionScopeData,
         reason: QuarantineReason,
-    ) -> Result<QuarantineOutcomeData, StorageError> {
-        let (dir, _lock) = self.locked(dataset)?;
-        self.quarantine_sync(&dir, generation, scope, reason)
+    ) -> Result<QuarantineOutcomeData, share::error::DomainError> {
+        self.quarantine_inner(dataset, generation, scope, reason)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 }
 

@@ -3,8 +3,8 @@ use std::os::unix::fs::symlink;
 use std::str::FromStr;
 use storage::{
     AtomicBlobPort, DeleteOptionsData, DurabilityData, GenerationData, PromoteOutcomeData,
-    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, SafePathSegmentData,
-    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
+    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, SafePathSegmentData, StorageKeyData,
+    StorageNamespaceData, TransactionScopeData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -169,7 +169,7 @@ async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
         .list_primary(StorageNamespaceData::Session)
         .await
         .expect_err("symlink entry must fail closed");
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     std::fs::remove_file(root.join("session/unsafe")).expect("remove symlink");
 
     let entries = adapter
@@ -372,7 +372,7 @@ async fn filesystem_adapter_rejects_symlink_target_without_touching_outside_file
         .await
         .expect_err("symlink target must fail closed");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     assert_eq!(std::fs::read(outside_file).unwrap(), b"outside");
 
     std::fs::remove_dir_all(root).unwrap();

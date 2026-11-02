@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use storage::{
     AtomicDatasetPort, DatasetKeyData, DatasetMemberData, DatasetReadOutcomeData, GenerationData,
-    SafePathSegmentData, StorageError,
+    SafePathSegmentData,
 };
 
 use crate::adapters::{
@@ -670,6 +670,6 @@ fn safe_member_name(name: &str) -> Result<SafePathSegmentData, SessionGeneration
     SafePathSegmentData::from_str(name).map_err(storage_error)
 }
 
-fn storage_error(error: StorageError) -> SessionGenerationWireError {
+fn storage_error(error: share::error::DomainError) -> SessionGenerationWireError {
     SessionGenerationWireError::InvalidManifest(error.to_string())
 }

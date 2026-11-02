@@ -1942,8 +1942,6 @@
         "SafeStorageFileType",
         "SafeStorageRoot",
         "StorageEntryData",
-        "StorageError",
-        "StorageErrorKind",
         "StorageKeyData",
         "StorageNamespaceData",
         "TransactionScopeData",
