@@ -2223,6 +2223,7 @@
         "delivery_logging.rs",
         "delivery_logging_tests.rs",
         "harness.rs",
+        "harness_tests.rs",
         "lib.rs",
         "lib_tests.rs",
         "memory.rs",

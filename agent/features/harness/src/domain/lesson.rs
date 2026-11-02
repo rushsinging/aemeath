@@ -12,16 +12,22 @@ use std::path::{Path, PathBuf};
 // SignalKind 统一定义于 domain::evidence（#2048 扩展六类，
 // CycleObservation 保留为兜底信号；旧 ManualContext 迁移语义由
 // CycleObservation 覆盖——手动触发上下文即周期观察）。
-pub use crate::domain::evidence::SignalKind;
+pub use crate::domain::evidence::{EvidenceSourceRef, SignalKind};
 
 /// 证据绑定：每条被采纳的 lesson MUST 至少携带一条。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceBinding {
-    /// 来源标识（周期 id / run id / 触发请求 id）。
+    /// 来源标识（历史字段：旧条目为 cycle id；新条目建议同时携带 source）。
     pub run_ref: String,
     pub signal: SignalKind,
     /// 行为摘录（有界）。
     pub excerpt: String,
+    /// 结构化 signal id（旧条目缺省为空）。
+    #[serde(default)]
+    pub signal_id: String,
+    /// 可回读 session 的来源（旧条目缺省为 None）。
+    #[serde(default)]
+    pub source: Option<EvidenceSourceRef>,
 }
 
 /// 经验条目状态。

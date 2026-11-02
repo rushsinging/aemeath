@@ -347,10 +347,10 @@ pub struct RsiConfigPatch {
     pub chunk_max_components: Option<usize>,
     #[serde(default)]
     pub evidence_initial_window_days: Option<u64>,
-    #[serde(default)]
-    pub evidence_max_sessions_per_cycle: Option<usize>,
-    #[serde(default)]
-    pub evidence_block_sessions: Option<usize>,
+    #[serde(default, alias = "evidence_max_sessions_per_cycle")]
+    pub evidence_max_runs_per_cycle: Option<usize>,
+    #[serde(default, alias = "evidence_block_sessions")]
+    pub evidence_block_runs: Option<usize>,
     #[serde(default)]
     pub execution_mode: Option<crate::config::RsiExecutionMode>,
 }
@@ -1001,11 +1001,11 @@ pub(crate) fn apply_harness_patch(
         if let Some(v) = rsi.evidence_initial_window_days {
             base.rsi.evidence_initial_window_days = v;
         }
-        if let Some(v) = rsi.evidence_max_sessions_per_cycle {
-            base.rsi.evidence_max_sessions_per_cycle = v;
+        if let Some(v) = rsi.evidence_max_runs_per_cycle {
+            base.rsi.evidence_max_runs_per_cycle = v;
         }
-        if let Some(v) = rsi.evidence_block_sessions {
-            base.rsi.evidence_block_sessions = v;
+        if let Some(v) = rsi.evidence_block_runs {
+            base.rsi.evidence_block_runs = v;
         }
         if let Some(v) = rsi.execution_mode {
             base.rsi.execution_mode = v;

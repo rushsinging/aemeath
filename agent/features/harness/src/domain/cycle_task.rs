@@ -5,6 +5,7 @@ use crate::domain::errors::HarnessError;
 use crate::domain::improvement::{run_improvement_cycle, RsiLlmPort};
 use crate::domain::lesson::LessonStore;
 use crate::domain::task::{CycleOutcome, RsiTask};
+use crate::domain::virtual_registry::VirtualComponentRegistry;
 use async_trait::async_trait;
 use share::config::RsiConfig;
 use std::sync::Arc;
@@ -94,13 +95,24 @@ impl HarnessRsiCycleTask {
 #[async_trait]
 impl RsiTask for HarnessRsiCycleTask {
     async fn run_cycle(&mut self) -> Result<CycleOutcome, HarnessError> {
-        let registry = &mut **self.registry.lock().await;
+        let actual_registry: &mut dyn ComponentRegistry = &mut **self.registry.lock().await;
+        // dry-run 使用内存 overlay：块间能看见虚拟叠加终态，Compose 也基于
+        // 同一虚拟终态仲裁；底层真实 registry NEVER 被写入。
+        let mut virtual_registry = self
+            .dry_run
+            .then(|| VirtualComponentRegistry::new(actual_registry));
+        let registry: &mut dyn ComponentRegistry =
+            if let Some(virtual_overlay) = virtual_registry.as_mut() {
+                virtual_overlay
+            } else {
+                actual_registry
+            };
         // 数据源块驱动（#2049）：每块独立「证据 → 提案 → 采纳 → lesson」，
         // 块成功（周期 Ok——作废也是明确处理结论）才推进游标。
         let params = crate::domain::stream::StreamPlanParams {
             initial_window_days: self.config.evidence_initial_window_days,
-            max_runs_per_cycle: self.config.evidence_max_sessions_per_cycle.max(1),
-            block_run_limit: self.config.evidence_block_sessions.max(1),
+            max_runs_per_cycle: self.config.evidence_max_runs_per_cycle.max(1),
+            block_run_limit: self.config.evidence_block_runs.max(1),
             component_tree_fingerprint: String::new(),
         };
         let blocks = self.stream_port.plan(&params);
@@ -249,6 +261,113 @@ impl RsiTask for HarnessRsiCycleTask {
                 adopted: Vec::new(),
             });
         }
+
+        // #2156：TwoPhase——宿主路由候选 → 诊断选择固定组件 → 执行只写正文。
+        if self.config.execution_mode == share::config::RsiExecutionMode::TwoPhase {
+            let active_lessons_before_cycle = match self.lesson_store.load_active() {
+                Ok(lessons) => lessons,
+                Err(error) => {
+                    log::warn!(target: crate::LOG_TARGET, "TwoPhase Active lesson 读取失败（按空经验继续）：{error}");
+                    Vec::new()
+                }
+            };
+            let mut merged_evidence = crate::domain::evidence::EvidenceBundle::default();
+            for evidence in &block_evidences {
+                merged_evidence
+                    .signals
+                    .extend(evidence.signals.iter().cloned());
+                merged_evidence.sessions_covered += evidence.sessions_covered;
+            }
+            let sessions_runs: Vec<String> = blocks
+                .iter()
+                .flat_map(|block| &block.runs)
+                .map(|run| format!("{}#{}", run.session_key, run.run_id))
+                .collect();
+            if let Some(recorder) = &self.recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::BlockEvidence {
+                    block_index: 0,
+                    sessions_runs,
+                    signals: merged_evidence
+                        .signals
+                        .iter()
+                        .map(|signal| signal.signal_id.clone())
+                        .collect(),
+                });
+            }
+            if self.dry_run {
+                report_lines.push(format!(
+                    "—— checkpoint：起始 {}（dry-run NEVER 推进）",
+                    cursor_start.as_deref().unwrap_or("无游标（首次周期）")
+                ));
+                report_lines.push(format!(
+                    "—— 数据源分块：{} 块（TwoPhase 汇总路由）",
+                    blocks.len()
+                ));
+            }
+            let mut history = load_signal_history(&self.history_path);
+            let run = crate::domain::improvement::run_two_phase_cycle(
+                registry,
+                self.llm.as_ref(),
+                &self.lesson_store,
+                &self.config,
+                merged_evidence,
+                self.stream_port.as_ref(),
+                self.dry_run,
+                &mut preview_lines,
+                self.recorder.as_deref(),
+                self.version_store.as_deref(),
+                &mut history,
+                &cycle_id,
+            )
+            .await?;
+            if !self.dry_run {
+                save_signal_history(&self.history_path, &history);
+            }
+            let mut outcome = run.outcome;
+            if !outcome.adopted.is_empty() {
+                if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
+                    registry,
+                    self.llm.as_ref(),
+                    &self.lesson_store,
+                    &outcome.adopted,
+                    &active_lessons_before_cycle,
+                    self.stream_port.as_ref(),
+                    self.dry_run,
+                    &mut preview_lines,
+                    self.recorder.as_deref(),
+                    self.version_store.as_deref(),
+                )
+                .await
+                {
+                    outcome.adopted.extend(compose_outcome.adopted);
+                    outcome.summary = format!("{} | {}", outcome.summary, compose_outcome.summary);
+                }
+            }
+            if self.dry_run {
+                report_lines.push(format!("    TwoPhase：{}", outcome.summary));
+                outcome.summary.push_str("\n（dry-run 报告）\n");
+                outcome.summary.push_str(&report_lines.join("\n"));
+                if !preview_lines.is_empty() {
+                    outcome
+                        .summary
+                        .push_str("\n—— 组件落盘结果（预演，零写入）：\n");
+                    outcome.summary.push_str(&preview_lines.join("\n"));
+                }
+            }
+            if !self.dry_run {
+                let fingerprint = crate::domain::stream_port::component_tree_fingerprint(registry);
+                for block in &blocks {
+                    self.stream_port.advance(block, fingerprint.clone());
+                }
+            }
+            if let Some(recorder) = &self.recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::CycleEnd {
+                    summary: outcome.summary.chars().take(200).collect(),
+                    duration_ms: cycle_started.elapsed().as_millis() as u64,
+                });
+            }
+            return Ok(outcome);
+        }
         if self.dry_run {
             report_lines.push(format!(
                 "—— checkpoint：起始 {}（dry-run NEVER 推进）",
@@ -256,6 +375,15 @@ impl RsiTask for HarnessRsiCycleTask {
             ));
             report_lines.push(format!("—— 数据源分块：{} 块", blocks.len()));
         }
+        // Compose 必须对照采纳前的历史经验：Block 采纳会退役旧 lesson 并追加
+        // 本周期自身 lesson，采纳后再读取会同时丢历史并制造 proposal-self 候选。
+        let active_lessons_before_cycle = match self.lesson_store.load_active() {
+            Ok(lessons) => lessons,
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "Compose 历史 Active lesson 读取失败（按空经验继续）：{error}");
+                Vec::new()
+            }
+        };
         for (block_index, block) in blocks.iter().enumerate() {
             let evidence = block_evidences[block_index].clone();
             if let Some(recorder) = &self.recorder {
@@ -328,6 +456,8 @@ impl RsiTask for HarnessRsiCycleTask {
                 self.llm.as_ref(),
                 &self.lesson_store,
                 &all_adoptions,
+                &active_lessons_before_cycle,
+                self.stream_port.as_ref(),
                 self.dry_run,
                 &mut preview_lines,
                 self.recorder.as_deref(),
@@ -336,7 +466,7 @@ impl RsiTask for HarnessRsiCycleTask {
             .await
             {
                 if self.dry_run {
-                    report_lines.push(format!("    Compose：{}", compose_outcome.summary));
+                    report_lines.push(format!("    {}", compose_outcome.summary));
                 }
                 summary_parts.push(compose_outcome.summary);
             }
