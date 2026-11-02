@@ -1612,6 +1612,7 @@
         "CanonicalSession",
         "CompactBehavior",
         "CompactLlmBinding",
+        "CompactMetricsData",
         "CompactOutcome",
         "CompactProgressFn",
         "CompactRequestData",

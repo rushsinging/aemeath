@@ -282,6 +282,17 @@ fn project_to_llm_binding(
             None
         }
     });
+    // 压缩耗时与模型强相关：解析结果（含来源与窗口）落日志，否则慢的时候
+    // 无法判断用的是配置模型还是会话模型（#2132）。
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[compact] 目标模型解析：{}/{} origin={:?} compact_window={window:?} max_output={} reasoning={:?} concurrency={max_concurrency}",
+        binding.model.provider,
+        binding.model.model,
+        target.origin(),
+        compact_output_budget.min(binding.max_tokens.max(1)),
+        reasoning,
+    );
     context::CompactLlmBinding {
         invoker: std::sync::Arc::clone(&binding.provider),
         model: binding.model.clone(),

@@ -3023,6 +3023,18 @@ fn token_cap_budget_inside_candidate_count_keeps_count_semantics() {
 }
 
 #[test]
+fn percentile_ms_covers_empty_single_and_out_of_range_quantiles() {
+    assert_eq!(percentile_ms(&[], 0.5), 0);
+    assert_eq!(percentile_ms(&[42], 0.0), 42);
+    assert_eq!(percentile_ms(&[42], 0.95), 42);
+    let sorted = [10, 20, 30, 40, 50];
+    assert_eq!(percentile_ms(&sorted, 0.0), 10);
+    assert_eq!(percentile_ms(&sorted, 0.5), 30);
+    assert_eq!(percentile_ms(&sorted, 0.95), 50);
+    assert_eq!(percentile_ms(&sorted, 1.0), 50);
+}
+
+#[test]
 fn compact_invoke_request_carries_binding_model() {
     // 回归：请求 model 曾传空串，provider 侧以
     // `invocation model must not be empty` 在发请求前拒绝，导致每个 chunk

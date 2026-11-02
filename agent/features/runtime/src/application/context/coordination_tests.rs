@@ -248,6 +248,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
             quality: CompactSummaryQuality::LocalOnly,
+            metrics: Box::default(),
         }),
         &usage,
         &mut window,

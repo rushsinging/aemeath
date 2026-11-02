@@ -401,6 +401,7 @@ impl ContextCompactPort for StubContextService {
                 recent_messages: request.source.pending_messages.clone(),
                 source_revision: SessionRevision::new(1),
                 quality: crate::ports::context_port::CompactSummaryQuality::LocalOnly,
+                metrics: Box::default(),
             },
         ))
     }

@@ -186,6 +186,7 @@ struct GeneratedCompact {
     summary: String,
     recent_messages: Vec<share::message::Message>,
     quality: crate::domain::CompactSummaryQuality,
+    metrics: crate::domain::compact::CompactMetricsData,
 }
 
 struct AutoCompactAttemptPermit {
@@ -506,6 +507,7 @@ impl CanonicalSessionRepository {
             summary,
             recent_messages: compacted.recent_messages,
             quality: compacted.quality,
+            metrics: compacted.metrics,
         }))
     }
 
@@ -563,6 +565,7 @@ impl CanonicalSessionRepository {
             recent_messages: generated.recent_messages,
             source_revision: source.revision,
             quality: generated.quality,
+            metrics: Box::new(generated.metrics),
         }))
     }
 
