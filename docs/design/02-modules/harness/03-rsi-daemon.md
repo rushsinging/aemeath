@@ -58,7 +58,8 @@ enum RsiControlAck {
 |---|---|---|
 | `enabled` | true | 总开关（false 时 daemon 不启动定时器） |
 | `model` | 继承默认 | 独立模型档 |
-| `max_tokens` / `reasoning` | 继承 catalog | 独立输出预算与思考档（结构化 JSON 输出任务需显式降思考档的教训已在反思链路验证） |
+| `reasoning` | `low` | RSI LLM 思考档；结构化 JSON 输出默认低档，避免 thinking 吃掉输出预算 |
+| `max_tokens` | `65536` | RSI 单次 LLM 输出预算（64K），可配置 |
 | `interval_secs` | 28800 | Timer 触发周期（8 小时；一天 3 轮） |
 | `evidence_initial_window_days` | 30 | 首次（无 checkpoint）读取的活跃 session 时间窗（天） |
 | `evidence_max_runs_per_cycle` | 50 | 每周期步长上限：最多处理的 run 数，超出留待下周期增量消化。默认配合 8 小时周期；按真实 corpus 模拟，session 不跨块时平均约 11–12 个数据块/轮。旧键 `evidence_max_sessions_per_cycle` 仅兼容 alias |

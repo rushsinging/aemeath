@@ -257,7 +257,7 @@ NEVER 中断周期；失败原因落事件流 `proposal_rejected`。
 | Aliyun deepseek-v4.1-flash | 高 | 快 | 稳定 |
 | Qiniu conatus-free | **优秀**（含领域正解，如 PEP 668 的 venv/pipx/uv 方案） | ~8s | 免费，推荐生产档 |
 
-`harness.rsi.model` 可独立配置（空 = 继承 `models.default`）。
+`harness.rsi.model` 可独立配置（空 = 继承 `models.default`）。`harness.rsi.reasoning` 默认 `low`、`harness.rsi.max_tokens` 默认 `65536`；结构化 JSON 输出 MUST 使用低思考档与足够输出预算，避免 thinking 耗尽正文预算。
 
 ## 7. 改动本契约的验收要求
 
