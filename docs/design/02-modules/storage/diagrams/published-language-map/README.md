@@ -10,14 +10,19 @@ A–E 工作项涉及的病症位置。
 
 ## 分组
 
-| 节点 | 内容（#1865 A–E 收口后 41 符号，五分） |
+| 节点 | 内容（#1865 A–E 收口后 38 符号，五分） |
 |---|---|
 | 工厂 | `wire_file_system_blob` / `wire_file_system_dataset`（根级 pub fn，返回 `Arc<dyn 端口>`） |
 | 端口 | `AtomicBlobPort`（read/write_atomic/promote_previous/quarantine/delete_all_generations/list_primary）、`AtomicDatasetPort`（read_manifest/read_consistent/read_previous/commit_atomic/commit_incremental） |
 | 安全路径 | `SafePathSegmentData` 校验 + `SafeStorageRoot`/`SafeStorageDir`/`SafeOpenOptions`/`SafeStorageFileType`/`SafeStorageEntryData` 受限句柄 |
 | 共享词汇 | `StorageNamespaceData`（previous_policy/minimum_durability/effective_durability 策略）、`StorageKeyData`、`DurabilityData`、`TransactionScopeData`、`GenerationData` |
 | 崩溃恢复与隔离 | journal 决策产物 + 隔离三件（`QuarantineReason`/`QuarantineOutcomeData`/`QuarantineReceiptData`）；#1865 A 决策单点记录 |
-| 错误语义 | 错误载荷词汇（`CorruptionReason`/`QuarantineDisposition`/`CorruptTransactionError`）+ #1865 C 折叠链（`StorageError`(pub(crate)) → `DomainError` 三档 → 消费方 ACL 按 category 控制流） |
+
+**错误语义（#1865 C）**：本 crate **无 Error 类根导出**——内部 `StorageError{kind}` 与
+损坏载荷（`CorruptTransactionError`/`CorruptionReason`/`QuarantineDisposition`）全部
+`pub(crate)`（跨 crate 引用 0）；跨界经 `impl From<StorageError> for DomainError` 折叠为
+语义三档（Invalid/Unavailable/Storage），消费方 ACL 按 `category()` 控制流。图上以
+底图卡片记录，不占符号节点。
 | blob 载荷与回执 | 写入/删除选项、读/写/删/提升回执、隔离三件（Reason/Outcome/Receipt）、`CommitWarningData`、`StorageEntryData` |
 | dataset 载荷与回执 | 成员三型、变更集、清单、修订指纹（`revision_member_digest` 单源）、提交回执与可见性 |
 

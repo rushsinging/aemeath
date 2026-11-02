@@ -3,7 +3,7 @@
  "diagram_type": "architecture",
  "meta": {
   "title": "Storage 根面 Published Language 设计图",
-  "subtitle": "终态设计 · 根符号 41 · 功能子域六分（写入/恢复/修订/策略/路径/错误）",
+  "subtitle": "终态设计 · 根符号 38 · 功能子域五分（无 Error 类根导出：跨界统一 DomainError）",
   "quality_profile": "showcase",
   "visual_preset": "blueprint",
   "output": "index.html"
@@ -108,14 +108,6 @@
    "sublabel": "cap-std · journal",
    "row": 3,
    "col": 5
-  },
-  {
-   "id": "w6",
-   "type": "security",
-   "label": "错误语义",
-   "sublabel": "DomainError 折叠 · 载荷词汇",
-   "row": 2,
-   "col": 5
   }
  ],
  "boundaries": [
@@ -128,8 +120,7 @@
     "w2",
     "w3",
     "w4",
-    "w5",
-    "w6"
+    "w5"
    ],
    "pad": 40
   }
@@ -175,6 +166,16 @@
   }
  ],
  "cards": [
+  {
+   "dot": "amber",
+   "title": "错误语义（#1865 C：无 Error 类根导出）",
+   "items": [
+    "内部事实错误 StorageError{kind}(6 变体) 降 pub(crate)；损坏载荷 CorruptTransactionError/CorruptionReason/QuarantineDisposition 同步收窄（跨 crate 引用 0）",
+    "唯一折叠点：impl From<StorageError> for share::error::DomainError",
+    "语义三档：InvalidKey→Invalid / UnsupportedDurability→Unavailable / Io·PermissionDenied·ConcurrentWrite·CorruptTransaction→Storage",
+    "消费方 ACL（config/memory/audit）按 DomainError.category() 控制流，不再依赖 implementation kind"
+   ]
+  },
   {
    "dot": "amber",
    "title": "#1865 病症标注（设计对照）",

@@ -116,15 +116,7 @@ fn corrupt_transaction_error_preserves_typed_facts_without_paths() {
     );
     let kind = StorageErrorKind::CorruptTransaction(corruption.clone());
 
-    assert_eq!(corruption.scope(), TransactionScopeData::Blob);
-    assert_eq!(
-        corruption.reason(),
-        CorruptionReason::CommittedDigestMismatch
-    );
-    assert_eq!(
-        corruption.quarantine_disposition(),
-        QuarantineDisposition::EvidenceQuarantined
-    );
+    // #1865 C：载荷访问器随零消费删除；诊断经 Debug 脱敏 + kind 等值断言。
     assert_eq!(kind, StorageErrorKind::CorruptTransaction(corruption));
     assert!(!format!("{kind:?}").contains('/'));
 }

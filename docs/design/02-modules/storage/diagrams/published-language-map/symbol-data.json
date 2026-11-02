@@ -47,11 +47,6 @@
    "SafeOpenOptions",
    "SafeStorageFileType",
    "SafeStorageEntryData"
-  ],
-  "错误语义": [
-   "CorruptionReason",
-   "QuarantineDisposition",
-   "CorruptTransactionError"
   ]
  },
  "nodeGroup": {
@@ -92,10 +87,7 @@
   "SafeStorageDir": "安全路径访问",
   "SafeOpenOptions": "安全路径访问",
   "SafeStorageFileType": "安全路径访问",
-  "SafeStorageEntryData": "安全路径访问",
-  "CorruptionReason": "错误语义",
-  "QuarantineDisposition": "错误语义",
-  "CorruptTransactionError": "错误语义"
+  "SafeStorageEntryData": "安全路径访问"
  },
  "symbols": {
   "AtomicBlobPort": {
@@ -796,43 +788,6 @@
      ]
     }
    ]
-  },
-  "CorruptTransactionError": {
-   "kind": "struct",
-   "duty": "事务损坏载荷（#1865 C：作为 StorageErrorKind 降 pub(crate) 后保留的公开载荷词汇；跨界统一 DomainError）",
-   "deep_path": null,
-   "def": "agent/features/storage/src/domain/blob_recovery.rs",
-   "signature": "pub struct CorruptTransactionError {",
-   "fields": [
-    "scope: TransactionScopeData",
-    "reason: CorruptionReason",
-    "quarantine_disposition: QuarantineDisposition"
-   ],
-   "methods": [
-    "pub fn new(scope : TransactionScopeData, reason : CorruptionReason, quarantine_disposition : QuarantineDisposition) -> Self",
-    "pub fn scope(& self) -> TransactionScopeData",
-    "pub fn reason(& self) -> CorruptionReason",
-    "pub fn quarantine_disposition(& self) -> QuarantineDisposition"
-   ],
-   "consumer_count": 0,
-   "consumers": []
-  },
-  "CorruptionReason": {
-   "kind": "enum",
-   "duty": "事务损坏原因载荷（#1865 C：随 ConcorruptTransactionError 作为公开载荷词汇保留）",
-   "deep_path": null,
-   "def": "agent/features/storage/src/domain/blob_recovery.rs",
-   "signature": "pub enum CorruptionReason {",
-   "fields": [
-    "PrimaryDigestMatchesNeitherGeneration",
-    "CommittedDigestMismatch",
-    "OrphanPreviousDigestMismatch",
-    "InvalidJournal",
-    "DatasetMemberDigestMismatch"
-   ],
-   "methods": [],
-   "consumer_count": 0,
-   "consumers": []
   },
   "DatasetChangeSetData": {
    "kind": "struct",
@@ -2306,20 +2261,6 @@
      ]
     }
    ]
-  },
-  "QuarantineDisposition": {
-   "kind": "enum",
-   "duty": "隔离处置载荷（#1865 C：同上）",
-   "deep_path": null,
-   "def": "agent/features/storage/src/domain/blob_recovery.rs",
-   "signature": "pub enum QuarantineDisposition {",
-   "fields": [
-    "EvidenceQuarantined",
-    "QuarantineFailed"
-   ],
-   "methods": [],
-   "consumer_count": 0,
-   "consumers": []
   },
   "QuarantineOutcomeData": {
    "kind": "enum",
@@ -5634,16 +5575,6 @@
     "根 capability：SafeStorageRoot",
     "受限句柄：SafeStorageDir + SafeOpenOptions + SafeStorageFileType",
     "D：消费方自行拼物理路径（runtime 工具结果 blob）→ 改 storage 句柄能力；SafeStorageEntryData 为泄漏补导出"
-   ]
-  },
-  "错误语义": {
-   "chain": "错误语义链（#1865 C：内部事实错误 → 语义折叠 → 消费方三档控制流）",
-   "path": [
-    "内部事实错误：StorageError{kind,message}（6 kind：InvalidKey/Io/PermissionDenied/UnsupportedDurability/ConcurrentWrite/CorruptTransaction）——#1865 C 降 pub(crate)",
-    "载荷词汇（根面公开）：CorruptionReason / QuarantineDisposition / CorruptTransactionError（事务损坏载荷链）",
-    "语义映射：InvalidKey→Invalid / UnsupportedDurability→Unavailable / Io·PermissionDenied·ConcurrentWrite·CorruptTransaction→Storage",
-    "唯一折叠点：impl From<StorageError> for share::error::DomainError（with_source 保留诊断链）",
-    "消费方 ACL：config / memory / audit 按 DomainError.category() 三档做控制流（不再依赖 storage 实现细节 kind）"
    ]
   }
  }

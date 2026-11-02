@@ -12,6 +12,7 @@
 #[cfg(any(test, feature = "test-fault-injection"))]
 use super::constants::{DATASET_FAULT_ABORT_ENV, DATASET_FAULT_POINT_ENV};
 use super::error_map::{map_io, map_lock_io, reject_symlink};
+use crate::domain::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -31,11 +32,10 @@ use super::dataset_protocol::{
 };
 use crate::domain::revision_member_digest;
 use crate::{
-    AtomicDatasetPort, CorruptTransactionError, CorruptionReason, DatasetChangeSetData,
-    DatasetCommitReceiptData, DatasetCommitVisibilityData, DatasetKeyData, DatasetManifestData,
-    DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData, DatasetReadData,
-    DatasetReadOutcomeData, DatasetRevisionData, DeleteOptionsData, DeleteOutcomeData,
-    GenerationData, QuarantineDisposition, QuarantineOutcomeData, QuarantineReason,
+    AtomicDatasetPort, DatasetChangeSetData, DatasetCommitReceiptData, DatasetCommitVisibilityData,
+    DatasetKeyData, DatasetManifestData, DatasetMemberChangeData, DatasetMemberData,
+    DatasetMemberReferenceData, DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData,
+    DeleteOptionsData, DeleteOutcomeData, GenerationData, QuarantineOutcomeData, QuarantineReason,
     QuarantineReceiptData, SafePathSegmentData, StorageError, StorageErrorKind,
     TransactionScopeData, WriteOptionsData,
 };

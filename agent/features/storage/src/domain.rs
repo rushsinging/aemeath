@@ -20,7 +20,7 @@ pub use atomic_dataset::{
     DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
     DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData,
 };
-pub use blob_recovery::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
+pub(crate) use blob_recovery::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
 pub use published_language::{DurabilityData, StorageKeyData, StorageNamespaceData};
 pub(crate) use published_language::{StorageError, StorageErrorKind};
 pub use safe_path::SafePathSegmentData;

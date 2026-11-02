@@ -120,16 +120,12 @@ fn conflicting_prepared_evidence_is_quarantined_with_typed_error() {
     let error = runtime
         .block_on(reopened.read(&key(), GenerationData::Primary))
         .unwrap_err();
-    let storage::StorageErrorKind::CorruptTransaction(corruption) = error.kind() else {
-        panic!("digest conflict must be typed corruption");
-    };
-    assert_eq!(
-        corruption.reason(),
-        storage::CorruptionReason::PrimaryDigestMatchesNeitherGeneration
-    );
-    assert_eq!(
-        corruption.quarantine_disposition(),
-        storage::QuarantineDisposition::EvidenceQuarantined
+    // #1865 C：跨界只承诺语义三档（损坏细节载荷已 pub(crate) 收窄）。
+    assert_eq!(error.category(), share::error::ErrorCategory::Storage);
+    assert!(
+        error.message().contains("损坏") || error.message().contains("不一致"),
+        "损坏错误需带可诊断文案：{}",
+        error.message()
     );
     assert!(std::fs::read_dir(root.join("session"))
         .unwrap()
@@ -453,13 +449,8 @@ async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
         .read(&key(), GenerationData::Primary)
         .await
         .unwrap_err();
-    let storage::StorageErrorKind::CorruptTransaction(corruption) = error.kind() else {
-        panic!("mismatched orphan must be typed corruption");
-    };
-    assert_eq!(
-        corruption.reason(),
-        storage::CorruptionReason::OrphanPreviousDigestMismatch
-    );
+    // #1865 C：同上，只断言语义档。
+    assert_eq!(error.category(), share::error::ErrorCategory::Storage);
     std::fs::remove_dir_all(mismatch_root).unwrap();
 }
 

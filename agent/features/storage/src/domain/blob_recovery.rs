@@ -91,16 +91,4 @@ impl CorruptTransactionError {
             quarantine_disposition,
         }
     }
-
-    pub fn scope(&self) -> TransactionScopeData {
-        self.scope
-    }
-
-    pub fn reason(&self) -> CorruptionReason {
-        self.reason
-    }
-
-    pub fn quarantine_disposition(&self) -> QuarantineDisposition {
-        self.quarantine_disposition
-    }
 }

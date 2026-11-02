@@ -7,7 +7,7 @@
 //! | 工厂 | `wire_file_system_blob`、`wire_file_system_dataset`（原 file_system_* 更名 wire_ 前缀类；返回 `Arc<dyn 端口>`） |
 //! | 角色和职能 | `AtomicBlobPort`（追加日志端口）、`AtomicDatasetPort`（原子集端口）、`SafeStorageRoot`/`SafeStorageDir`/`SafeOpenOptions`/`SafeStorageFileType`（安全文件系统句柄） |
 //! | 数据和生命周期 | 29 个 Data：标识 7（StorageKeyData/DatasetKeyData 同构但语义域不同——类型安全优先不合）、载荷 9（含 SafeStorageEntryData 泄漏补导出）、回执 10、选项 3（#1865 E：原自述 28 实数 29 已校正） |
-//! | Error | 跨界统一 `share::error::DomainError`（#1865 C 折叠：`StorageError`/`StorageErrorKind` 降 pub(crate)，语义映射 InvalidKey→Invalid / UnsupportedDurability→Unavailable / 其余→Storage，`impl From<StorageError>` 为唯一折叠点）；`CorruptTransactionError`（+`CorruptionReason`/`QuarantineDisposition`）作为事务损坏载荷词汇保留 |
+//! | Error | **无 Error 类根导出**（#1865 C 语义折叠 + 零消费收窄）：跨界统一 `share::error::DomainError`——内部 `StorageError`/`StorageErrorKind` 与损坏载荷 `CorruptTransactionError`/`CorruptionReason`/`QuarantineDisposition` 全部 pub(crate)，`impl From<StorageError>` 为唯一折叠点（InvalidKey→Invalid / UnsupportedDurability→Unavailable / 其余→Storage） |
 //!
 //! #1865 收敛记录：A 恢复决策单点（`domain::blob_recovery` 为唯一策略表，adapter 只采集
 //! 证据并执行决策；JournalPhase 单点带 serde，TransactionDigest 删除）；B 死面清理
@@ -70,13 +70,12 @@ pub use adapters::{
     SafeOpenOptions, SafeStorageDir, SafeStorageEntryData, SafeStorageFileType, SafeStorageRoot,
 };
 pub use domain::{
-    BlobReadData, CommitWarningData, CorruptTransactionError, CorruptionReason,
-    DatasetChangeSetData, DatasetCommitReceiptData, DatasetCommitVisibilityData, DatasetKeyData,
-    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
-    DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData, DeleteOptionsData,
-    DeleteOutcomeData, DurabilityData, GenerationData, PromoteOutcomeData, QuarantineDisposition,
-    QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData, ReadOutcomeData,
-    SafePathSegmentData, StorageEntryData, StorageKeyData, StorageNamespaceData,
+    BlobReadData, CommitWarningData, DatasetChangeSetData, DatasetCommitReceiptData,
+    DatasetCommitVisibilityData, DatasetKeyData, DatasetManifestData, DatasetMemberChangeData,
+    DatasetMemberData, DatasetMemberReferenceData, DatasetReadData, DatasetReadOutcomeData,
+    DatasetRevisionData, DeleteOptionsData, DeleteOutcomeData, DurabilityData, GenerationData,
+    PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData,
+    ReadOutcomeData, SafePathSegmentData, StorageEntryData, StorageKeyData, StorageNamespaceData,
     TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 pub use ports::{AtomicBlobPort, AtomicDatasetPort};

@@ -1,6 +1,7 @@
 #[cfg(any(test, feature = "test-fault-injection"))]
 use super::constants::{FAULT_ABORT_ENV, FAULT_POINT_ENV};
 use super::error_map::{map_durability, map_io, map_lock_io};
+use crate::domain::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -18,11 +19,11 @@ use crate::domain::blob_recovery::{
     decide_blob_recovery, decide_orphan_previous, DigestObservation, JournalPhase, RecoveryDecision,
 };
 use crate::{
-    AtomicBlobPort, BlobReadData, CorruptTransactionError, CorruptionReason, DeleteOptionsData,
-    DeleteOutcomeData, DurabilityData, GenerationData, PromoteOutcomeData, QuarantineDisposition,
-    QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData, ReadOutcomeData,
-    SafePathSegmentData, StorageEntryData, StorageError, StorageErrorKind, StorageKeyData,
-    StorageNamespaceData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
+    AtomicBlobPort, BlobReadData, DeleteOptionsData, DeleteOutcomeData, DurabilityData,
+    GenerationData, PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason,
+    QuarantineReceiptData, ReadOutcomeData, SafePathSegmentData, StorageEntryData, StorageError,
+    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
+    WriteReceiptData,
 };
 
 #[derive(Debug)]
