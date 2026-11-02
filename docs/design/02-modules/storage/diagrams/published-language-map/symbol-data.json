@@ -50,10 +50,6 @@
    "SafeOpenOptions",
    "SafeStorageFileType",
    "SafeStorageEntryData"
-  ],
-  "错误语义": [
-   "StorageError",
-   "StorageErrorKind"
   ]
  },
  "nodeGroup": {
@@ -97,9 +93,7 @@
   "SafeStorageDir": "安全路径访问",
   "SafeOpenOptions": "安全路径访问",
   "SafeStorageFileType": "安全路径访问",
-  "SafeStorageEntryData": "安全路径访问",
-  "StorageError": "错误语义",
-  "StorageErrorKind": "错误语义"
+  "SafeStorageEntryData": "安全路径访问"
  },
  "symbols": {
   "AtomicBlobPort": {
@@ -110,12 +104,12 @@
    "signature": "pub trait AtomicBlobPort: Send + Sync {",
    "fields": [],
    "methods": [
-    "fn read(& self, key : & StorageKeyData, generation : GenerationData) -> Result < ReadOutcomeData , StorageError >",
-    "fn write_atomic(& self, key : & StorageKeyData, bytes : & [u8], options : WriteOptionsData) -> Result < WriteReceiptData , StorageError >",
-    "fn promote_previous(& self, key : & StorageKeyData) -> Result < PromoteOutcomeData , StorageError >",
-    "fn quarantine(& self, key : & StorageKeyData, generation : GenerationData, scope : TransactionScopeData, reason : QuarantineReason) -> Result < QuarantineOutcomeData , StorageError >",
-    "fn delete_all_generations(& self, key : & StorageKeyData, options : DeleteOptionsData) -> Result < DeleteOutcomeData , StorageError >",
-    "fn list_primary(& self, namespace : crate :: domain :: StorageNamespaceData) -> Result < Vec < crate :: domain :: StorageEntryData > , StorageError >"
+    "fn read(& self, key : & StorageKeyData, generation : GenerationData) -> Result < ReadOutcomeData , share :: error :: DomainError >",
+    "fn write_atomic(& self, key : & StorageKeyData, bytes : & [u8], options : WriteOptionsData) -> Result < WriteReceiptData , share :: error :: DomainError >",
+    "fn promote_previous(& self, key : & StorageKeyData) -> Result < PromoteOutcomeData , share :: error :: DomainError >",
+    "fn quarantine(& self, key : & StorageKeyData, generation : GenerationData, scope : TransactionScopeData, reason : QuarantineReason) -> Result < QuarantineOutcomeData , share :: error :: DomainError >",
+    "fn delete_all_generations(& self, key : & StorageKeyData, options : DeleteOptionsData) -> Result < DeleteOutcomeData , share :: error :: DomainError >",
+    "fn list_primary(& self, namespace : crate :: domain :: StorageNamespaceData) -> Result < Vec < crate :: domain :: StorageEntryData > , share :: error :: DomainError >"
    ],
    "consumer_count": 17,
    "consumers": [
@@ -400,7 +394,7 @@
        "label": "类型引用"
       },
       {
-       "line": 526,
+       "line": 525,
        "code": "blob: &std::sync::Arc<dyn storage::AtomicBlobPort>,",
        "kind": "fnty",
        "label": "类型引用"
@@ -449,15 +443,15 @@
    "signature": "pub trait AtomicDatasetPort: Send + Sync {",
    "fields": [],
    "methods": [
-    "fn read_manifest(& self, dataset : & DatasetKeyData) -> Result < DatasetManifestData , StorageError >",
-    "fn list_datasets(& self, namespace : crate :: domain :: StorageNamespaceData) -> Result < Vec < DatasetKeyData > , StorageError >",
-    "fn delete_all_generations(& self, dataset : & DatasetKeyData, options : DeleteOptionsData) -> Result < DeleteOutcomeData , StorageError >",
-    "fn read_consistent(& self, dataset : & DatasetKeyData, members : & [SafePathSegmentData]) -> Result < DatasetReadOutcomeData , StorageError >",
-    "fn read_previous(& self, dataset : & DatasetKeyData, members : & [SafePathSegmentData]) -> Result < DatasetReadOutcomeData , StorageError >",
-    "fn commit_atomic(& self, dataset : & DatasetKeyData, expected : & DatasetRevisionData, members : & [DatasetMemberData], options : WriteOptionsData) -> Result < DatasetCommitReceiptData , StorageError >",
-    "fn commit_incremental(& self, dataset : & DatasetKeyData, changes : & DatasetChangeSetData, options : WriteOptionsData) -> Result < DatasetCommitReceiptData , StorageError >",
-    "fn promote_previous(& self, dataset : & DatasetKeyData) -> Result < DatasetCommitReceiptData , StorageError >",
-    "fn quarantine(& self, dataset : & DatasetKeyData, generation : GenerationData, scope : TransactionScopeData, reason : QuarantineReason) -> Result < QuarantineOutcomeData , StorageError >"
+    "fn read_manifest(& self, dataset : & DatasetKeyData) -> Result < DatasetManifestData , share :: error :: DomainError >",
+    "fn list_datasets(& self, namespace : crate :: domain :: StorageNamespaceData) -> Result < Vec < DatasetKeyData > , share :: error :: DomainError >",
+    "fn delete_all_generations(& self, dataset : & DatasetKeyData, options : DeleteOptionsData) -> Result < DeleteOutcomeData , share :: error :: DomainError >",
+    "fn read_consistent(& self, dataset : & DatasetKeyData, members : & [SafePathSegmentData]) -> Result < DatasetReadOutcomeData , share :: error :: DomainError >",
+    "fn read_previous(& self, dataset : & DatasetKeyData, members : & [SafePathSegmentData]) -> Result < DatasetReadOutcomeData , share :: error :: DomainError >",
+    "fn commit_atomic(& self, dataset : & DatasetKeyData, expected : & DatasetRevisionData, members : & [DatasetMemberData], options : WriteOptionsData) -> Result < DatasetCommitReceiptData , share :: error :: DomainError >",
+    "fn commit_incremental(& self, dataset : & DatasetKeyData, changes : & DatasetChangeSetData, options : WriteOptionsData) -> Result < DatasetCommitReceiptData , share :: error :: DomainError >",
+    "fn promote_previous(& self, dataset : & DatasetKeyData) -> Result < DatasetCommitReceiptData , share :: error :: DomainError >",
+    "fn quarantine(& self, dataset : & DatasetKeyData, generation : GenerationData, scope : TransactionScopeData, reason : QuarantineReason) -> Result < QuarantineOutcomeData , share :: error :: DomainError >"
    ],
    "consumer_count": 13,
    "consumers": [
@@ -568,13 +562,13 @@
        "label": "类型引用"
       },
       {
-       "line": 499,
+       "line": 495,
        "code": "storage: Arc<dyn storage_api::AtomicDatasetPort>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 510,
+       "line": 506,
        "code": "storage: Arc<dyn storage_api::AtomicDatasetPort>,",
        "kind": "fnty",
        "label": "类型引用"
@@ -750,14 +744,12 @@
   },
   "CommitWarningData": {
    "kind": "enum",
-   "duty": "提交警告（PreviousPromotionPending 变体全仓零生产，#1865 B 待删）",
+   "duty": "提交警告（#1865 B：仅剩 JournalCleanupPending；MemberPublishRecoveryPending 随 dataset warning 通道删除）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/atomic_blob.rs",
    "signature": "pub enum CommitWarningData {",
    "fields": [
-    "PreviousPromotionPending",
-    "JournalCleanupPending",
-    "MemberPublishRecoveryPending"
+    "JournalCleanupPending"
    ],
    "methods": [],
    "consumer_count": 2,
@@ -779,19 +771,7 @@
       },
       {
        "line": 265,
-       "code": "storage::CommitWarningData::PreviousPromotionPending => \"上一轮配置晋升仍待处理\",",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 266,
-       "code": "storage::CommitWarningData::JournalCleanupPending",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 267,
-       "code": "| storage::CommitWarningData::MemberPublishRecoveryPending => \"配置事务日志清理待处理\",",
+       "code": "storage::CommitWarningData::JournalCleanupPending => \"配置事务日志清理待处理\",",
        "kind": "ref",
        "label": "路径引用"
       }
@@ -817,7 +797,7 @@
   },
   "CorruptTransactionError": {
    "kind": "struct",
-   "duty": "事务损坏错误（scope/reason/disposition 载荷）；跨 crate 仅标签映射（config:679 / memory:223 / audit:70），载荷零消费",
+   "duty": "事务损坏载荷（#1865 C：作为 StorageErrorKind 降 pub(crate) 后保留的公开载荷词汇；跨界统一 DomainError）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/blob_recovery.rs",
    "signature": "pub struct CorruptTransactionError {",
@@ -837,7 +817,7 @@
   },
   "CorruptionReason": {
    "kind": "enum",
-   "duty": "损坏原因载荷（CorruptTransactionError 载荷链，跨 crate 零直接消费）",
+   "duty": "事务损坏原因载荷（#1865 C：随 ConcorruptTransactionError 作为公开载荷词汇保留）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/blob_recovery.rs",
    "signature": "pub enum CorruptionReason {",
@@ -865,8 +845,8 @@
     "removed_members: Vec < SafePathSegmentData >"
    ],
    "methods": [
-    "pub fn new(expected_revision : DatasetRevisionData, mut new_members : Vec < DatasetMemberChangeData >, mut reused_members : Vec < DatasetMemberReferenceData >) -> Result < Self , StorageError >",
-    "pub fn with_removed_members(mut self, mut removed_members : Vec < SafePathSegmentData >) -> Result < Self , StorageError >",
+    "pub fn new(expected_revision : DatasetRevisionData, mut new_members : Vec < DatasetMemberChangeData >, mut reused_members : Vec < DatasetMemberReferenceData >) -> Result < Self , share :: error :: DomainError >",
+    "pub fn with_removed_members(mut self, mut removed_members : Vec < SafePathSegmentData >) -> Result < Self , share :: error :: DomainError >",
     "pub fn expected_revision(& self) -> & DatasetRevisionData",
     "pub fn new_members(& self) -> & [DatasetMemberChangeData]",
     "pub fn reused_members(& self) -> & [DatasetMemberReferenceData]",
@@ -884,13 +864,13 @@
      ],
      "snippets": [
       {
-       "line": 301,
-       "code": ") -> Result<DatasetChangeSetData, StorageError> {",
+       "line": 305,
+       "code": ") -> Result<DatasetChangeSetData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 329,
+       "line": 333,
        "code": "DatasetChangeSetData::new(manifest.revision().clone(), changed_members, reused_members)?",
        "kind": "call",
        "label": "调用"
@@ -901,20 +881,18 @@
   },
   "DatasetCommitReceiptData": {
    "kind": "struct",
-   "duty": "提交回执（visibility + warning 通道；warning 跨 crate 零消费且与 visibility 一一对应，#1865 B 待删）",
+   "duty": "提交回执（#1865 B：warning 字段已删除，可见性由 DatasetCommitVisibilityData 单点表达）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/atomic_dataset.rs",
    "signature": "pub struct DatasetCommitReceiptData {",
    "fields": [
     "revision: DatasetRevisionData",
-    "visibility: DatasetCommitVisibilityData",
-    "warning: Option < CommitWarningData >"
+    "visibility: DatasetCommitVisibilityData"
    ],
    "methods": [
-    "fn committed(revision : DatasetRevisionData, visibility : DatasetCommitVisibilityData, warning : Option < CommitWarningData >) -> Self",
+    "fn committed(revision : DatasetRevisionData, visibility : DatasetCommitVisibilityData) -> Self",
     "pub fn revision(& self) -> & DatasetRevisionData",
-    "pub fn visibility(& self) -> DatasetCommitVisibilityData",
-    "pub fn warning(& self) -> Option < CommitWarningData >"
+    "pub fn visibility(& self) -> DatasetCommitVisibilityData"
    ],
    "consumer_count": 0,
    "consumers": []
@@ -941,13 +919,13 @@
      ],
      "snippets": [
       {
-       "line": 335,
+       "line": 331,
        "code": "storage_api::DatasetCommitVisibilityData::Visible => MemoryCommitVisibility::Visible,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 336,
+       "line": 332,
        "code": "storage_api::DatasetCommitVisibilityData::RecoveryPending => {",
        "kind": "ref",
        "label": "路径引用"
@@ -967,7 +945,7 @@
     "segments: Vec < SafePathSegmentData >"
    ],
    "methods": [
-    "pub fn new(namespace : StorageNamespaceData, segments : Vec < SafePathSegmentData >) -> Result < Self , StorageError >",
+    "pub fn new(namespace : StorageNamespaceData, segments : Vec < SafePathSegmentData >) -> Result < Self , share :: error :: DomainError >",
     "pub fn namespace(& self) -> StorageNamespaceData",
     "pub fn segments(& self) -> & [SafePathSegmentData]"
    ],
@@ -1032,38 +1010,38 @@
        "label": "类型引用"
       },
       {
-       "line": 235,
-       "code": "pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKeyData, StorageError> {",
+       "line": 237,
+       "code": ") -> Result<DatasetKeyData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 236,
+       "line": 238,
        "code": "DatasetKeyData::new(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 248,
-       "code": ") -> Result<DatasetKeyData, StorageError> {",
+       "line": 250,
+       "code": ") -> Result<DatasetKeyData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 249,
+       "line": 251,
        "code": "DatasetKeyData::new(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 260,
-       "code": "fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKeyData, StorageError> {",
+       "line": 264,
+       "code": ") -> Result<DatasetKeyData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 271,
-       "code": ") -> Result<DatasetKeyData, StorageError> {",
+       "line": 275,
+       "code": ") -> Result<DatasetKeyData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -1189,7 +1167,7 @@
      ],
      "snippets": [
       {
-       "line": 97,
+       "line": 90,
        "code": "let dataset_key = storage_api::DatasetKeyData::new(",
        "kind": "call",
        "label": "调用"
@@ -1273,13 +1251,13 @@
        "label": "类型引用"
       },
       {
-       "line": 279,
+       "line": 283,
        "code": "manifest: &storage::DatasetManifestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 299,
+       "line": 303,
        "code": "manifest: &storage::DatasetManifestData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -1311,7 +1289,7 @@
      ],
      "snippets": [
       {
-       "line": 306,
+       "line": 310,
        "code": "Ok(DatasetMemberChangeData::Replace(DatasetMemberData::new(",
        "kind": "call",
        "label": "调用"
@@ -1362,7 +1340,7 @@
      ],
      "snippets": [
       {
-       "line": 306,
+       "line": 310,
        "code": "Ok(DatasetMemberChangeData::Replace(DatasetMemberData::new(",
        "kind": "call",
        "label": "调用"
@@ -1408,13 +1386,13 @@
        "label": "路径引用"
       },
       {
-       "line": 253,
+       "line": 249,
        "code": ") -> Result<Vec<storage_api::DatasetMemberData>, MemoryError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 307,
+       "line": 303,
        "code": ".map(storage_api::DatasetMemberData::bytes)",
        "kind": "ref",
        "label": "路径引用"
@@ -1430,13 +1408,13 @@
      ],
      "snippets": [
       {
-       "line": 88,
+       "line": 81,
        "code": "let active_member = storage_api::DatasetMemberData::new(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 92,
+       "line": 85,
        "code": "let archive_member = storage_api::DatasetMemberData::new(",
        "kind": "call",
        "label": "调用"
@@ -1508,8 +1486,8 @@
      ],
      "snippets": [
       {
-       "line": 322,
-       "code": ".collect::<Result<Vec<DatasetMemberReferenceData>, StorageError>>()?;",
+       "line": 326,
+       "code": ".collect::<Result<Vec<DatasetMemberReferenceData>, share::error::DomainError>>()?;",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -1611,7 +1589,7 @@
        "label": "类型引用"
       },
       {
-       "line": 266,
+       "line": 262,
        "code": "type Revision = storage_api::DatasetRevisionData;",
        "kind": "fnty",
        "label": "类型引用"
@@ -1627,7 +1605,7 @@
      ],
      "snippets": [
       {
-       "line": 71,
+       "line": 64,
        "code": "fn assert_store<T: MemoryDatasetStore<Revision = storage_api::DatasetRevisionData>>() {}",
        "kind": "fnty",
        "label": "类型引用"
@@ -1776,7 +1754,7 @@
      "snippets": [
       {
        "line": 132,
-       "code": ") -> Result<DeleteOutcomeData, StorageError> {",
+       "code": ") -> Result<DeleteOutcomeData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -1922,7 +1900,7 @@
      ],
      "snippets": [
       {
-       "line": 330,
+       "line": 326,
        "code": "storage_api::WriteOptionsData::new(storage_api::DurabilityData::ProcessCrashSafe),",
        "kind": "ref",
        "label": "路径引用"
@@ -1938,7 +1916,7 @@
      ],
      "snippets": [
       {
-       "line": 114,
+       "line": 107,
        "code": "storage_api::WriteOptionsData::new(storage_api::DurabilityData::BestEffort),",
        "kind": "ref",
        "label": "路径引用"
@@ -1970,7 +1948,7 @@
      ],
      "snippets": [
       {
-       "line": 83,
+       "line": 88,
        "code": "WriteOptionsData::new(DurabilityData::ProcessCrashSafe),",
        "kind": "ref",
        "label": "路径引用"
@@ -1986,7 +1964,7 @@
      ],
      "snippets": [
       {
-       "line": 516,
+       "line": 515,
        "code": "storage::WriteOptionsData::new(storage::DurabilityData::ProcessCrashSafe),",
        "kind": "ref",
        "label": "路径引用"
@@ -2148,7 +2126,7 @@
      ],
      "snippets": [
       {
-       "line": 67,
+       "line": 72,
        "code": ".read(&key, GenerationData::Primary)",
        "kind": "ref",
        "label": "路径引用"
@@ -2164,13 +2142,13 @@
      ],
      "snippets": [
       {
-       "line": 530,
+       "line": 529,
        "code": "let bytes = match blob.read(&key, storage::GenerationData::Primary).await? {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 539,
+       "line": 538,
        "code": "storage::GenerationData::Primary,",
        "kind": "ref",
        "label": "路径引用"
@@ -2319,7 +2297,7 @@
       },
       {
        "line": 108,
-       "code": ") -> Result<PromoteOutcomeData, StorageError> {",
+       "code": ") -> Result<PromoteOutcomeData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -2329,7 +2307,7 @@
   },
   "QuarantineDisposition": {
    "kind": "enum",
-   "duty": "隔离处置载荷（同上）",
+   "duty": "隔离处置载荷（#1865 C：同上）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/blob_recovery.rs",
    "signature": "pub enum QuarantineDisposition {",
@@ -2371,7 +2349,7 @@
      "snippets": [
       {
        "line": 117,
-       "code": ") -> Result<QuarantineOutcomeData, StorageError> {",
+       "code": ") -> Result<QuarantineOutcomeData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -2447,7 +2425,7 @@
   },
   "QuarantineReceiptData": {
    "kind": "struct",
-   "duty": "隔离回执明细（跨 crate 零消费；字段访问器仅 id()，#1865 B 收窄）",
+   "duty": "隔离回执明细（#1865 B：id 访问器删除，跨 crate 零消费）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/atomic_blob.rs",
    "signature": "pub struct QuarantineReceiptData {",
@@ -2458,8 +2436,7 @@
     "reason: QuarantineReason"
    ],
    "methods": [
-    "pub fn new(id : super :: SafePathSegmentData, generation : GenerationData, scope : TransactionScopeData, reason : QuarantineReason) -> Self",
-    "pub fn id(& self) -> & super :: SafePathSegmentData"
+    "pub fn new(id : super :: SafePathSegmentData, generation : GenerationData, scope : TransactionScopeData, reason : QuarantineReason) -> Self"
    ],
    "consumer_count": 0,
    "consumers": []
@@ -2550,7 +2527,7 @@
      ],
      "snippets": [
       {
-       "line": 77,
+       "line": 82,
        "code": "ReadOutcomeData::NotFound => {}",
        "kind": "ref",
        "label": "路径引用"
@@ -2566,13 +2543,13 @@
      ],
      "snippets": [
       {
-       "line": 535,
+       "line": 534,
        "code": "storage::ReadOutcomeData::NotFound => {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 544,
+       "line": 543,
        "code": "storage::ReadOutcomeData::NotFound => return Ok(0),",
        "kind": "ref",
        "label": "路径引用"
@@ -2592,7 +2569,7 @@
      "snippets": [
       {
        "line": 76,
-       "code": ") -> Result<ReadOutcomeData, StorageError> {",
+       "code": ") -> Result<ReadOutcomeData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -2640,7 +2617,7 @@
      ],
      "snippets": [
       {
-       "line": 94,
+       "line": 96,
        "code": "SafeOpenOptions {",
        "kind": "ctor",
        "label": "构造"
@@ -2672,13 +2649,13 @@
      ],
      "snippets": [
       {
-       "line": 127,
+       "line": 129,
        "code": "SafeOpenOptions {",
        "kind": "ctor",
        "label": "构造"
       },
       {
-       "line": 201,
+       "line": 203,
        "code": "SafeOpenOptions {",
        "kind": "ctor",
        "label": "构造"
@@ -2742,7 +2719,7 @@
        "label": "类型引用"
       },
       {
-       "line": 169,
+       "line": 171,
        "code": "if SafePathSegmentData::from_str(stream).is_ok() {",
        "kind": "call",
        "label": "调用"
@@ -2854,7 +2831,7 @@
      "snippets": [
       {
        "line": 8,
-       "code": "SafePathSegmentData, StorageError,",
+       "code": "SafePathSegmentData,",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -2925,37 +2902,31 @@
        "label": "调用"
       },
       {
-       "line": 238,
+       "line": 240,
        "code": "vec![SafePathSegmentData::from_str(&format!(",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 270,
+       "line": 274,
        "code": "project_dir: Option<&SafePathSegmentData>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 283,
+       "line": 287,
        "code": "SafePathSegmentData::from_str(name)",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 307,
+       "line": 311,
        "code": "SafePathSegmentData::from_str(member.name())?,",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 316,
-       "code": "let safe_name = SafePathSegmentData::from_str(name)?;",
-       "kind": "call",
-       "label": "调用"
-      },
-      {
-       "line": 326,
+       "line": 330,
        "code": ".map(|name| SafePathSegmentData::from_str(name))",
        "kind": "call",
        "label": "调用"
@@ -3172,19 +3143,19 @@
        "label": "调用"
       },
       {
-       "line": 242,
+       "line": 238,
        "code": "fn member_name(value: &str) -> storage_api::SafePathSegmentData {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 243,
+       "line": 239,
        "code": "storage_api::SafePathSegmentData::from_str(value).expect(\"fixed Memory member name is safe\")",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 243,
+       "line": 239,
        "code": "storage_api::SafePathSegmentData::from_str(value).expect(\"fixed Memory member name is safe\")",
        "kind": "fnty",
        "label": "类型引用"
@@ -3200,13 +3171,13 @@
      ],
      "snippets": [
       {
-       "line": 89,
+       "line": 82,
        "code": "storage_api::SafePathSegmentData::from_str(\"active\").expect(\"safe active member\"),",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 93,
+       "line": 86,
        "code": "storage_api::SafePathSegmentData::from_str(\"archive\").expect(\"safe archive member\"),",
        "kind": "call",
        "label": "调用"
@@ -3237,13 +3208,13 @@
        "label": "调用"
       },
       {
-       "line": 110,
+       "line": 112,
        "code": "fn segment_file_name(day: &str) -> Result<SafePathSegmentData, EventAppendError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 111,
+       "line": 113,
        "code": "SafePathSegmentData::from_str(&format!(\"{day}{EVENTS_JSONL_SUFFIX}\"))",
        "kind": "call",
        "label": "调用"
@@ -3348,13 +3319,13 @@
      ],
      "snippets": [
       {
-       "line": 559,
+       "line": 558,
        "code": "let segment: storage::SafePathSegmentData = session_id",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 570,
+       "line": 571,
        "code": "let segment: storage::SafePathSegmentData = session_id",
        "kind": "fnty",
        "label": "类型引用"
@@ -3373,10 +3344,10 @@
     "dir: Arc < Dir >"
    ],
    "methods": [
-    "pub fn open_existing(& self, name : & SafePathSegmentData, options : SafeOpenOptions) -> Result < std :: fs :: File , StorageError >",
-    "pub fn create_or_open(& self, name : & SafePathSegmentData, options : SafeOpenOptions) -> Result < std :: fs :: File , StorageError >",
-    "pub fn entries(& self) -> Result < Vec < SafeStorageEntryData > , StorageError >",
-    "pub fn remove_file(& self, name : & SafePathSegmentData) -> Result < () , StorageError >"
+    "pub fn open_existing(& self, name : & SafePathSegmentData, options : SafeOpenOptions) -> Result < std :: fs :: File , share :: error :: DomainError >",
+    "pub fn create_or_open(& self, name : & SafePathSegmentData, options : SafeOpenOptions) -> Result < std :: fs :: File , share :: error :: DomainError >",
+    "pub fn entries(& self) -> Result < Vec < SafeStorageEntryData > , share :: error :: DomainError >",
+    "pub fn remove_file(& self, name : & SafePathSegmentData) -> Result < () , share :: error :: DomainError >"
    ],
    "consumer_count": 3,
    "consumers": [
@@ -3405,7 +3376,7 @@
      ],
      "snippets": [
       {
-       "line": 104,
+       "line": 106,
        "code": "fn events_dir(&self) -> Result<SafeStorageDir, EventAppendError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -3492,7 +3463,7 @@
      ],
      "snippets": [
       {
-       "line": 163,
+       "line": 165,
        "code": "if entry.file_type() != SafeStorageFileType::RegularFile {",
        "kind": "ref",
        "label": "路径引用"
@@ -3508,7 +3479,7 @@
      ],
      "snippets": [
       {
-       "line": 157,
+       "line": 159,
        "code": "if entry.file_type() != SafeStorageFileType::RegularFile {",
        "kind": "ref",
        "label": "路径引用"
@@ -3543,8 +3514,8 @@
     "dir: Arc < Dir >"
    ],
    "methods": [
-    "pub fn open(root : impl AsRef < Path >) -> Result < Self , StorageError >",
-    "pub fn ensure_dir(& self, segments : & [SafePathSegmentData]) -> Result < SafeStorageDir , StorageError >"
+    "pub fn open(root : impl AsRef < Path >) -> Result < Self , share :: error :: DomainError >",
+    "pub fn ensure_dir(& self, segments : & [SafePathSegmentData]) -> Result < SafeStorageDir , share :: error :: DomainError >"
    ],
    "consumer_count": 21,
    "consumers": [
@@ -3727,13 +3698,13 @@
        "label": "类型引用"
       },
       {
-       "line": 505,
+       "line": 501,
        "code": "event_root: storage_api::SafeStorageRoot,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 512,
+       "line": 508,
        "code": "event_root: storage_api::SafeStorageRoot,",
        "kind": "fnty",
        "label": "类型引用"
@@ -3749,7 +3720,7 @@
      ],
      "snippets": [
       {
-       "line": 433,
+       "line": 427,
        "code": "let lock_root = storage_api::SafeStorageRoot::open(&root).unwrap();",
        "kind": "call",
        "label": "调用"
@@ -3972,7 +3943,7 @@
   },
   "StorageEntryData": {
    "kind": "struct",
-   "duty": "枚举条目（generation() 恒返回 Primary，#1865 B 待处置）",
+   "duty": "枚举条目（#1865 B：generation() 恒值方法删除）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/atomic_blob.rs",
    "signature": "pub struct StorageEntryData {",
@@ -3983,8 +3954,7 @@
    "methods": [
     "pub fn new(key : super :: StorageKeyData, size_bytes : usize) -> Self",
     "pub fn key(& self) -> & super :: StorageKeyData",
-    "pub fn size_bytes(& self) -> usize",
-    "pub fn generation(& self) -> GenerationData"
+    "pub fn size_bytes(& self) -> usize"
    ],
    "consumer_count": 1,
    "consumers": [
@@ -3998,558 +3968,9 @@
      "snippets": [
       {
        "line": 140,
-       "code": ") -> Result<Vec<storage::StorageEntryData>, StorageError> {",
+       "code": ") -> Result<Vec<storage::StorageEntryData>, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
-      }
-     ]
-    }
-   ]
-  },
-  "StorageError": {
-   "kind": "struct",
-   "duty": "storage 统一错误 {kind,message}；config:675-683 / memory:219-230 穷尽 match kind（#1865 C 折叠 DomainError）",
-   "deep_path": null,
-   "def": "agent/features/storage/src/domain/published_language.rs",
-   "signature": "pub struct StorageError {",
-   "fields": [
-    "kind: StorageErrorKind",
-    "message: String"
-   ],
-   "methods": [
-    "pub fn new(kind : StorageErrorKind, message : impl Into < String >) -> Self",
-    "pub fn kind(& self) -> & StorageErrorKind",
-    "fn fmt(& self, formatter : & mut fmt :: Formatter < '_ >) -> fmt :: Result"
-   ],
-   "consumer_count": 10,
-   "consumers": [
-    {
-     "file": "agent/features/audit/src/adapters/append.rs",
-     "module": "audit :: adapters/append.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 67,
-       "code": "fn map_open_error(error: storage::StorageError) -> AppendLogError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/config/src/adapters.rs",
-     "module": "config :: adapters.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 682,
-       "code": "fn map_storage_error(error: storage::StorageError) -> ConfigAdapterError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/adapters/dataset_session_reader.rs",
-     "module": "context :: adapters/dataset_session_reader.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 673,
-       "code": "fn storage_error(error: StorageError) -> SessionGenerationWireError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/adapters/dataset_session_writer.rs",
-     "module": "context :: adapters/dataset_session_writer.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用",
-      "调用"
-     ],
-     "snippets": [
-      {
-       "line": 235,
-       "code": "pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKeyData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 248,
-       "code": ") -> Result<DatasetKeyData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 260,
-       "code": "fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKeyData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 271,
-       "code": ") -> Result<DatasetKeyData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 301,
-       "code": ") -> Result<DatasetChangeSetData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 311,
-       "code": ".collect::<Result<Vec<_>, StorageError>>()?;",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 322,
-       "code": ".collect::<Result<Vec<DatasetMemberReferenceData>, StorageError>>()?;",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 327,
-       "code": ".collect::<Result<Vec<_>, StorageError>>()?;",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 333,
-       "code": "fn missing_reuse_evidence(name: &str) -> StorageError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 334,
-       "code": "StorageError::new(",
-       "kind": "call",
-       "label": "调用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/adapters.rs",
-     "module": "memory :: adapters.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 127,
-       "code": "fn map_storage_open_error(error: storage_api::StorageError) -> MemoryOpenerError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 219,
-       "code": "pub fn map_storage_error(error: &storage_api::StorageError) -> MemoryStorageErrorKind {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 228,
-       "code": "| storage_api::StorageErrorKind::UnsupportedDurability => MemoryStorageErrorKind::Io,",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/adapters_tests.rs",
-     "module": "memory :: adapters_tests.rs",
-     "is_test": true,
-     "forms": [
-      "调用"
-     ],
-     "snippets": [
-      {
-       "line": 64,
-       "code": "let error = storage_api::StorageError::new(storage_kind, \"redacted by ACL\");",
-       "kind": "call",
-       "label": "调用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/event_jsonl.rs",
-     "module": "memory :: event_jsonl.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 97,
-       "code": "fn map_storage_error(error: storage::StorageError) -> EventAppendError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/reflection_history_jsonl.rs",
-     "module": "memory :: reflection_history_jsonl.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 112,
-       "code": "fn storage_failure(error: storage::StorageError) -> MemoryError {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/background_process/session_runtime.rs",
-     "module": "runtime :: application/background_process/session_runtime.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用",
-      "调用",
-      "类型引用",
-      "调用",
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 497,
-       "code": ") -> Result<(), storage::StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 511,
-       "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
-       "kind": "call",
-       "label": "调用"
-      },
-      {
-       "line": 528,
-       "code": ") -> Result<usize, storage::StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 550,
-       "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
-       "kind": "call",
-       "label": "调用"
-      },
-      {
-       "line": 558,
-       "code": "fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 561,
-       "code": ".map_err(|error: storage::StorageError| error)?;",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 569,
-       "code": "fn legacy_ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 572,
-       "code": ".map_err(|error: storage::StorageError| error)?;",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/testing/testkit/src/blob.rs",
-     "module": "unknown :: agent/testing/testkit/src/blob.rs",
-     "is_test": false,
-     "forms": [
-      "类型引用",
-      "调用",
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 76,
-       "code": ") -> Result<ReadOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 91,
-       "code": ") -> Result<WriteReceiptData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 93,
-       "code": "return Err(StorageError::new(storage::StorageErrorKind::Io, message));",
-       "kind": "call",
-       "label": "调用"
-      },
-      {
-       "line": 108,
-       "code": ") -> Result<PromoteOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 117,
-       "code": ") -> Result<QuarantineOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 132,
-       "code": ") -> Result<DeleteOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 140,
-       "code": ") -> Result<Vec<storage::StorageEntryData>, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    }
-   ]
-  },
-  "StorageErrorKind": {
-   "kind": "enum",
-   "duty": "错误类别 6 变体（消费方控制流依赖的专有语义域）",
-   "deep_path": null,
-   "def": "agent/features/storage/src/domain/published_language.rs",
-   "signature": "pub enum StorageErrorKind {",
-   "fields": [
-    "InvalidKey",
-    "Io",
-    "PermissionDenied",
-    "UnsupportedDurability",
-    "ConcurrentWrite",
-    "CorruptTransaction { CorruptTransactionError }"
-   ],
-   "methods": [],
-   "consumer_count": 8,
-   "consumers": [
-    {
-     "file": "agent/features/audit/src/adapters/append.rs",
-     "module": "audit :: adapters/append.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 69,
-       "code": "storage::StorageErrorKind::InvalidKey => AppendLogError::InvalidStream,",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/config/src/adapters.rs",
-     "module": "config :: adapters.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 684,
-       "code": "StorageErrorKind::PermissionDenied => ConfigAdapterError::PermissionDenied,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 685,
-       "code": "StorageErrorKind::UnsupportedDurability => ConfigAdapterError::UnsupportedDurability,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 687,
-       "code": "StorageErrorKind::InvalidKey => ConfigAdapterError::Invalid,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 688,
-       "code": "StorageErrorKind::Io | StorageErrorKind::ConcurrentWrite => ConfigAdapterError::Io,",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/adapters/dataset_session_writer.rs",
-     "module": "context :: adapters/dataset_session_writer.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 335,
-       "code": "StorageErrorKind::ConcurrentWrite,",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/adapters.rs",
-     "module": "memory :: adapters.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 221,
-       "code": "storage_api::StorageErrorKind::PermissionDenied => MemoryStorageErrorKind::PermissionDenied,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 222,
-       "code": "storage_api::StorageErrorKind::ConcurrentWrite => MemoryStorageErrorKind::ConcurrentWrite,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 226,
-       "code": "storage_api::StorageErrorKind::InvalidKey => MemoryStorageErrorKind::Serialization,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 227,
-       "code": "storage_api::StorageErrorKind::Io",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 228,
-       "code": "| storage_api::StorageErrorKind::UnsupportedDurability => MemoryStorageErrorKind::Io,",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/adapters_tests.rs",
-     "module": "memory :: adapters_tests.rs",
-     "is_test": true,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 43,
-       "code": "storage_api::StorageErrorKind::PermissionDenied,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 47,
-       "code": "storage_api::StorageErrorKind::ConcurrentWrite,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 51,
-       "code": "storage_api::StorageErrorKind::Io,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 55,
-       "code": "storage_api::StorageErrorKind::UnsupportedDurability,",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 59,
-       "code": "storage_api::StorageErrorKind::InvalidKey,",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/memory/src/event_jsonl.rs",
-     "module": "memory :: event_jsonl.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 99,
-       "code": "StorageErrorKind::InvalidKey => EventAppendError::Rejected,",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/background_process/session_runtime.rs",
-     "module": "runtime :: application/background_process/session_runtime.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 511,
-       "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 550,
-       "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/testing/testkit/src/blob.rs",
-     "module": "unknown :: agent/testing/testkit/src/blob.rs",
-     "is_test": false,
-     "forms": [
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 93,
-       "code": "return Err(StorageError::new(storage::StorageErrorKind::Io, message));",
-       "kind": "ref",
-       "label": "路径引用"
       }
      ]
     }
@@ -4557,7 +3978,7 @@
   },
   "StorageKeyData": {
    "kind": "struct",
-   "duty": "blob 键标识：namespace + segments（类型安全优先不合 DatasetKeyData）",
+   "duty": "blob 键标识：namespace + segments；#1865 D 新增 relative_path() 为物理布局唯一发布点（消费方不再自行拼接）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/published_language.rs",
    "signature": "pub struct StorageKeyData {",
@@ -4566,9 +3987,10 @@
     "segments: Vec < SafePathSegmentData >"
    ],
    "methods": [
-    "pub fn new(namespace : StorageNamespaceData, segments : Vec < SafePathSegmentData >) -> Result < Self , StorageError >",
+    "pub fn new(namespace : StorageNamespaceData, segments : Vec < SafePathSegmentData >) -> Result < Self , share :: error :: DomainError >",
     "pub fn namespace(& self) -> StorageNamespaceData",
-    "pub fn segments(& self) -> & [SafePathSegmentData]"
+    "pub fn segments(& self) -> & [SafePathSegmentData]",
+    "pub fn relative_path(& self) -> std :: path :: PathBuf"
    ],
    "consumer_count": 8,
    "consumers": [
@@ -4583,7 +4005,7 @@
      "snippets": [
       {
        "line": 16,
-       "code": "SafePathSegmentData, StorageErrorKind, StorageKeyData, StorageNamespaceData, WriteOptionsData,",
+       "code": "SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -4696,6 +4118,12 @@
        "code": "let key = StorageKeyData::new(",
        "kind": "call",
        "label": "调用"
+      },
+      {
+       "line": 47,
+       "code": "let key = StorageKeyData::new(",
+       "kind": "call",
+       "label": "调用"
       }
      ]
     },
@@ -4711,25 +4139,25 @@
      ],
      "snippets": [
       {
-       "line": 558,
-       "code": "fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
+       "line": 557,
+       "code": "fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 562,
+       "line": 561,
        "code": "storage::StorageKeyData::new(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 569,
-       "code": "fn legacy_ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
+       "line": 570,
+       "code": ") -> Result<storage::StorageKeyData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 573,
+       "line": 574,
        "code": "storage::StorageKeyData::new(",
        "kind": "call",
        "label": "调用"
@@ -4761,8 +4189,8 @@
      ],
      "snippets": [
       {
-       "line": 11,
-       "code": "StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,",
+       "line": 10,
+       "code": "PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageKeyData,",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -4808,25 +4236,20 @@
   },
   "StorageNamespaceData": {
    "kind": "enum",
-   "duty": "命名空间词汇 + 策略：previous_policy:61（pub(crate)）/ minimum_durability:76 / effective_durability:91；TaskData/History/Workspace/AuditUsage 4 变体零生产（#1865 B 待删）",
+   "duty": "命名空间词汇 + 策略：minimum_durability / effective_durability（#1865 B：TaskData/History/Workspace/AuditUsage 4 死变体与 PreviousPolicy 机制已删除，恒 Retain 为唯一路径）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/published_language.rs",
    "signature": "pub enum StorageNamespaceData {",
    "fields": [
     "Session",
     "Memory",
-    "TaskData",
-    "History",
     "ToolResult",
-    "AuditUsage",
     "Config",
-    "Workspace",
     "BackgroundProcess",
     "LegacyBackgroundTask"
    ],
    "methods": [
     "pub fn as_str(self) -> & 'static str",
-    "fn previous_policy(self) -> PreviousPolicy",
     "pub fn minimum_durability(self) -> DurabilityData",
     "pub fn effective_durability(self, requested : DurabilityData) -> DurabilityData"
    ],
@@ -4933,13 +4356,13 @@
      ],
      "snippets": [
       {
-       "line": 237,
+       "line": 239,
        "code": "StorageNamespaceData::Session,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 250,
+       "line": 252,
        "code": "StorageNamespaceData::Session,",
        "kind": "ref",
        "label": "路径引用"
@@ -5041,7 +4464,7 @@
      ],
      "snippets": [
       {
-       "line": 98,
+       "line": 91,
        "code": "storage_api::StorageNamespaceData::Memory,",
        "kind": "ref",
        "label": "路径引用"
@@ -5117,8 +4540,8 @@
        "label": "路径引用"
       },
       {
-       "line": 47,
-       "code": ".join(StorageNamespaceData::ToolResult.as_str())",
+       "line": 48,
+       "code": "StorageNamespaceData::ToolResult,",
        "kind": "ref",
        "label": "路径引用"
       }
@@ -5133,13 +4556,13 @@
      ],
      "snippets": [
       {
-       "line": 563,
+       "line": 562,
        "code": "storage::StorageNamespaceData::BackgroundProcess,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 574,
+       "line": 575,
        "code": "storage::StorageNamespaceData::LegacyBackgroundTask,",
        "kind": "ref",
        "label": "路径引用"
@@ -5371,7 +4794,7 @@
      ],
      "snippets": [
       {
-       "line": 330,
+       "line": 326,
        "code": "storage_api::WriteOptionsData::new(storage_api::DurabilityData::ProcessCrashSafe),",
        "kind": "call",
        "label": "调用"
@@ -5387,7 +4810,7 @@
      ],
      "snippets": [
       {
-       "line": 114,
+       "line": 107,
        "code": "storage_api::WriteOptionsData::new(storage_api::DurabilityData::BestEffort),",
        "kind": "call",
        "label": "调用"
@@ -5419,7 +4842,7 @@
      ],
      "snippets": [
       {
-       "line": 83,
+       "line": 88,
        "code": "WriteOptionsData::new(DurabilityData::ProcessCrashSafe),",
        "kind": "call",
        "label": "调用"
@@ -5435,7 +4858,7 @@
      ],
      "snippets": [
       {
-       "line": 516,
+       "line": 515,
        "code": "storage::WriteOptionsData::new(storage::DurabilityData::ProcessCrashSafe),",
        "kind": "call",
        "label": "调用"
@@ -5452,7 +4875,7 @@
      "snippets": [
       {
        "line": 11,
-       "code": "StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,",
+       "code": "TransactionScopeData, WriteOptionsData, WriteReceiptData,",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -5474,7 +4897,7 @@
   },
   "WriteReceiptData": {
    "kind": "struct",
-   "duty": "写入回执（含 warning 通道：PreviousPromotionPending 零生产点，#1865 B 待删）",
+   "duty": "写入回执（#1865 B：warning 通道死变体 PreviousPromotionPending 已删除；JournalCleanupPending 为唯一降级档）",
    "deep_path": null,
    "def": "agent/features/storage/src/domain/atomic_blob.rs",
    "signature": "pub struct WriteReceiptData {",
@@ -5498,7 +4921,7 @@
      "snippets": [
       {
        "line": 91,
-       "code": ") -> Result<WriteReceiptData, StorageError> {",
+       "code": ") -> Result<WriteReceiptData, share::error::DomainError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -6165,13 +5588,13 @@
   "blob 写入与世代": {
    "chain": "blob 写入链",
    "path": [
-    "装配：wire_file_system_blob → AtomicBlobPort",
-    "键与选项：StorageKeyData + WriteOptionsData，经 StorageNamespaceData + DurabilityData 归一耐久档",
-    "锁与恢复：StorageKeyData 解析加锁，恢复决策内联执行（A 项改造点）",
-    "世代保留：TransactionScopeData + GenerationData（Primary/Previous 双世代）",
-    "提交与回执：WriteReceiptData + CommitWarningData（B：warning 死通道待删）",
+    "装配：wire_file_system_blob → AtomicBlobPort（DomainError 签名）",
+    "键与选项：StorageKeyData（relative_path 布局单点）+ WriteOptionsData，经 StorageNamespaceData + DurabilityData 归一耐久档",
+    "锁与恢复：StorageKeyData 解析加锁，恢复决策单点于 domain::blob_recovery（adapter 只采集证据执行）",
+    "世代保留：TransactionScopeData + GenerationData（恒 Retain；Primary/Previous 双世代）",
+    "提交与回执：WriteReceiptData + CommitWarningData（JournalCleanupPending 唯一降级档）",
     "读取：ReadOutcomeData + BlobReadData + GenerationData",
-    "同族操作：PromoteOutcomeData / DeleteOptionsData / DeleteOutcomeData / StorageEntryData（B：generation 恒 Primary）"
+    "同族操作：PromoteOutcomeData / DeleteOptionsData / DeleteOutcomeData / StorageEntryData"
    ]
   },
   "崩溃恢复与隔离": {
@@ -6180,26 +5603,28 @@
     "证据：journal 阶段 × 摘要观测（恢复子域内部）",
     "决策：domain 决策表（test-only）vs adapter 内联（A：单点化）",
     "隔离产物：QuarantineReason + QuarantineOutcomeData + QuarantineReceiptData（B：字段零消费）",
-    "损坏终态：CorruptTransactionError + CorruptionReason + QuarantineDisposition"
+    "损坏终态：CorruptTransactionError + CorruptionReason + QuarantineDisposition",
+    "C 语义折叠：StorageError{kind,message} pub(crate) → impl From → DomainError 三档（InvalidKey→Invalid / UnsupportedDurability→Unavailable / 其余→Storage）",
+    "消费方 ACL：config/memory/audit 按 DomainError.category() 控制流（不再依赖 kind）"
    ]
   },
   "dataset 修订与提交": {
    "chain": "dataset 修订链",
    "path": [
-    "装配：wire_file_system_dataset → AtomicDatasetPort",
+    "装配：wire_file_system_dataset → AtomicDatasetPort（DomainError 签名）",
     "成员：DatasetMemberData + DatasetMemberReferenceData + DatasetMemberChangeData",
     "清单：DatasetChangeSetData + DatasetManifestData",
-    "指纹与提交：DatasetRevisionData（摘要单源）→ DatasetCommitReceiptData + DatasetCommitVisibilityData",
-    "读取与读回执：DatasetReadData + DatasetReadOutcomeData + DatasetKeyData（B：warning 与 DatasetReadData 待处置）"
+    "指纹与提交：DatasetRevisionData（摘要单源）→ DatasetCommitReceiptData + DatasetCommitVisibilityData（warning 通道已删）",
+    "读取与读回执：DatasetReadData + DatasetReadOutcomeData + DatasetKeyData"
    ]
   },
   "命名空间与耐久": {
    "chain": "命名空间策略链",
    "path": [
-    "词汇：StorageNamespaceData（数据域维度）",
-    "策略：previous_policy + minimum_durability",
+    "词汇：StorageNamespaceData（数据域维度：Session/Memory/ToolResult/Config/BackgroundProcess/LegacyBackgroundTask）",
+    "策略：minimum_durability 恒 ProcessCrashSafe；previous 恒 Retain（#1865 B：PreviousPolicy 机制删除）",
     "归一：effective_durability → WriteOptionsData",
-    "B：TaskData/History/Workspace/AuditUsage 死变体待删（含专属 previous/durability 分支）"
+    "B 已收口：TaskData/History/Workspace/AuditUsage 死变体及专属策略分支删除"
    ]
   },
   "安全路径访问": {
@@ -6209,15 +5634,6 @@
     "根 capability：SafeStorageRoot",
     "受限句柄：SafeStorageDir + SafeOpenOptions + SafeStorageFileType",
     "D：消费方自行拼物理路径（runtime 工具结果 blob）→ 改 storage 句柄能力；SafeStorageEntryData 为泄漏补导出"
-   ]
-  },
-  "错误语义": {
-   "chain": "错误消费链",
-   "path": [
-    "事实形态：StorageError{kind,message} + StorageErrorKind（6 变体）",
-    "消费方：config / memory 穷尽 match kind，audit 通配降级",
-    "C：折叠 DomainError（前置：share 依赖 + workspace-matrix 登记）",
-    "保留判定：CorruptionReason / QuarantineDisposition 作为载荷枚举"
    ]
   }
  }

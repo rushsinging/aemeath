@@ -10,13 +10,13 @@ A–E 工作项涉及的病症位置。
 
 ## 分组
 
-| 节点 | 内容 |
+| 节点 | 内容（#1865 A–E 收口后 41 符号，五分） |
 |---|---|
 | 工厂 | `wire_file_system_blob` / `wire_file_system_dataset`（根级 pub fn，返回 `Arc<dyn 端口>`） |
 | 端口 | `AtomicBlobPort`（read/write_atomic/promote_previous/quarantine/delete_all_generations/list_primary）、`AtomicDatasetPort`（read_manifest/read_consistent/read_previous/commit_atomic/commit_incremental） |
 | 安全路径 | `SafePathSegmentData` 校验 + `SafeStorageRoot`/`SafeStorageDir`/`SafeOpenOptions`/`SafeStorageFileType`/`SafeStorageEntryData` 受限句柄 |
 | 共享词汇 | `StorageNamespaceData`（previous_policy/minimum_durability/effective_durability 策略）、`StorageKeyData`、`DurabilityData`、`TransactionScopeData`、`GenerationData` |
-| 错误与恢复 | `StorageError`{kind,message}、`StorageErrorKind`（6 变体）、`CorruptionReason`/`QuarantineDisposition`/`CorruptTransactionError` 载荷链 |
+| 崩溃恢复与隔离 | 恢复决策载荷（`CorruptionReason`/`QuarantineDisposition`/`CorruptTransactionError`）+ 隔离三件；#1865 A 决策单点 / C 错误语义折叠记录 |
 | blob 载荷与回执 | 写入/删除选项、读/写/删/提升回执、隔离三件（Reason/Outcome/Receipt）、`CommitWarningData`、`StorageEntryData` |
 | dataset 载荷与回执 | 成员三型、变更集、清单、修订指纹（`revision_member_digest` 单源）、提交回执与可见性 |
 

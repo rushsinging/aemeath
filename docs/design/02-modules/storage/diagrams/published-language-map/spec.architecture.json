@@ -3,7 +3,7 @@
  "diagram_type": "architecture",
  "meta": {
   "title": "Storage 根面 Published Language 设计图",
-  "subtitle": "终态设计 · 根符号 43 · 功能子域六分（写入/恢复/修订/策略/路径/错误）",
+  "subtitle": "终态设计 · 根符号 41 · 功能子域五分（写入/恢复/修订/策略/路径）",
   "quality_profile": "showcase",
   "visual_preset": "blueprint",
   "output": "index.html"
@@ -70,14 +70,6 @@
    "col": 4
   },
   {
-   "id": "w6",
-   "type": "security",
-   "label": "错误语义",
-   "sublabel": "kind · 消费方 match",
-   "row": 2,
-   "col": 5
-  },
-  {
    "id": "composition",
    "type": "cloud",
    "label": "composition",
@@ -128,8 +120,7 @@
     "w2",
     "w3",
     "w4",
-    "w5",
-    "w6"
+    "w5"
    ],
    "pad": 40
   }
