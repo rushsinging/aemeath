@@ -165,22 +165,6 @@ struct ProviderBinding {
 
 Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 Provider Published Language
 
-### 2.2 PL trait 实现权登记表（#2146 治理）
-
-全仓 pub trait 按三族治理（97 个盘点）：
-
-| 族类 | 机制 | 守卫 |
-|---|---|---|
-| capability(pure) | **Sealed trait 编译期强制**（`pub(crate) mod sealed` + 超 trait 绑定；实现权物理归属定义 crate） | `pattern.pl.trait-implementation-registry` 双保险 |
-| injected-host / comp-bridge | 宿主（或 composition）实现合法，登记 `allowed_impl_crates` | 同上，按登记表校验 |
-| fake-pending（capability 有存量消费方 fake） | 66 处 fake 按登记 crate 锁死（新增未登记即违规）；收敛到定义方 test_support 后转 sealed | 同上 |
-
-登记表唯一真相源：`.agents/architecture-guard-registry.json` 的
-`pattern.pl.trait-implementation-registry`（55 条）。新增 PL trait MUST
-登记（能力端口同时加 Sealed），未登记 trait 不校验——登记即锁。，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`construction_symbols` 白名单锁定）。
-
-> **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。#1142 仍延期，**NEVER** 冒充已完成。
-
 ### 2.2 Runtime-owned InteractionPort 与交互语言
 
 ```rust
@@ -314,6 +298,40 @@ submit(trigger, owned message snapshot)
 - 后台完成**不主动**经 `EventSink` / SDK 向 TUI 投影 `ReflectionOutput`、formatted content 或完成正文。只有用户显式 `/reflect [limit]` 时才返回 newest-first 的安全 metadata/count 视图。
 - completion 与日志只能含 trigger、status、error category、token/count、duration、record id 等 metadata；**NEVER** 含 prompt、消息、Memory content、provider raw response、parsed/formatted output 或正文截断。
 - Run teardown 必须 drain 该 Run 的 Reflection slot；到结束 deadline 仍未完成时 cancel，并等待 cancellation/timeout 终态清槽后再释放 Run lease，**NEVER** 留下 detached job。adapter 自身的执行 timeout 同样只产出安全终态 metadata。
+
+
+### 2.4 PL trait 实现权登记表（#2146 治理）
+
+全仓 pub trait 按四档治理（97 个盘点；登记表当前 **54 条**）：**capability(pure)** 用
+Sealed trait 编译期强制（`pub(crate) mod sealed` + 超 trait 绑定，实现权物理归属定义
+crate）；**injected-host** 与 **comp-bridge** 的 trait 保持开放，按
+`allowed_impl_crates` 白名单登记校验（宿主 / composition 桥接实现合法）；
+**fake-pending** 是过渡债务档（存量测试 fake 按所在 crate 锁死、只减不增），当前已
+**清零**——66 处存量 fake 全部收敛到定义方 `test_support`，该档从登记表移除。
+
+| 档位 | 语义 | 治理 |
+|---|---|---|
+| capability(pure) | 协议语义唯一（原子性、revision 单调、评分一致性等），实现权唯一 | **Sealed trait 编译期强制** + `pattern.pl.trait-implementation-registry` 双保险 |
+| injected-host | 宿主 crate 合法实现（如 runtime 实现 tools 定义的 ToolCatalogPort） | 守卫按 `allowed_impl_crates` 校验，未登记实现即违规 |
+| comp-bridge | 仅 composition 桥接实现（如 ProviderFactory / UsageSink） | 同上 |
+| ~~fake-pending~~ | ~~capability 有存量消费方 fake~~ → **已清零**（#2146 收敛完成） | 若再现即为违规，不再新增该档 |
+
+**治理原则（2026-11-02 拍板）**：
+
+- **测试不是开放实现权的理由**：测试 fake 唯一通道 = 定义方 `test_support`
+  （`#[cfg(any(test, feature = "dev"))]`，如 storage `InMemoryBlobPort`）。不为测试开
+  `injected-host` 白名单、不扩散 `dev` feature 例外。
+- **开放实现权只由产品需求驱动**（如 storage 多后端可替换）；出现该需求时把对应
+  sealed trait 改判 `injected-host` 并登记白名单，NEVER 为测试理由松绑。
+- **sealed 松绑判据**：仅当「依赖方自定义实现」成为产品能力时。`AtomicBlobPort` /
+  `AtomicDatasetPort` / `MemoryPort` / `SessionManagementPort` 是多后端需求的候选观察项。
+- **守卫校验边界**（`enforce_impl_registry` 实际行为）：白名单制（未登记 trait 不校验，
+  登记即锁）；按 `impl <path::>Trait for` 头部 trait 简单名匹配；owner、composition、
+  `allowed_impl_crates` 三者之一放行；多行 `impl` 头部与宏展开实现不在静态扫描面。
+
+登记表唯一真相源：`.agents/architecture-guard-registry.json` 的
+`pattern.pl.trait-implementation-registry`。新增 PL trait MUST 登记（能力端口同时加
+Sealed），登记即锁。
 
 ## 3. RuntimeContext、SessionState 与 IoC 装配
 
