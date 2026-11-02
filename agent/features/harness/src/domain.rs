@@ -29,6 +29,9 @@ mod plugin_tests;
 pub mod routing;
 #[cfg(test)]
 mod routing_tests;
+pub mod scope_dedup;
+#[cfg(test)]
+mod scope_dedup_tests;
 pub mod stream;
 pub mod stream_port;
 #[cfg(test)]

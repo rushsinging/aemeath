@@ -49,6 +49,13 @@ pub(crate) const COMPOSE_SIMILARITY_CANDIDATE_THRESHOLD: f64 = 0.28;
 /// Compose 相似候选注入的 session 上下文总字符预算。
 pub(crate) const COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS: usize = 12_000;
 
+/// 跨 scope（global ↔ project overlay）重复召回阈值。相似度只用于召回，
+/// 最终由结构化判定区分 duplicate/specialization/conflict/distinct。
+pub(crate) const CROSS_SCOPE_DUPLICATE_RECALL_THRESHOLD: f64 = 0.24;
+
+/// 单个 project overlay 的跨 scope 重复判定候选上限。
+pub(crate) const CROSS_SCOPE_DUPLICATE_CANDIDATE_LIMIT: usize = 24;
+
 /// RSI 可落盘的内建 prose 组件 body 预算（低于 runtime 4000 注入预算，
 /// 为 source 标签包装保留余量；超限走 LLM 压缩，NEVER 硬截断）。
 pub(crate) const RSI_BUILTIN_COMPONENT_BODY_BUDGET_CHARS: usize = 3800;

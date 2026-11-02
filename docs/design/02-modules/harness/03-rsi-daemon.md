@@ -72,6 +72,8 @@ enum RsiControlAck {
 
 - 证据流只支持项目布局 `<project>/<session>.dataset`，项目段保留在 `EvidenceSourceRef.session_id` 中；顶层 legacy `<session>.dataset` 是旧设计，RSI NEVER 枚举或回读，也 NEVER 把它伪造成某个项目或 global。
 - 诊断/执行 prompt 为组件材料标注 `scope=global` / `project:<id>`，并强制：单项目的项目特定经验 NEVER 写入 global；项目 A 证据 NEVER 写入项目 B；没有同项目候选时选择 no_issue。
+- 宿主 scope 硬门禁（#2168）：内置工具 signal 先按来源项目分段过滤候选——单一项目只允许同名 project overlay，跨项目只允许 global tool-guidance/guardrails，unknown/legacy 保持 unresolved；single-phase 与 TwoPhase 共用该门禁。
+- 跨 scope 重复治理（#2168）：规则单元经 CJK bigram 召回后，由结构化 LLM 判定 `duplicate / specialization / conflict / distinct`；duplicate/conflict 的新提案被宿主拒绝，specialization/distinct 放行。周期开始时自动 reconciliation：按权威落点删除 global/project 重复行，并将证据只来自单项目的 global 专属规则下沉到对应 project overlay。
 - 项目 overlay 组件由宿主从同项目 canonical session 的 workspace 快照反解项目根，按运行时注入优先级映射 `AGENTS.md` 优先、`CLAUDE.md` 兜底；两者都缺失时不注册、不自动创建。
 - prose 组件 NEVER 复述或改写工具 schema（字段必填性、类型、枚举、示例）。工具 schema 由宿主在每次 provider 请求中权威携带；参数类改进只沉淀「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
 - RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 字符、overlay 7800 字符。初稿超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。既有组件正文已超预算时，执行阶段的第一任务就是语义压缩（合并重复规则、删除套话、保留条件与动作），NEVER 要求模型携带超长原文逐字重写。

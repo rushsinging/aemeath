@@ -28,3 +28,4 @@
 11. **signal → 组件受限路由**（2026-10-30）：宿主先生成候选组件，诊断只能在候选 index 内选择，执行阶段固定组件且 NEVER 输出 component id/action；Skill 证据按来源上下文精确匹配，未知归属 unresolved，NEVER 兜底写入全局组件。模型只复制 E0/E1 短证据编号，完整 signal id 由 runtime 映射并持久化。
 12. **canonical prose bootstrap**（2026-10-31）：`guardrails/default` 与 `tool-guidance/default` 是宿主内建职责面；正式 RSI 装配缺失时自动创建最小骨架且 NEVER 覆盖用户文件，dry-run 仅虚拟可见并零写盘。RSI 仍不可动态创建任意组件。
 13. **落点与预算安全**（2026-10-31）：证据流只枚举 `<project>/<session>.dataset`，顶层 legacy 布局 NEVER 进入 RSI；global 只承接跨项目通用规律，项目 A NEVER 写项目 B。项目 overlay 由 workspace 快照反解项目根，`AGENTS.md` 优先、`CLAUDE.md` 兜底；工具参数类改进 NEVER 复述 schema；超注入预算 MUST 先 LLM 压缩一轮，仍超则整份作废，NEVER 硬截断。
+14. **跨 scope 去重**（2026-11-02，#2168）：单一语义规则只有一个权威落点。宿主先按证据项目分段过滤候选，再对 global/project 规则做召回与结构化判定；duplicate/conflict 提案拒绝，specialization 仅保留项目差异，周期开始自动收敛存量重复并下沉单项目 global 专属规则。

@@ -71,7 +71,7 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
     let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
     let lesson_store_for_assert = Arc::clone(&lesson_store);
     let source = EvidenceSourceRef {
-        session_id: "s1.dataset".into(),
+        session_id: "0123456789abcdef/s1.dataset".into(),
         run_id: "run-1".into(),
         step_id: "step-2".into(),
     };
@@ -96,7 +96,7 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
     let stream = FakeEvidenceStream::default();
     stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
         runs: vec![RunRef {
-            session_key: "s1.dataset".into(),
+            session_key: "0123456789abcdef/s1.dataset".into(),
             run_id: "run-1".into(),
         }],
     });
@@ -108,17 +108,24 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
             summary: "Edit 重复失败 ×2".into(),
             excerpt: Some("old_string mismatch".into()),
             occurrences: 2,
-            sources: vec![EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
-                run_id: "run-1".into(),
-                step_id: "step-1".into(),
-            }],
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     stream.contexts.lock().expect("contexts").extend([
         SessionContextExcerpt {
             source: EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
+                session_id: "0123456789abcdef/s1.dataset".into(),
                 run_id: "run-1".into(),
                 step_id: "step-1".into(),
             },
@@ -211,13 +218,13 @@ async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
     for run_id in ["run-1", "run-2"] {
         stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
             runs: vec![RunRef {
-                session_key: "s1.dataset".into(),
+                session_key: "0123456789abcdef/s1.dataset".into(),
                 run_id: run_id.into(),
             }],
         });
     }
     let source = EvidenceSourceRef {
-        session_id: "s1.dataset".into(),
+        session_id: "0123456789abcdef/s1.dataset".into(),
         run_id: "run-1".into(),
         step_id: "step-1".into(),
     };
@@ -229,7 +236,14 @@ async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
             summary: "Bash 同参数失败后重复调用 ×2".into(),
             excerpt: Some("exit code 1: unchanged retry".into()),
             occurrences: 2,
-            sources: vec![source.clone()],
+            sources: vec![
+                source.clone(),
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     stream
@@ -319,7 +333,7 @@ async fn two_phase_cycle_uses_router_and_fixed_execution() {
     let stream = FakeEvidenceStream::default();
     stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
         runs: vec![RunRef {
-            session_key: "s1.dataset".into(),
+            session_key: "0123456789abcdef/s1.dataset".into(),
             run_id: "run-1".into(),
         }],
     });
@@ -331,7 +345,18 @@ async fn two_phase_cycle_uses_router_and_fixed_execution() {
             summary: "Bash 连续失败 ×3".into(),
             excerpt: Some("exit code 1".into()),
             occurrences: 3,
-            sources: Vec::new(),
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     let llm = PromptRecordingLlm::new(vec![
@@ -387,7 +412,7 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
     let lesson_dir = tempfile::tempdir().expect("tempdir");
     let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
     let source = EvidenceSourceRef {
-        session_id: "s1.dataset".into(),
+        session_id: "0123456789abcdef/s1.dataset".into(),
         run_id: "run-1".into(),
         step_id: "step-2".into(),
     };
@@ -412,7 +437,7 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
     let stream = FakeEvidenceStream::default();
     stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
         runs: vec![RunRef {
-            session_key: "s1.dataset".into(),
+            session_key: "0123456789abcdef/s1.dataset".into(),
             run_id: "run-1".into(),
         }],
     });
@@ -424,17 +449,24 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
             summary: "Edit 重复失败 ×2".into(),
             excerpt: Some("old_string mismatch".into()),
             occurrences: 2,
-            sources: vec![EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
-                run_id: "run-1".into(),
-                step_id: "step-1".into(),
-            }],
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     stream.contexts.lock().expect("contexts").extend([
         SessionContextExcerpt {
             source: EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
+                session_id: "0123456789abcdef/s1.dataset".into(),
                 run_id: "run-1".into(),
                 step_id: "step-1".into(),
             },
