@@ -5,7 +5,7 @@
 //! 本结构负责结构化消费（评测 harness / 事件），两条路径同一真相源。
 
 /// 单次压缩的观测指标；`Default` 表示"未采集"。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct CompactMetricsData {
     /// 实际调用的压缩模型（`provider/model`）；本地压缩为 `None`。
     pub model: Option<String>,

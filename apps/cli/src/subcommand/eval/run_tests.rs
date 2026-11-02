@@ -50,6 +50,7 @@ fn report_counts_succeeded_and_failed() {
         elapsed_ms: Some(1000),
         estimated_input_tokens: Some(10_000),
         ms_per_1k_input_tokens: Some(100.0),
+        metrics: None,
         error: None,
     });
     assert_eq!(report.cases_total, 2);
