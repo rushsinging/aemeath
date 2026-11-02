@@ -22,6 +22,7 @@ impl StatusViewAssembler {
         session: Option<&SessionModel>,
         diagnostics: &DiagnosticModel,
         permission_mode: &str,
+        local_bin_restart_required: bool,
     ) -> StatusViewModel {
         StatusViewModel {
             notice: Self::assemble_notice_view(&conversation.runtime.status_notice),
@@ -31,6 +32,7 @@ impl StatusViewAssembler {
                 workspace,
                 session,
                 permission_mode,
+                local_bin_restart_required,
             ),
             line: Self::assemble_from_runtime_session(
                 conversation,
@@ -64,6 +66,7 @@ impl StatusViewAssembler {
         workspace: &WorkspaceProvider,
         session: Option<&SessionModel>,
         permission_mode: &str,
+        local_bin_restart_required: bool,
     ) -> StatusRuntimeViewModel {
         StatusRuntimeViewModel {
             model: presentation.model_id().map(ToOwned::to_owned),
@@ -84,6 +87,8 @@ impl StatusViewAssembler {
             ),
             tps: conversation.runtime.live_tps.unwrap_or(0.0),
             background_processes_active: conversation.runtime.background_processes_active,
+            app_version: composition::version().to_string(),
+            restart_to_update: local_bin_restart_required,
             reflecting: conversation.runtime.reflecting,
             context: StatusContextViewModel {
                 path_base: workspace.path_base().unwrap_or_default().to_string(),

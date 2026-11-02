@@ -58,6 +58,8 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
             context_size: 200_000,
             tps: 42.0,
             background_processes_active: 0,
+            app_version: "0.0.0-test".to_string(),
+            restart_to_update: false,
             reflecting: false,
             context: StatusContextViewModel::default(),
         },
@@ -73,6 +75,10 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
     assert!(text.contains("42 t/s"));
     assert!(text.contains("ctx 37%"));
     assert!(text.contains("api 7"));
+    assert!(
+        text.ends_with("v0.0.0-test"),
+        "版本段应常驻 runtime 行末尾: {text}"
+    );
     assert!(!text.to_ascii_lowercase().contains("session"));
     assert!(!text.contains("019-session"));
     assert!(!text.to_ascii_lowercase().contains("cost"));
@@ -333,5 +339,32 @@ fn status_bar_includes_reflecting_marker_when_active() {
     assert!(
         !rendered.contains("Reflecting"),
         "unexpected Reflecting marker, got {rendered}"
+    );
+}
+
+#[test]
+fn runtime_row_omits_version_segment_when_empty() {
+    let bar = StatusBar::new();
+    let view = status_view("", "", StatusWorktreeKind::Main, "main", None);
+
+    let text = bar.build_full_text(&view);
+
+    assert!(!text.contains(" v"), "空版本不得渲染悬空 v 段: {text}");
+}
+
+#[test]
+fn runtime_row_shows_restart_to_update_marker_without_new_version() {
+    let bar = StatusBar::new();
+    let mut view = status_view("", "", StatusWorktreeKind::Main, "main", None);
+    view.runtime.app_version = "0.0.0-abc12345".to_string();
+    view.runtime.restart_to_update = true;
+
+    let text = bar.build_full_text(&view);
+
+    assert!(text.contains("v0.0.0-abc12345"), "{text}");
+    assert!(text.ends_with("restart to update"), "{text}");
+    assert!(
+        !text.contains("→"),
+        "restart to update 不得携带具体新版本号: {text}"
     );
 }

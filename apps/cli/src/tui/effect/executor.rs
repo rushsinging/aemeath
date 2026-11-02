@@ -503,6 +503,24 @@ impl App {
             .push_input_event(sdk::ChatInputEvent::QueryReflectionHistory { limit });
     }
 
+    /// 本地二进制被替换时在状态栏标记 `restart to update`（内部节流，失败静默）。
+    ///
+    /// 只置状态、不向会话流追加提示；状态保持到进程退出（重启即消失）。
+    pub(crate) fn poll_local_bin_update(&mut self) {
+        if self.local_bin_restart_required {
+            return;
+        }
+        if self
+            .local_bin_watch
+            .poll(std::time::Instant::now())
+            .is_none()
+        {
+            return;
+        }
+        self.local_bin_restart_required = true;
+        self.view_state.dirty.mark_status();
+    }
+
     /// 启动时后台检查版本更新（非阻塞）。
     /// 使用 `force_check` 忽略缓存，确保每次启动都查最新状态。
     /// 失败时静默降级——版本检查不应影响正常使用。
