@@ -4,9 +4,7 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
-use super::{
-    CommitWarningData, SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData,
-};
+use super::{SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData};
 
 /// 计算单个成员字节参与修订号运算的领域摘要（`MEMBER_BYTES_DOMAIN`）。
 ///
@@ -422,19 +420,16 @@ pub enum DatasetCommitVisibilityData {
 pub struct DatasetCommitReceiptData {
     revision: DatasetRevisionData,
     visibility: DatasetCommitVisibilityData,
-    warning: Option<CommitWarningData>,
 }
 
 impl DatasetCommitReceiptData {
     pub(crate) fn committed(
         revision: DatasetRevisionData,
         visibility: DatasetCommitVisibilityData,
-        warning: Option<CommitWarningData>,
     ) -> Self {
         Self {
             revision,
             visibility,
-            warning,
         }
     }
 
@@ -444,10 +439,6 @@ impl DatasetCommitReceiptData {
 
     pub fn visibility(&self) -> DatasetCommitVisibilityData {
         self.visibility
-    }
-
-    pub fn warning(&self) -> Option<CommitWarningData> {
-        self.warning
     }
 }
 

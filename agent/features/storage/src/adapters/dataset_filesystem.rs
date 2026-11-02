@@ -30,12 +30,12 @@ use super::dataset_protocol::{
 };
 use crate::domain::revision_member_digest;
 use crate::{
-    AtomicDatasetPort, CommitWarningData, CorruptTransactionError, CorruptionReason,
-    DatasetChangeSetData, DatasetCommitReceiptData, DatasetCommitVisibilityData, DatasetKeyData,
-    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
-    DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData, DeleteOptionsData,
-    DeleteOutcomeData, GenerationData, QuarantineDisposition, QuarantineOutcomeData,
-    QuarantineReason, QuarantineReceiptData, SafePathSegmentData, StorageError, StorageErrorKind,
+    AtomicDatasetPort, CorruptTransactionError, CorruptionReason, DatasetChangeSetData,
+    DatasetCommitReceiptData, DatasetCommitVisibilityData, DatasetKeyData, DatasetManifestData,
+    DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData, DatasetReadData,
+    DatasetReadOutcomeData, DatasetRevisionData, DeleteOptionsData, DeleteOutcomeData,
+    GenerationData, QuarantineDisposition, QuarantineOutcomeData, QuarantineReason,
+    QuarantineReceiptData, SafePathSegmentData, StorageError, StorageErrorKind,
     TransactionScopeData, WriteOptionsData,
 };
 
@@ -1211,7 +1211,6 @@ impl FileSystemDatasetAdapter {
             Ok(()) => Ok(DatasetCommitReceiptData::committed(
                 new_revision,
                 DatasetCommitVisibilityData::Visible,
-                None,
             )),
             Err(error) if matches!(error.kind(), StorageErrorKind::CorruptTransaction(_)) => {
                 Err(error)
@@ -1221,7 +1220,6 @@ impl FileSystemDatasetAdapter {
                 Ok(DatasetCommitReceiptData::committed(
                     new_revision,
                     DatasetCommitVisibilityData::RecoveryPending,
-                    Some(CommitWarningData::MemberPublishRecoveryPending),
                 ))
             }
             Err(error) => {
@@ -1358,7 +1356,6 @@ impl FileSystemDatasetAdapter {
             return Ok(DatasetCommitReceiptData::committed(
                 current.revision().clone(),
                 DatasetCommitVisibilityData::Visible,
-                None,
             ));
         };
         // D：跨越 Prepared 之前完整验证上一代，缺失/矛盾则 typed 拒绝且绝不写 journal。
@@ -1424,7 +1421,6 @@ impl FileSystemDatasetAdapter {
             Ok(()) => Ok(DatasetCommitReceiptData::committed(
                 new_revision,
                 DatasetCommitVisibilityData::Visible,
-                None,
             )),
             Err(error) => {
                 if matches!(error.kind(), StorageErrorKind::CorruptTransaction(_)) {
@@ -1440,7 +1436,6 @@ impl FileSystemDatasetAdapter {
                     Ok(DatasetCommitReceiptData::committed(
                         new_revision,
                         DatasetCommitVisibilityData::RecoveryPending,
-                        Some(CommitWarningData::MemberPublishRecoveryPending),
                     ))
                 } else {
                     let _ = proto::remove_journal(dir);

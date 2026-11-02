@@ -18,22 +18,12 @@ impl DurabilityData {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PreviousPolicy {
-    Retain,
-    Discard,
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum StorageNamespaceData {
     Session,
     Memory,
-    TaskData,
-    History,
     ToolResult,
-    AuditUsage,
     Config,
-    Workspace,
     /// #252：后台进程账本（session 级快照，resume 失效对账与查询）。
     BackgroundProcess,
     /// #252：后台进程账本旧 namespace（Background Process 更名前的
@@ -47,45 +37,17 @@ impl StorageNamespaceData {
         match self {
             Self::Session => "session",
             Self::Memory => "memory",
-            Self::TaskData => "task",
-            Self::History => "history",
             Self::ToolResult => "tool-result",
-            Self::AuditUsage => "audit-usage",
             Self::Config => "config",
-            Self::Workspace => "workspace",
             Self::BackgroundProcess => "background-process",
             Self::LegacyBackgroundTask => "background-task",
         }
     }
 
-    pub(crate) fn previous_policy(self) -> PreviousPolicy {
-        match self {
-            Self::AuditUsage => PreviousPolicy::Discard,
-            Self::Session
-            | Self::Memory
-            | Self::TaskData
-            | Self::History
-            | Self::ToolResult
-            | Self::Config
-            | Self::Workspace
-            | Self::BackgroundProcess
-            | Self::LegacyBackgroundTask => PreviousPolicy::Retain,
-        }
-    }
-
+    /// 当前所有在役 namespace 均要求 crash-safe（#1865 B：BestEffort 专属
+    /// 分支随 AuditUsage 死变体删除）。
     pub fn minimum_durability(self) -> DurabilityData {
-        match self {
-            Self::AuditUsage => DurabilityData::BestEffort,
-            Self::Session
-            | Self::Memory
-            | Self::TaskData
-            | Self::History
-            | Self::ToolResult
-            | Self::Config
-            | Self::Workspace
-            | Self::BackgroundProcess
-            | Self::LegacyBackgroundTask => DurabilityData::ProcessCrashSafe,
-        }
+        DurabilityData::ProcessCrashSafe
     }
 
     pub fn effective_durability(self, requested: DurabilityData) -> DurabilityData {

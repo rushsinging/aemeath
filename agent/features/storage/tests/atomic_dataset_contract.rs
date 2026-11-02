@@ -73,7 +73,6 @@ async fn seed_generation(
         .await
         .expect("commit_atomic must publish the generation");
     assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
-    assert_eq!(receipt.warning(), None);
     receipt.revision().clone()
 }
 
@@ -179,7 +178,6 @@ async fn first_commit_publishes_complete_generation() {
         .await
         .expect("first commit must succeed against the empty revision");
     assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
-    assert_eq!(receipt.warning(), None);
 
     let manifest = adapter.read_manifest(&key).await.unwrap();
     assert_eq!(

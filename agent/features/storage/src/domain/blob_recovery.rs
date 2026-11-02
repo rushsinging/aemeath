@@ -1,19 +1,17 @@
-// JournalPhase / DigestObservation / RecoveryDecision、decide_* 与 TransactionDigest 仅测试引用：
-// 生产恢复路径在 adapters（`blob_protocol` 侧副本 + 内联 match）实现，逐项收窄到 test 目标（#1995）；
-// CorruptionReason / QuarantineDisposition / CorruptTransactionError 仍为生产载荷，保持原样。
-#[cfg(test)]
-use sha2::{Digest, Sha256};
+// 恢复决策单一真相源（#1865 A）：`decide_blob_recovery` / `decide_orphan_previous`
+// 是本 crate 唯一的恢复策略表，adapter（blob_filesystem::recover_sync /
+// recover_orphan_previous）只负责采集证据（journal phase × digest 观测）并执行
+// 决策动作，NEVER 内联重写判定。CorruptionReason / QuarantineDisposition /
+// CorruptTransactionError 为生产载荷。
 
 use super::TransactionScopeData;
 
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum JournalPhase {
     Prepared,
     Committed,
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DigestObservation {
     New,
@@ -33,7 +31,6 @@ pub enum CorruptionReason {
     DatasetMemberDigestMismatch,
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryDecision {
     RollForward,
@@ -42,7 +39,6 @@ pub enum RecoveryDecision {
     Corrupt(CorruptionReason),
 }
 
-#[cfg(test)]
 pub fn decide_blob_recovery(
     phase: JournalPhase,
     observation: DigestObservation,
@@ -62,39 +58,11 @@ pub fn decide_blob_recovery(
     }
 }
 
-#[cfg(test)]
 pub fn decide_orphan_previous(matches_primary: bool) -> RecoveryDecision {
     if matches_primary {
         RecoveryDecision::CleanOrphan
     } else {
         RecoveryDecision::Corrupt(CorruptionReason::OrphanPreviousDigestMismatch)
-    }
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransactionDigest([u8; 32]);
-
-#[cfg(test)]
-impl TransactionDigest {
-    pub fn blob_bytes(bytes: &[u8]) -> Self {
-        Self::calculate(b"aemeath.storage.blob.bytes.v1\0", bytes)
-    }
-
-    pub fn dataset_bytes(bytes: &[u8]) -> Self {
-        Self::calculate(b"aemeath.storage.dataset.bytes.v1\0", bytes)
-    }
-
-    pub fn absent_blob() -> Self {
-        Self::calculate(b"aemeath.storage.blob.absent.v1\0", &[])
-    }
-
-    fn calculate(domain: &[u8], bytes: &[u8]) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(domain);
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(bytes);
-        Self(hasher.finalize().into())
     }
 }
 

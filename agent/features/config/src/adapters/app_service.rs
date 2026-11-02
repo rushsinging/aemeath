@@ -262,9 +262,7 @@ fn patch_for_update(
 
 fn map_commit_warning(warning: storage::CommitWarningData) -> &'static str {
     match warning {
-        storage::CommitWarningData::PreviousPromotionPending => "上一轮配置晋升仍待处理",
-        storage::CommitWarningData::JournalCleanupPending
-        | storage::CommitWarningData::MemberPublishRecoveryPending => "配置事务日志清理待处理",
+        storage::CommitWarningData::JournalCleanupPending => "配置事务日志清理待处理",
     }
 }
 

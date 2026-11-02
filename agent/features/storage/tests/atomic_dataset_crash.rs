@@ -310,11 +310,7 @@ fn dataset_child_runs_transaction() {
 
     if let Some(result) = std::env::var_os(HELPER_RESULT) {
         let label = match outcome {
-            Ok(receipt)
-                if receipt.visibility() == DatasetCommitVisibilityData::RecoveryPending
-                    && receipt.warning()
-                        == Some(CommitWarningData::MemberPublishRecoveryPending) =>
-            {
+            Ok(receipt) if receipt.visibility() == DatasetCommitVisibilityData::RecoveryPending => {
                 "recovery-pending"
             }
             Ok(receipt) if receipt.visibility() == DatasetCommitVisibilityData::Visible => {

@@ -1948,7 +1948,9 @@
         "StorageNamespaceData",
         "TransactionScopeData",
         "WriteOptionsData",
-        "WriteReceiptData"
+        "WriteReceiptData",
+        "wire_file_system_blob",
+        "wire_file_system_dataset"
       ],
       "reason": "F-2：storage crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "fast"

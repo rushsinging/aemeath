@@ -1,6 +1,5 @@
 #[cfg(any(test, feature = "test-fault-injection"))]
 use super::constants::{FAULT_ABORT_ENV, FAULT_POINT_ENV};
-use crate::domain::PreviousPolicy;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -12,7 +11,10 @@ use fs2::FileExt;
 use uuid::Uuid;
 
 use super::blob_protocol::{
-    digest, digest_file, journal_name, read_journal, write_journal, BlobJournal, JournalPhase,
+    digest, digest_file, journal_name, read_journal, write_journal, BlobJournal,
+};
+use crate::domain::blob_recovery::{
+    decide_blob_recovery, decide_orphan_previous, DigestObservation, JournalPhase, RecoveryDecision,
 };
 use crate::{
     AtomicBlobPort, BlobReadData, CorruptTransactionError, CorruptionReason, DeleteOptionsData,
@@ -274,18 +276,22 @@ impl FileSystemBlobAdapter {
             return self.recover_orphan_previous(parent, primary_name);
         };
         let observed = digest_file(parent, primary_name)?;
-        match journal.phase {
-            JournalPhase::Prepared if observed.as_deref() == Some(journal.new_digest.as_str()) => {
-                let committed = BlobJournal {
-                    phase: JournalPhase::Committed,
-                    ..journal.clone()
-                };
-                write_journal(parent, primary_name, &committed, true)?;
+        // 策略判定单点在 domain（#1865 A）：本函数只采集证据并执行决策动作。
+        let decision = decide_blob_recovery(
+            journal.phase,
+            classify_digest_observation(&journal, observed.as_deref()),
+        );
+        match decision {
+            RecoveryDecision::RollForward => {
+                if journal.phase == JournalPhase::Prepared {
+                    let committed = BlobJournal {
+                        phase: JournalPhase::Committed,
+                        ..journal.clone()
+                    };
+                    write_journal(parent, primary_name, &committed, true)?;
+                }
             }
-            JournalPhase::Prepared
-                if observed == journal.old_digest
-                    || (observed.is_none() && journal.old_digest.is_none()) =>
-            {
+            RecoveryDecision::RollBack => {
                 let _ = parent.remove_file(format!(".stage-{}", journal.nonce));
                 let _ = parent.remove_file(primary_name.with_extension("previous.next"));
                 parent
@@ -293,19 +299,16 @@ impl FileSystemBlobAdapter {
                     .map_err(map_io)?;
                 return Ok(());
             }
-            JournalPhase::Committed if observed.as_deref() == Some(journal.new_digest.as_str()) => {
-            }
-            _ => {
+            RecoveryDecision::Corrupt(reason) => {
                 return Err(self.quarantine_corrupt_transaction(
                     parent,
                     primary_name,
                     &journal,
-                    if journal.phase == JournalPhase::Committed {
-                        CorruptionReason::CommittedDigestMismatch
-                    } else {
-                        CorruptionReason::PrimaryDigestMatchesNeitherGeneration
-                    },
+                    reason,
                 ));
+            }
+            RecoveryDecision::CleanOrphan => {
+                unreachable!("decide_blob_recovery 不产生 CleanOrphan")
             }
         }
         let previous_next = primary_name.with_extension("previous.next");
@@ -332,22 +335,26 @@ impl FileSystemBlobAdapter {
         let Some(orphan_digest) = digest_file(parent, &previous_next)? else {
             return Ok(());
         };
-        if digest_file(parent, primary_name)?.as_deref() == Some(orphan_digest.as_str()) {
-            parent.remove_file(&previous_next).map_err(map_io)?;
-            return sync_directory(parent, DurabilityData::ProcessCrashSafe);
+        let matches_primary =
+            digest_file(parent, primary_name)?.as_deref() == Some(orphan_digest.as_str());
+        match decide_orphan_previous(matches_primary) {
+            RecoveryDecision::CleanOrphan => {
+                parent.remove_file(&previous_next).map_err(map_io)?;
+                sync_directory(parent, DurabilityData::ProcessCrashSafe)
+            }
+            RecoveryDecision::Corrupt(reason) => {
+                let journal = BlobJournal {
+                    nonce: "orphan".to_string(),
+                    old_digest: None,
+                    new_digest: orphan_digest,
+                    phase: JournalPhase::Prepared,
+                };
+                Err(self.quarantine_corrupt_transaction(parent, primary_name, &journal, reason))
+            }
+            RecoveryDecision::RollForward | RecoveryDecision::RollBack => {
+                unreachable!("decide_orphan_previous 只产生 CleanOrphan/Corrupt")
+            }
         }
-        let journal = BlobJournal {
-            nonce: "orphan".to_string(),
-            old_digest: None,
-            new_digest: orphan_digest,
-            phase: JournalPhase::Prepared,
-        };
-        Err(self.quarantine_corrupt_transaction(
-            parent,
-            primary_name,
-            &journal,
-            CorruptionReason::OrphanPreviousDigestMismatch,
-        ))
     }
 
     fn quarantine_corrupt_transaction(
@@ -442,7 +449,8 @@ impl FileSystemBlobAdapter {
                 new_digest: digest(bytes),
                 phase: JournalPhase::Prepared,
             };
-            if key.namespace().previous_policy() == PreviousPolicy::Retain && primary_exists {
+            // #1865 B：PreviousPolicy 恒 Retain（Discard 随死变体删除），保留上一代即唯一路径。
+            if primary_exists {
                 let previous_name = primary_name.with_extension("previous");
                 let previous_next_name = primary_name.with_extension("previous.next");
                 if let Ok(metadata) = parent.symlink_metadata(&previous_next_name) {
@@ -814,3 +822,17 @@ fn map_durability(error: std::io::Error) -> StorageError {
 #[cfg(test)]
 #[path = "blob_filesystem_tests.rs"]
 mod tests;
+
+/// 恢复证据分类（#1865 A）：把 journal 记录的 new/old digest 与磁盘观测值
+/// 归入决策表的输入词汇。等价于旧内联判定的三分支：
+/// new 命中 → New；old 命中（含双方均缺失）→ Old/Absent；其余 → Other。
+fn classify_digest_observation(journal: &BlobJournal, observed: Option<&str>) -> DigestObservation {
+    if observed == Some(journal.new_digest.as_str()) {
+        return DigestObservation::New;
+    }
+    match (journal.old_digest.as_deref(), observed) {
+        (None, None) => DigestObservation::Absent,
+        (Some(old), Some(seen)) if old == seen => DigestObservation::Old,
+        _ => DigestObservation::Other,
+    }
+}

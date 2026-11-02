@@ -1,13 +1,14 @@
 use std::str::FromStr;
 
+use crate::domain::blob_recovery::{
+    decide_blob_recovery, decide_orphan_previous, DigestObservation, JournalPhase, RecoveryDecision,
+};
 use crate::domain::{
-    decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
-    DatasetChangeSetData, DatasetKeyData, DatasetManifestData, DatasetMemberChangeData,
-    DatasetMemberData, DatasetMemberReferenceData, DeleteOptionsData, DigestObservation,
-    DurabilityData, GenerationData, JournalPhase, PreviousPolicy, QuarantineDisposition,
-    QuarantineOutcomeData, QuarantineReason, RecoveryDecision, SafePathSegmentData,
-    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionDigest,
-    TransactionScopeData,
+    CorruptTransactionError, CorruptionReason, DatasetChangeSetData, DatasetKeyData,
+    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
+    DeleteOptionsData, DurabilityData, GenerationData, QuarantineDisposition,
+    QuarantineOutcomeData, QuarantineReason, SafePathSegmentData, StorageErrorKind, StorageKeyData,
+    StorageNamespaceData, TransactionScopeData,
 };
 
 #[test]
@@ -49,27 +50,8 @@ fn namespace_minimum_durability_cannot_be_lowered() {
         DurabilityData::ProcessCrashSafe
     );
     assert_eq!(
-        StorageNamespaceData::AuditUsage.effective_durability(DurabilityData::BestEffort),
-        DurabilityData::BestEffort
-    );
-}
-
-#[test]
-fn namespace_previous_policy_is_explicit() {
-    for namespace in [
-        StorageNamespaceData::Session,
-        StorageNamespaceData::Memory,
-        StorageNamespaceData::TaskData,
-        StorageNamespaceData::History,
-        StorageNamespaceData::ToolResult,
-        StorageNamespaceData::Config,
-        StorageNamespaceData::Workspace,
-    ] {
-        assert_eq!(namespace.previous_policy(), PreviousPolicy::Retain);
-    }
-    assert_eq!(
-        StorageNamespaceData::AuditUsage.previous_policy(),
-        PreviousPolicy::Discard
+        StorageNamespaceData::Config.effective_durability(DurabilityData::ProcessCrashSafe),
+        DurabilityData::ProcessCrashSafe
     );
 }
 
@@ -122,22 +104,6 @@ fn orphan_previous_next_is_only_cleaned_when_it_matches_primary() {
     assert_eq!(
         decide_orphan_previous(false),
         RecoveryDecision::Corrupt(CorruptionReason::OrphanPreviousDigestMismatch)
-    );
-}
-
-#[test]
-fn transaction_digest_is_domain_separated_and_distinguishes_absent() {
-    assert_ne!(
-        TransactionDigest::blob_bytes(b"value"),
-        TransactionDigest::dataset_bytes(b"value")
-    );
-    assert_ne!(
-        TransactionDigest::blob_bytes(b""),
-        TransactionDigest::absent_blob()
-    );
-    assert_eq!(
-        TransactionDigest::blob_bytes(b"value"),
-        TransactionDigest::blob_bytes(b"value")
     );
 }
 
@@ -436,9 +402,5 @@ fn background_process_namespace_is_crash_safe_and_retained() {
     assert_eq!(
         StorageNamespaceData::BackgroundProcess.effective_durability(DurabilityData::BestEffort),
         DurabilityData::ProcessCrashSafe
-    );
-    assert_eq!(
-        StorageNamespaceData::BackgroundProcess.previous_policy(),
-        PreviousPolicy::Retain
     );
 }

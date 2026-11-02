@@ -6,10 +6,15 @@
 //! |---|---|
 //! | 工厂 | `wire_file_system_blob`、`wire_file_system_dataset`（原 file_system_* 更名 wire_ 前缀类；返回 `Arc<dyn 端口>`） |
 //! | 角色和职能 | `AtomicBlobPort`（追加日志端口）、`AtomicDatasetPort`（原子集端口）、`SafeStorageRoot`/`SafeStorageDir`/`SafeOpenOptions`/`SafeStorageFileType`（安全文件系统句柄） |
-//! | 数据和生命周期 | 28 个 Data：标识 7（StorageKeyData/DatasetKeyData 同构但语义域不同——类型安全优先不合）、载荷 9（含 SafeStorageEntryData 泄漏补导出）、回执 10、选项 3 |
+//! | 数据和生命周期 | 29 个 Data：标识 7（StorageKeyData/DatasetKeyData 同构但语义域不同——类型安全优先不合）、载荷 9（含 SafeStorageEntryData 泄漏补导出）、回执 10、选项 3（#1865 E：原自述 28 实数 29 已校正） |
 //! | Error | `StorageError`{kind,message}（事实形态，**判定保留不折叠**——memory/config 穷尽 match kind 的控制流依赖 + kind 为 storage 专有语义域）、`StorageErrorKind`（6 变体）、`CorruptTransactionError`（+`CorruptionReason`/`QuarantineDisposition` 载荷链）——Error 类不 Data 化 |
 //!
-//! 判定记录：`PreviousPolicy` 降 pub(crate)（跨 crate 零消费但内部删除逻辑活跃）；
+//! #1865 收敛记录：A 恢复决策单点（`domain::blob_recovery` 为唯一策略表，adapter 只采集
+//! 证据并执行决策；JournalPhase 单点带 serde，TransactionDigest 删除）；B 死面清理
+//! （Namespace 4 死变体 + PreviousPolicy 机制、`CommitWarningData::PreviousPromotionPending`
+//! /`MemberPublishRecoveryPending`、`DatasetCommitReceiptData.warning` 字段、
+//! `QuarantineReceiptData::id`、`StorageEntryData::generation` 全部删除；`DatasetReadData`
+//! 保留——方法访问盲区，实为 read 载荷承载体）。
 //! `QuarantineOutcomeData::AlreadyAbsent` 与 receipt 三字段重复但内嵌收益小于嵌套成本，保留；
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 

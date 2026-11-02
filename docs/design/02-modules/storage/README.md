@@ -59,7 +59,7 @@ src/
     └── dataset_filesystem.rs    #   dataset lock / journal 文件系统实现
 ```
 
-- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型（含 `SafeStorageRoot`），并发布 `file_system_blob` / `file_system_dataset` 两个 composition wiring 构造函数（返回 `Arc<dyn Port>`）；concrete adapter 类型（`FileSystemBlobAdapter` / `FileSystemDatasetAdapter`）是 crate 私有，**NEVER** 转发 blob/dataset adapter 内部结构，**NEVER** 重建 `storage::api` 之类第二 façade（#1647 删除过渡模块并由 `check_storage_facade` 锁定）。
+- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型（含 `SafeStorageRoot`），并发布 `wire_file_system_blob` / `wire_file_system_dataset` 两个 composition wiring 构造函数（返回 `Arc<dyn Port>`；#1865 E 更名对齐）；concrete adapter 类型（`FileSystemBlobAdapter` / `FileSystemDatasetAdapter`）是 crate 私有，**NEVER** 转发 blob/dataset adapter 内部结构，**NEVER** 重建 `storage::api` 之类第二 façade（#1647 删除过渡模块并由 `check_storage_facade` 锁定）。
 - #883 已删除 Storage-owned `memory_store` / `task_store` 及其领域 schema、scoring、dependency graph 与 façade；Memory legacy reader/migration 由 Memory adapter 拥有，Task snapshot codec/restore 由 Task BC 拥有。
 - `ports/` 只定义 Storage-owned `AtomicBlobPort` / `AtomicDatasetPort` OHS，并依赖 `domain` Published Language；它 **NEVER** 成为所有 trait 的垃圾桶，也不容纳消费方的 Session/Memory/Audit 出站端口。
 - `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；dataset 的 adapter-private manifest/journal schema 留在 `adapters/dataset_protocol.rs`。这正是 §3.5 所述“Storage 私有 backend SPI”的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
@@ -113,13 +113,10 @@ struct SafeOpenOptions {
 enum StorageNamespace {
     Session,
     Memory,
-    Task,
-    History,
     ToolResult,
-    AuditUsage,
     Config,
-    Workspace,
-    Cost,
+    BackgroundProcess,
+    LegacyBackgroundTask,
 }
 
 struct WriteOptions {
@@ -128,13 +125,6 @@ struct WriteOptions {
 
 enum Durability { ProcessCrashSafe, BestEffort }
 enum Generation { Primary, Previous }
-
-enum PreviousPolicy { Retain, Discard }
-
-impl StorageNamespace {
-    /// namespace-owned 静态策略；调用方不能逐次关闭。
-    fn previous_policy(self) -> PreviousPolicy;
-}
 
 struct DeleteOptions {
     include_quarantine: bool,

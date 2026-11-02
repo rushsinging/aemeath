@@ -5,13 +5,8 @@ use cap_std::fs::{Dir, OpenOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::domain::blob_recovery::JournalPhase;
 use crate::{StorageError, StorageErrorKind};
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) enum JournalPhase {
-    Prepared,
-    Committed,
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct BlobJournal {
