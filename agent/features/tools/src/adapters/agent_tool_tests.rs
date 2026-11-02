@@ -26,7 +26,7 @@ impl AgentRunner for StubRunner {
 }
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
-    crate::domain::test_support::TestToolExecutionContextBuilder::new(std::path::PathBuf::from("."))
+    crate::domain::fakes::TestToolExecutionContextBuilder::new(std::path::PathBuf::from("."))
         .agent(runner)
         .build()
 }

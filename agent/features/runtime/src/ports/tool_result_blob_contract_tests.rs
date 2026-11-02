@@ -5,7 +5,7 @@ use crate::adapters::tool_result_blob::AtomicBlobToolResultStore;
 
 #[tokio::test]
 async fn adapter_maps_ids_to_tool_result_namespace_and_is_write_once_idempotent() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     let store = AtomicBlobToolResultStore::new(blob.clone(), "/root".into());
 
     let first = store
@@ -38,7 +38,7 @@ async fn adapter_maps_ids_to_tool_result_namespace_and_is_write_once_idempotent(
 
 #[tokio::test]
 async fn adapter_rejects_unsafe_identifiers_before_storage_io() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     let store = AtomicBlobToolResultStore::new(blob.clone(), "/root".into());
 
     let error = store
@@ -52,7 +52,7 @@ async fn adapter_rejects_unsafe_identifiers_before_storage_io() {
 
 #[tokio::test]
 async fn adapter_rejects_same_identifier_with_different_content() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     let store = AtomicBlobToolResultStore::new(blob.clone(), "/root".into());
     store.write_once("session", "tool", b"old").await.unwrap();
 
@@ -71,7 +71,7 @@ async fn adapter_rejects_same_identifier_with_different_content() {
 
 #[tokio::test]
 async fn adapter_write_failure_returns_no_locator_and_keeps_storage_empty() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     blob.fail_next_write("磁盘不可写");
     let store = AtomicBlobToolResultStore::new(blob.clone(), "/root".into());
 

@@ -1,5 +1,3 @@
-#[cfg(any(test, feature = "dev"))]
-pub mod context_test_support;
 #[cfg(test)]
 pub(crate) mod performance;
 pub(crate) mod reminder_pipeline;
@@ -11,8 +9,6 @@ mod service;
 #[path = "application/service_tests.rs"]
 mod service_tests;
 mod session_persistence;
-#[cfg(any(test, feature = "dev"))]
-pub mod test_support;
 
 pub(crate) use service::ContextApplicationService;
 pub(crate) use session_persistence::{SessionLoadError, SessionPersistenceService};

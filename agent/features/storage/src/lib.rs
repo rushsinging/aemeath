@@ -13,10 +13,6 @@
 //! `QuarantineOutcomeData::AlreadyAbsent` 与 receipt 三字段重复但内嵌收益小于嵌套成本，保留；
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
-/// 测试实现面（#2146：AtomicBlobPort 实现权归本 crate，跨 crate 测试经此）。
-#[cfg(any(test, feature = "dev"))]
-pub mod test_support;
-
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod constants;
 pub(crate) use constants::LOG_TARGET;

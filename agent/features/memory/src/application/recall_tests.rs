@@ -31,9 +31,9 @@ async fn memory_with(entries: Vec<&str>) -> crate::adapters::InMemoryMemory {
     memory
 }
 
-/// #2146：ScoringPort 实现权归 systemone crate；关键词命中打分替身。
+/// ScoringPort 替身（关键词命中打分）：经 testkit::systemone 构造。
 fn keyword_scoring(keyword: &'static str) -> std::sync::Arc<dyn systemone::ScoringPort> {
-    systemone::test_support::scripted_scoring(move |_state, questions| {
+    testkit::systemone::scripted_scoring(move |_state, questions| {
         let criteria = match &questions[0] {
             systemone::ScoringQuestion::Choice { criteria, .. } => criteria,
             _ => panic!("应为 Choice"),
@@ -66,12 +66,12 @@ fn keyword_scoring(keyword: &'static str) -> std::sync::Arc<dyn systemone::Scori
 
 /// 恒不可用替身。
 fn failing_scoring() -> std::sync::Arc<dyn systemone::ScoringPort> {
-    systemone::test_support::unavailable_scoring("服务未启动")
+    testkit::systemone::unavailable_scoring("服务未启动")
 }
 
 /// Noul 单值替身。
 fn single_noul_scoring(p_true: f64) -> std::sync::Arc<dyn systemone::ScoringPort> {
-    systemone::test_support::scripted_scoring(move |_state, questions| {
+    testkit::systemone::scripted_scoring(move |_state, questions| {
         assert!(
             matches!(questions[0], systemone::ScoringQuestion::Noul { .. }),
             "单候选必须走 Noul 题型"

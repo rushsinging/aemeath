@@ -54,10 +54,9 @@ async fn memory_search_tool_resolves_current_committed_port_for_each_call() {
         source: source.clone(),
     };
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let first_result = tool
         .call(serde_json::json!({"query": "committed memory"}), &context)
@@ -90,10 +89,9 @@ async fn add_result_returns_full_id_for_follow_up_actions() {
     let memory =
         memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let result = handlers::add_memory(
         serde_json::json!({
@@ -121,10 +119,9 @@ async fn add_result_rejects_over_length_content_with_actionable_error() {
     let memory =
         memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let result = handlers::add_memory(
         serde_json::json!({
@@ -368,10 +365,9 @@ async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation(
     memory.write(existing.clone()).await.unwrap();
     let revision = memory.revision();
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let result = handlers::add_memory(
         serde_json::json!({
@@ -408,10 +404,9 @@ async fn memory_update_publishes_manageable_archive_and_restore_results() {
     });
     let tool = MemoryUpdateTool { source };
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let archived = tool
         .call(
@@ -441,10 +436,9 @@ async fn memory_update_pins_then_unpins() {
         current: RwLock::new(Arc::new(memory)),
     });
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let add = MemoryAddTool {
         source: source.clone(),
@@ -480,10 +474,9 @@ async fn memory_update_archives_and_restores() {
         current: RwLock::new(Arc::new(memory)),
     });
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let add = MemoryAddTool {
         source: source.clone(),
@@ -529,10 +522,9 @@ async fn memory_update_archives_and_restores() {
 async fn memory_update_rejects_an_unknown_status() {
     let source = test_source();
     let workspace = tempfile::tempdir().unwrap();
-    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let context =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
 
     let explode = MemoryUpdateTool { source }
         .call(

@@ -161,7 +161,7 @@ impl Agent {
             context: ContextCoordinator::new(context::wire_isolated_context("test-session")),
             session_id: share::ids::SessionId::new("test-session"),
             tool_result_materializer:
-                crate::application::tool::test_support::test_tool_result_materializer(),
+                crate::application::tool::fakes::test_tool_result_materializer(),
             committed_side_effects: Default::default(),
             ctx,
             max_tool_concurrency,

@@ -46,7 +46,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
 
     let shell = test_shell_with_hooks(always_blocking_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
         )),
     );
@@ -176,7 +176,7 @@ async fn test_stall_detector_resets_across_user_turns() {
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         )),
     );
@@ -344,7 +344,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
@@ -437,7 +437,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
@@ -510,7 +510,7 @@ async fn test_idle_pending_command_list_models_does_not_run_spurious_turn() {
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
@@ -562,7 +562,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
     let response_refs: Vec<&str> = responses.iter().map(|s| s.as_str()).collect();
     let shell = test_shell_with_hooks(always_blocking_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(response_refs),
         )),
     );
@@ -720,7 +720,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
     let mut shell = test_shell();
     shell.active_run = active_run.clone();
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
@@ -907,7 +907,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
     let mut shell = test_shell_with_hooks(test_hook_port());
     shell.active_run = active_run.clone();
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
@@ -1059,7 +1059,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-idle-until-first-input");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -1152,7 +1152,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
@@ -1220,7 +1220,7 @@ async fn test_resume_skip_pending_user_run_idles_until_new_input() {
     let provider = SequenceProvider::new(vec!["response to new input"]);
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-resume-skip-pending");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -1266,7 +1266,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     let provider = SequenceProvider::new(vec!["hi there"]);
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-user-tail-idle");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -1378,7 +1378,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
     let provider = ApiErrorThenNormalProvider::new();
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-api-error-finalize");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -1474,7 +1474,7 @@ async fn test_clear_resets_run_counter_for_new_session_epoch() {
     let provider = SequenceProvider::new(vec!["r1", "r2"]);
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-clear-resets-run-counter");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -1732,19 +1732,19 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
 /// 调用（`append_and_persist` 等持久化方法），读路径原样转发给内层。
 struct RecordingContextFactory {
     persistence_calls:
-        Arc<Mutex<Vec<context::test_support::RecordedContextCall>>>,
+        Arc<Mutex<Vec<testkit::context::RecordedContextCall>>>,
 }
 
 impl RecordingContextFactory {
     /// 测试入口：包装既有 ContextPorts 为记录型（保持四端口语义）。
     fn wrap_ports(&self, inner: context::ContextPorts) -> context::ContextPorts {
-        // #2146：Context 四端口实现权归 context crate；共享句柄装饰器。
-        context::test_support::recording_context_shared(&inner, &self.persistence_calls)
+        // Context 四端口共享句柄装饰器：经 testkit::context 构造。
+        testkit::context::recording_context_shared(&inner, &self.persistence_calls)
     }
 
     fn new() -> (
         Arc<Self>,
-        Arc<Mutex<Vec<context::test_support::RecordedContextCall>>>,
+        Arc<Mutex<Vec<testkit::context::RecordedContextCall>>>,
     ) {
         let persistence_calls = Arc::new(Mutex::new(Vec::new()));
         (
@@ -1879,7 +1879,7 @@ async fn control_normal_run_records_session_persistence() {
         crate::SessionSwitchCoordinator::assemble_with_ports(builder, wrapped),
     );
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["r1"]),
         )),
     );
@@ -1931,7 +1931,7 @@ async fn reflect_now_queued_while_busy_is_dropped_after_run_not_executed() {
         ..Default::default()
     };
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-reflect-now-busy-drop");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);

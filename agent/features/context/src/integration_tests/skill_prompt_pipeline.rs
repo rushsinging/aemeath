@@ -37,7 +37,7 @@ fn descriptor(name: &str, description: &str, hint: Option<&str>) -> SkillDescrip
 
 fn source(skills: Vec<SkillDescriptor>) -> SkillPromptSource {
     SkillPromptSource::new(
-        Arc::new(tools::test_support::FixedSkillCatalog(skills)),
+        Arc::new(testkit::tools::FixedSkillCatalog(skills)),
         Arc::new(FixedQueryFactory),
         Arc::new(crate::adapters::SystemPromptAssembly::new(None)),
     )
@@ -135,9 +135,9 @@ async fn chinese_header_and_budget_are_deterministic() {
 
 #[test]
 fn query_factory_reads_live_workspace_root() {
-    let factory = WorkspaceSkillQueryFactory::new(Arc::new(
-        project::test_support::FakeWorkspace::new(PathBuf::from("/live")),
-    ));
+    let factory = WorkspaceSkillQueryFactory::new(Arc::new(testkit::project::FakeWorkspace::new(
+        PathBuf::from("/live"),
+    )));
     assert_eq!(
         factory.query(&base_request()).project_root,
         PathBuf::from("/live")

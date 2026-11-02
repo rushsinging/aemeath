@@ -35,9 +35,6 @@ pub use application::tool::triage::{PolicyTriage, TriageEscalation};
 #[cfg(any(test, feature = "dev"))]
 pub use application::client::wire_test_session_switch;
 
-/// 测试实现面（#2146：ProviderFactory 等实现权归本 crate）。
-#[cfg(any(test, feature = "dev"))]
-pub mod test_support;
 pub use application::client::{
     config_snapshot_to_sdk, resolve_concurrency_limits, resolve_model_runtime_settings,
     resume_session_to_backing, wire_agent_client_from_args, wire_agent_runner, AgentClientImpl,
@@ -63,8 +60,8 @@ pub use application::reflection::{
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
 pub use ports::{
-    LlmInvokePort, ProviderBindingData, ProviderBuildSpecData, ProviderFactory, ToolResultBlobPort,
-    UnavailableUsageSink, UsageSink,
+    LlmInvokePort, ProviderBindingData, ProviderBuildSpecData, ProviderFactory,
+    ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef, UnavailableUsageSink, UsageSink,
 };
 
 #[cfg(test)]

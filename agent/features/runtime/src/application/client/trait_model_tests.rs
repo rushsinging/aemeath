@@ -89,7 +89,7 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
     // 能力查询已删除（#1880）：binding 持全量 ModelInfo，port 只负责 invoke。
     // #2146：实现归 provider test_support，测试只提供脚本。
     fn test_port() -> std::sync::Arc<dyn crate::ports::LlmInvokePort> {
-        provider::test_support::scripted_llm(|_request| {
+        testkit::provider::scripted_llm(|_request| {
             Err(ProviderError::fatal(
                 ProviderErrorKind::UpstreamUnavailable,
                 "test provider does not support invocation",

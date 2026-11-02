@@ -589,6 +589,7 @@ dependencies = [
  "systemone",
  "task",
  "tempfile",
+ "testkit",
  "tokio",
  "tokio-util",
  "tools",
@@ -674,6 +675,7 @@ dependencies = [
  "storage",
  "task",
  "tempfile",
+ "testkit",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -2542,6 +2544,7 @@ dependencies = [
  "share",
  "storage",
  "systemone",
+ "testkit",
  "thiserror 2.0.18",
  "tokio",
  "utils",
@@ -3728,6 +3731,7 @@ dependencies = [
  "systemone",
  "task",
  "tempfile",
+ "testkit",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -4267,6 +4271,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "testkit",
  "tokio",
  "uuid",
 ]
@@ -4588,6 +4593,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "testkit"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "context",
+ "futures",
+ "futures-util",
+ "memory",
+ "policy",
+ "project",
+ "provider",
+ "runtime",
+ "sdk",
+ "serde_json",
+ "share",
+ "storage",
+ "systemone",
+ "tokio",
+ "tools",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4836,6 +4863,7 @@ dependencies = [
  "systemone",
  "task",
  "tempfile",
+ "testkit",
  "thiserror 2.0.18",
  "tokio",
  "url",

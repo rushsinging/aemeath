@@ -147,17 +147,16 @@ fn logging_init_decision_rejects_conflicting_output_mode() {
     assert!(error.contains("Stderr"));
 }
 
-/// 记录子代理 usage 的脚本 factory（#2146：ProviderFactory 实现权归
-/// runtime，经其 test_support 构造）。
+/// 记录子代理 usage 的脚本 factory。
 fn counting_test_factory() -> (Arc<dyn runtime::ProviderFactory>, Arc<AtomicUsize>) {
-    runtime::test_support::counting_provider_factory(
+    testkit::runtime::counting_provider_factory(
         crate::provider::provider_factory() as Arc<dyn runtime::ProviderFactory>
     )
 }
 
-/// 按调用序号回放脚本流（#2146：LlmInvokePort 实现权归 provider）。
+/// 按调用序号回放脚本流。
 fn reported_usage_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::LlmInvokePort> {
-    provider::test_support::scripted_llm(move |_request| {
+    testkit::provider::scripted_llm(move |_request| {
         let invocation_index = invocation_count.fetch_add(1, Ordering::SeqCst);
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
@@ -208,13 +207,13 @@ fn reported_usage_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::
             chunks.push(provider::ProviderResponseChunk::Usage(usage));
         }
         chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
-        Ok(provider::test_support::stream_from_chunks(chunks))
+        Ok(testkit::provider::stream_from_chunks(chunks))
     })
 }
 
 fn reported_usage_test_factory() -> Arc<dyn runtime::ProviderFactory> {
     let invocation_count = Arc::new(AtomicUsize::new(0));
-    runtime::test_support::scripted_provider_factory(move |spec| {
+    testkit::runtime::scripted_provider_factory(move |spec| {
         Ok(runtime::ProviderBindingData {
             provider: reported_usage_port(Arc::clone(&invocation_count)),
             model: provider::ModelInfo {
@@ -234,10 +233,10 @@ fn reported_usage_test_factory() -> Arc<dyn runtime::ProviderFactory> {
     })
 }
 
-/// 直绑后台脚本 factory（#2146：实现权归 runtime test_support）。
+/// 直绑后台脚本 factory。
 fn direct_log_test_factory() -> Arc<dyn runtime::ProviderFactory> {
     let invocation_count = Arc::new(AtomicUsize::new(0));
-    runtime::test_support::scripted_provider_factory(move |spec| {
+    testkit::runtime::scripted_provider_factory(move |spec| {
         Ok(runtime::ProviderBindingData {
             provider: direct_log_script_port(Arc::clone(&invocation_count)),
             model: provider::ModelInfo {
@@ -678,9 +677,9 @@ async fn bootstrap_assembly_has_no_scoring_notice_when_scenarios_disabled() {
 
 /// 脚本：invocation 0 返回 Bash tool call（长命令触发转后台直绑），
 /// 之后 EndTurn 收口（占位即 tool result）。
-/// 直绑后台脚本流（#2146：实现归 provider test_support）。
+/// 直绑后台脚本流。
 fn direct_log_script_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::LlmInvokePort> {
-    provider::test_support::scripted_llm(move |_request| {
+    testkit::provider::scripted_llm(move |_request| {
         let invocation_index = invocation_count.fetch_add(1, Ordering::SeqCst);
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
@@ -724,7 +723,7 @@ fn direct_log_script_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provide
             chunks.push(provider::ProviderResponseChunk::Usage(usage));
         }
         chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
-        Ok(provider::test_support::stream_from_chunks(chunks))
+        Ok(testkit::provider::stream_from_chunks(chunks))
     })
 }
 

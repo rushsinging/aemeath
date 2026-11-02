@@ -24,9 +24,9 @@ impl ToolCatalogPort for FakeToolCat {
     }
 }
 
-/// #2146：实现权归 policy crate。
+/// Policy 替身：经 testkit::policy 构造。
 pub(super) fn fake_policy_port() -> std::sync::Arc<dyn crate::ports::Policy> {
-    policy::test_support::allow_all_standard()
+    testkit::policy::allow_all_standard()
 }
 
 pub(super) struct FakeReflHist;
@@ -199,7 +199,7 @@ pub(super) fn make_parent_context_with_config(
     let run_config = crate::application::run::config::RunConfigSnapshot::capture(config_snapshot);
     assemble_parent_context(
         Arc::new(FakeToolCat),
-        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        testkit::tools::scripted_tool_execution(|_invocation, _context| {
             tools::published::execution::ToolExecutionOutcome::success_text("fake")
         }),
         run_config,
@@ -284,7 +284,7 @@ pub(super) fn make_parent_context() -> RuntimeContext {
         RunConfigSnapshot::capture(share::config::domain::snapshot::ConfigSnapshot::new(config));
     assemble_parent_context(
         Arc::new(FakeToolCat),
-        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        testkit::tools::scripted_tool_execution(|_invocation, _context| {
             tools::published::execution::ToolExecutionOutcome::success_text("fake")
         }),
         config_snapshot,
@@ -301,7 +301,7 @@ pub(super) fn make_parent_workspace() -> RuntimeWorkspaceAccess {
 fn make_test_factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         Arc::new(FakeToolCat),
-        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        testkit::tools::scripted_tool_execution(|_invocation, _context| {
             tools::published::execution::ToolExecutionOutcome::success_text("fake")
         }),
         fake_policy_port(),
@@ -675,7 +675,7 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
 
     let parent_ctx = make_parent_context_with_catalog(
         recording_catalog,
-        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        testkit::tools::scripted_tool_execution(|_invocation, _context| {
             tools::published::execution::ToolExecutionOutcome::success_text("fake")
         }),
     );
@@ -761,7 +761,7 @@ fn make_parent_context_with_policy_role(
     );
     assemble_parent_context(
         recording_catalog,
-        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        testkit::tools::scripted_tool_execution(|_invocation, _context| {
             tools::published::execution::ToolExecutionOutcome::success_text("fake")
         }),
         config_snapshot,
@@ -833,7 +833,7 @@ fn sub_derivation_fails_closed_when_parent_catalog_errors() {
     let failing_catalog: Arc<dyn ToolCatalogPort> = Arc::new(FailingToolCatalog);
     let parent_ctx = make_parent_context_with_catalog(
         failing_catalog,
-        tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        testkit::tools::scripted_tool_execution(|_invocation, _context| {
             tools::published::execution::ToolExecutionOutcome::success_text("fake")
         }),
     );

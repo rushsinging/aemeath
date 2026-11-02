@@ -486,7 +486,7 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-per-turn-drain-seal");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -622,7 +622,7 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-per-turn-drain-seal-2");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -718,7 +718,7 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-per-turn-drain-seal-single");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -797,7 +797,7 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
     let provider = Arc::new(ScriptedInvocationProvider::new(Vec::new()));
     let shell = test_shell();
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-idle-compact-command");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -913,7 +913,7 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
 
     let shell = test_shell_with_task_store(test_hook_port(), task_store.clone());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-task-reminder-injection");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -1029,7 +1029,7 @@ async fn clear_resets_authoritative_task_state() {
 
     let shell = test_shell_with_task_store(test_hook_port(), task_store.clone());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-clear-resets-tasks");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);

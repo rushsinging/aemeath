@@ -72,10 +72,9 @@ fn execution_scope_builder_preserves_registry_profile_and_deadline() {
 
 #[test]
 fn tool_execution_context_exposes_scope_and_read_only_workspace_port() {
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(PathBuf::from(
-        "/workspace",
-    ))
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(PathBuf::from("/workspace"))
+            .build();
 
     assert_eq!(ctx.scope().run_id(), "test-run");
     assert_eq!(
@@ -106,10 +105,9 @@ fn tool_execution_context_can_replace_invocation_cancellation_without_changing_s
         }
     }
 
-    let original = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        PathBuf::from("/workspace"),
-    )
-    .build();
+    let original =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(PathBuf::from("/workspace"))
+            .build();
     let replaced = original.with_cancellation(std::sync::Arc::new(Cancelled));
 
     assert_eq!(replaced.scope(), original.scope());
@@ -119,10 +117,9 @@ fn tool_execution_context_can_replace_invocation_cancellation_without_changing_s
 
 #[test]
 fn tool_execution_context_read_set_records_evidence_through_port() {
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(PathBuf::from(
-        "/workspace",
-    ))
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(PathBuf::from("/workspace"))
+            .build();
 
     assert!(!ctx.read_set().contains("src/lib.rs"));
     ctx.read_set().record("src/lib.rs");
@@ -144,10 +141,9 @@ fn tool_execution_context_exposes_skill_load_scope_and_state_port() {
     }
 
     let expected_scope = SkillLoadScope::subagent("agent-1").unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(PathBuf::from(
-        "/workspace",
-    ))
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(PathBuf::from("/workspace"))
+            .build();
     let ctx = ctx.with_skill_load_state(expected_scope.clone(), std::sync::Arc::new(State));
 
     assert_eq!(ctx.skill_load_scope(), Some(&expected_scope));

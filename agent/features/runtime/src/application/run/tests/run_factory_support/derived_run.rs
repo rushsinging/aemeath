@@ -22,7 +22,7 @@ impl ParentRunFixture {
         Self {
             context_factory,
             provider_factory: Arc::new(FakeProviderFactory),
-            skill_catalog: Arc::new(tools::test_support::FixedSkillCatalog(Vec::new())),
+            skill_catalog: Arc::new(testkit::tools::FixedSkillCatalog(Vec::new())),
         }
     }
 

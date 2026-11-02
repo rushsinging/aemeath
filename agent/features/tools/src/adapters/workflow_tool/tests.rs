@@ -165,10 +165,8 @@ impl WorkflowToolBackend for MockBackend {
 
 fn context() -> crate::domain::ToolExecutionContext {
     let workspace = tempfile::tempdir().expect("workspace");
-    crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build()
+    crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+        .build()
 }
 
 fn create_input() -> serde_json::Value {

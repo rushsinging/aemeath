@@ -14,10 +14,8 @@ impl StaticProvider {
     /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 的脚本化端口。
     fn port(&self) -> std::sync::Arc<dyn LlmInvokePort> {
         let response = self.response.clone();
-        provider::test_support::scripted_llm(move |_request| {
-            Ok(provider::test_support::text_stream_with_usage(
-                &response, 11, 22,
-            ))
+        testkit::provider::scripted_llm(move |_request| {
+            Ok(testkit::provider::text_stream_with_usage(&response, 11, 22))
         })
     }
 }
@@ -204,7 +202,7 @@ impl ScriptedReflectionProvider {
     fn port(&self) -> std::sync::Arc<dyn LlmInvokePort> {
         let steps = std::sync::Arc::clone(&self.steps);
         let requests = std::sync::Arc::clone(&self.requests);
-        provider::test_support::scripted_llm(move |request| {
+        testkit::provider::scripted_llm(move |request| {
             let messages = request
                 .messages
                 .iter()
@@ -222,10 +220,10 @@ impl ScriptedReflectionProvider {
                 .pop_front()
                 .expect("反思 provider 调用超出脚本：重试与修复的调用次数 MUST 有界");
             match step {
-                ScriptedStep::Text(text) => Ok(provider::test_support::text_stream_with_usage(
-                    &text, 11, 22,
-                )),
-                ScriptedStep::Empty => Ok(provider::test_support::empty_text_stream()),
+                ScriptedStep::Text(text) => {
+                    Ok(testkit::provider::text_stream_with_usage(&text, 11, 22))
+                }
+                ScriptedStep::Empty => Ok(testkit::provider::empty_text_stream()),
                 ScriptedStep::InvokeError => Err(ProviderError::fatal(
                     provider::ProviderErrorKind::UpstreamUnavailable,
                     "scripted provider failure",

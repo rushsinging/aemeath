@@ -2,10 +2,10 @@ use super::*;
 use share::session_types::ProjectIdentityData;
 use std::sync::Arc;
 
-/// #2146：实现权归 context crate。stored_model 决定 load 出的 metadata.model。
-fn model_port(stored: Option<&str>) -> Arc<context::test_support::ScriptedSessionManagement> {
+/// 。stored_model 决定 load 出的 metadata.model。
+fn model_port(stored: Option<&str>) -> Arc<testkit::context::ScriptedSessionManagement> {
     let stored = stored.map(str::to_string);
-    Arc::new(context::test_support::ScriptedSessionManagement::new(
+    Arc::new(testkit::context::ScriptedSessionManagement::new(
         move |id| {
             let mut session = context::session::CanonicalSession::fixture(id);
             session.metadata.model = stored.clone();
@@ -16,7 +16,7 @@ fn model_port(stored: Option<&str>) -> Arc<context::test_support::ScriptedSessio
 
 /// updates 投影为 (id, model) 元组（与原断言口径一致）。
 fn recorded_models(
-    port: &context::test_support::ScriptedSessionManagement,
+    port: &testkit::context::ScriptedSessionManagement,
 ) -> Vec<(String, Option<String>)> {
     port.updates()
         .into_iter()

@@ -317,5 +317,5 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
     }
 }
 
-// #2146 密封解锁：Tool 的唯一实现是 TypedToolAdapter（泛型包装，
+// Tool 的唯一实现是 TypedToolAdapter（泛型包装，
 // 工具源实现 TypedTool 经 adapter 注册，实现权仍在 crate 内）。

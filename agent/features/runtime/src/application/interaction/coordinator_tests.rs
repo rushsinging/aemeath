@@ -617,10 +617,9 @@ fn approval_timeout_fixture() -> (
         std::path::PathBuf::from("/tmp"),
         tokio_util::sync::CancellationToken::new(),
     );
-    let catalog: std::sync::Arc<dyn tools::ToolCatalogPort> =
-        std::sync::Arc::new(SnapshotToolCatalog(
-            tools::test_support::sequential_test_tool_catalog("Bash", 1800),
-        ));
+    let catalog: std::sync::Arc<dyn tools::ToolCatalogPort> = std::sync::Arc::new(
+        SnapshotToolCatalog(testkit::tools::sequential_test_tool_catalog("Bash", 1800)),
+    );
     (catalog, ctx)
 }
 

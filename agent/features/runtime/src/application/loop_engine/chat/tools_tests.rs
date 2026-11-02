@@ -417,7 +417,7 @@ async fn oversized_tool_result_event_uses_materialized_projection() {
     );
     let sink = RecordingSink::default();
     let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-    let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+    let materializer = crate::application::tool::fakes::test_tool_result_materializer();
 
     send_tool_result(
         &sink,
@@ -465,7 +465,7 @@ async fn send_tool_result_forwards_execution_duration() {
     .with_duration(1_500);
     let sink = RecordingSink::default();
     let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-    let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+    let materializer = crate::application::tool::fakes::test_tool_result_materializer();
 
     send_tool_result(
         &sink,
@@ -499,7 +499,7 @@ async fn send_tool_result_without_duration_keeps_none() {
     );
     let sink = RecordingSink::default();
     let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-    let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+    let materializer = crate::application::tool::fakes::test_tool_result_materializer();
 
     send_tool_result(
         &sink,
@@ -525,7 +525,7 @@ async fn cancelled_tool_round_materializes_one_result_for_each_provider_call() {
         ToolOutcome::new("finished", Value::Null, Vec::new()),
     );
     let results = complete_cancelled_tool_round(&calls, vec![completed]).results;
-    let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+    let materializer = crate::application::tool::fakes::test_tool_result_materializer();
 
     let message = crate::application::loop_engine::shared::materialize_tool_results(
         materializer.as_ref(),
@@ -554,7 +554,7 @@ async fn test_materialized_tool_results_use_provider_id_not_runtime_id() {
         "Bash".to_string(),
         ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
     )];
-    let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+    let materializer = crate::application::tool::fakes::test_tool_result_materializer();
     let message = crate::application::loop_engine::shared::materialize_tool_results(
         materializer.as_ref(),
         results,
@@ -583,7 +583,7 @@ async fn test_materialized_tool_results_persist_oversized_tui_result() {
             Vec::new(),
         ),
     )];
-    let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+    let materializer = crate::application::tool::fakes::test_tool_result_materializer();
     let message = crate::application::loop_engine::shared::materialize_tool_results(
         materializer.as_ref(),
         results,

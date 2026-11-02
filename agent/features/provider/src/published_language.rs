@@ -442,26 +442,6 @@ pub struct LlmTextOutputData {
 /// 文本消费由默认方法 [`LlmInvokePort::invoke_text`] 收口提供——
 /// 非流式即流式的退化，不再作为独立 trait 存在，各实现免费获得文本能力。
 ///
-/// # 实现权（编译期密封）
-///
-/// 除 provider 外任何 crate **NEVER** 也不能实现本 trait（含测试 fake）——
-/// 需要可控行为时经 `provider::test_support` 的脚本化端口构造：
-///
-/// ```compile_fail
-/// # use provider::{LlmInvokePort, ModelInfo, ProviderRequestData, ProviderResponseStream, ProviderError};
-/// struct MyFake;
-/// # #[async_trait::async_trait]
-/// impl LlmInvokePort for MyFake {
-/// #   async fn invoke_stream(&self, _m: &ModelInfo, _r: &ProviderRequestData)
-/// #       -> Result<ProviderResponseStream, ProviderError> { unimplemented!() }
-///     // ...
-/// }
-/// // error[E0277]: the trait bound `MyFake: Sealed` is not satisfied
-/// // （Sealed 在 pub(crate) 模块中，外部不可命名 → 编译期拒绝）
-/// ```
-///
-/// 取消语义：唯一真相源是 `request.cancellation`（单通道）；
-/// 触发时返回 [`ProviderError`] 的 `Cancelled` 变体。
 #[async_trait::async_trait]
 pub trait LlmInvokePort: Send + Sync {
     /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流

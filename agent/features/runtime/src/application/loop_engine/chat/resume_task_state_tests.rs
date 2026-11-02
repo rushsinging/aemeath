@@ -166,15 +166,13 @@ async fn successful_resume_emits_session_then_same_complete_task_state_contract(
     let task_store = Arc::new(task::TaskStore::new());
     let shell = resumed_shell(
         task_store,
-        Arc::new(context::test_support::ScriptedSessionManagement::new(
-            |_| {
-                restored_session(
-                    session_id,
-                    shell_workspace_snapshot(),
-                    snapshot_with_one_task(),
-                )
-            },
-        )),
+        Arc::new(testkit::context::ScriptedSessionManagement::new(|_| {
+            restored_session(
+                session_id,
+                shell_workspace_snapshot(),
+                snapshot_with_one_task(),
+            )
+        })),
         noop_hook_port(),
     );
 
@@ -203,15 +201,13 @@ async fn successful_resume_without_active_batch_emits_empty_state_to_clear_old_s
     let task_store = Arc::new(task::TaskStore::new());
     let shell = resumed_shell(
         task_store,
-        Arc::new(context::test_support::ScriptedSessionManagement::new(
-            |_| {
-                restored_session(
-                    session_id,
-                    shell_workspace_snapshot(),
-                    task::TaskSnapshotData::empty(),
-                )
-            },
-        )),
+        Arc::new(testkit::context::ScriptedSessionManagement::new(|_| {
+            restored_session(
+                session_id,
+                shell_workspace_snapshot(),
+                task::TaskSnapshotData::empty(),
+            )
+        })),
         noop_hook_port(),
     );
 
@@ -278,15 +274,13 @@ async fn successful_resume_emits_session_start_hook_with_resumed_session_id() {
     let recording_hook = RecordingSessionStartHookPort::default();
     let shell = resumed_shell(
         task_store,
-        Arc::new(context::test_support::ScriptedSessionManagement::new(
-            |_| {
-                restored_session(
-                    session_id,
-                    shell_workspace_snapshot(),
-                    task::TaskSnapshotData::empty(),
-                )
-            },
-        )),
+        Arc::new(testkit::context::ScriptedSessionManagement::new(|_| {
+            restored_session(
+                session_id,
+                shell_workspace_snapshot(),
+                task::TaskSnapshotData::empty(),
+            )
+        })),
         Arc::new(recording_hook.clone()),
     );
 

@@ -1,4 +1,4 @@
-//! LLM 调用端口的测试实现面（#2146 收口）。
+//! provider 测试替身（#2146 治理后统一由 testkit 维护）。
 //!
 //! 架构规则：`LlmInvokePort` 的**唯一实现**是 provider 的生产 `LlmClient`；
 //! 除 provider crate 外，任何 crate **NEVER** 实现该 trait（含测试 fake）。
@@ -6,13 +6,13 @@
 //! 便捷流构造：[`text_stream`] / [`empty_text_stream`] / [`error_stream`] /
 //! [`stream_from_chunks`]——脚本即闭包，可自由捕获计数器、通道、录制器等状态。
 //!
-//! 跨 crate 测试可见（`feature = "dev"`）；生产构建不编译。
+//! 消费方经 `[dev-dependencies] testkit` 引用，不进生产依赖图。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::published_language::{
+use provider::published_language::{
     LlmInvokePort, ModelInfo, ProviderContentData, ProviderError, ProviderRequestData,
     ProviderResponseChunk, ProviderResponseStream, ResponseStopReason,
 };
@@ -144,7 +144,7 @@ pub fn text_stream_with_usage(
     input_tokens: u32,
     output_tokens: u32,
 ) -> ProviderResponseStream {
-    use crate::published_language::TokenUsageData;
+    use provider::published_language::TokenUsageData;
     let mut chunks: Vec<ProviderResponseChunk> = Vec::new();
     if !text.is_empty() {
         chunks.push(ProviderResponseChunk::Content(ProviderContentData::Text(

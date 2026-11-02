@@ -35,11 +35,12 @@
 
 ### 实现权治理（与 §二 命名守卫互补）
 
-导出语法管「符号长什么样」，实现权管「trait 允许谁实现」：`capability(pure)` 端口用
-Sealed trait 编译期强制；`injected-host`/`comp-bridge` 按登记表 `allowed_impl_crates`
-白名单校验（`pattern.pl.trait-implementation-registry`）。三条铁律：**测试不是开放
-实现权的理由**（测试 fake 唯一通道 = 定义方 `test_support`）；**开放只由产品需求
-驱动**；`fake-pending` 是待清零债务档。详见 runtime `06-ports-and-adapters.md §2.4`。
+导出语法管「符号长什么样」，实现权管「trait 允许谁实现」。2026-11-02 拍板终态：
+**不 sealed、不逐条登记**——定义方只提供 trait + 生产 adapter；测试替身统一在
+`agent/testing/testkit` 维护（消费方经 `[dev-dependencies] testkit` 引用），各 crate
+`src/test_support.rs` 通道由守卫 `pattern.pl.fake-impl-location` 禁止；生产实现方向
+由 `dependency.workspace-matrix` 管。局部内联 stub（同文件 `#[cfg(test)]`、不跨模块
+导出）允许。详见 runtime `06-ports-and-adapters.md §2.4`。
 
 ## 三、DDD 判据（Published Language 收录五类）
 

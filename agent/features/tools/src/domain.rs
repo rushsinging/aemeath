@@ -10,6 +10,8 @@ pub mod command_pl;
 pub mod command_ports;
 pub(crate) mod constants;
 pub mod context;
+#[cfg(test)]
+pub(crate) mod fakes;
 pub(crate) mod goal_text;
 pub mod memory_source;
 pub mod ports;
@@ -30,8 +32,6 @@ pub mod skill_ports;
 pub mod skill_state;
 pub mod skill_tool;
 pub mod suspension;
-#[cfg(any(test, feature = "test-harness"))]
-pub mod test_support;
 pub mod timeout_policy;
 pub mod tool;
 pub mod tool_definition;

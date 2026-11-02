@@ -527,6 +527,7 @@ const NON_RUNTIME_MEMBERS: &[&str] = &[
     "packages/global/logging",
     "packages/global/utils",
     "tools/xtask",
+    "agent/testing/testkit",
 ];
 
 /// Path of the guard source file itself; excluded from scans because it

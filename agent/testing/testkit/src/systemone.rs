@@ -1,12 +1,13 @@
-//! System One 测试实现面（#2146 实现权治理：ScoringPort 实现权归本
-//! crate，跨 crate 测试经此获得替身；生产不编译）。
+//! systemone 测试替身（#2146 治理后统一由 testkit 维护）。
+//!
+//! ScoringPort 实现权归 systemone crate，跨 crate 测试经本模块获得替身；
+//! 消费方经 `[dev-dependencies] testkit` 引用，不进生产依赖图。
 
 use std::sync::Arc;
 
-use crate::domain::{
-    ScoringAnswer, ScoringQuestion, ScoringState, ScoringUnavailable, UnavailableKind,
+use systemone::{
+    ScoringAnswer, ScoringPort, ScoringQuestion, ScoringState, ScoringUnavailable, UnavailableKind,
 };
-use crate::ports::ScoringPort;
 
 /// 脚本化评分端口：`answer` 按脚本返回（可按 state/questions 定制答案、
 /// 错误或不可用）。

@@ -322,6 +322,22 @@
      ]
     },
     {
+     "file": "agent/features/context/src/adapters.rs",
+     "module": "context :: adapters.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 50,
+       "code": "blob: std::sync::Arc<dyn storage::AtomicBlobPort>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
      "file": "agent/features/context/src/integration_tests/dataset_session_reader.rs",
      "module": "context :: integration_tests/dataset_session_reader.rs",
      "is_test": true,
@@ -350,22 +366,6 @@
        "code": "let blob: Arc<dyn storage::AtomicBlobPort> =",
        "kind": "fnty",
        "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 33,
-       "code": "impl AtomicBlobPort for RecordingBlob {",
-       "kind": "implty",
-       "label": "接口实现"
       }
      ]
     },
@@ -400,7 +400,7 @@
        "label": "类型引用"
       },
       {
-       "line": 513,
+       "line": 526,
        "code": "blob: &std::sync::Arc<dyn storage::AtomicBlobPort>,",
        "kind": "fnty",
        "label": "类型引用"
@@ -424,16 +424,16 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "接口实现"
      ],
      "snippets": [
       {
-       "line": 21,
-       "code": "impl AtomicBlobPort for FakeBlobPort {",
+       "line": 71,
+       "code": "impl AtomicBlobPort for InMemoryBlobPort {",
        "kind": "implty",
        "label": "接口实现"
       }
@@ -524,7 +524,7 @@
      ],
      "snippets": [
       {
-       "line": 763,
+       "line": 744,
        "code": "let dataset: Arc<dyn storage::AtomicDatasetPort> =",
        "kind": "fnty",
        "label": "类型引用"
@@ -731,15 +731,15 @@
    "consumer_count": 1,
    "consumers": [
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "调用"
      ],
      "snippets": [
       {
-       "line": 31,
+       "line": 82,
        "code": "Some(bytes) => ReadOutcomeData::Found(BlobReadData::new(generation, bytes.clone())),",
        "kind": "call",
        "label": "调用"
@@ -806,7 +806,7 @@
      ],
      "snippets": [
       {
-       "line": 661,
+       "line": 668,
        "code": ") -> Result<Option<CommitWarningData>, ConfigAdapterError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -1078,7 +1078,7 @@
      ],
      "snippets": [
       {
-       "line": 836,
+       "line": 817,
        "code": "&storage::DatasetKeyData::new(",
        "kind": "call",
        "label": "调用"
@@ -1650,7 +1650,7 @@
     "pub fn include_quarantine(self) -> bool",
     "fn default() -> Self"
    ],
-   "consumer_count": 5,
+   "consumer_count": 4,
    "consumers": [
     {
      "file": "agent/features/context/src/adapters/atomic_blob_session.rs",
@@ -1701,38 +1701,28 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 17,
+       "line": 23,
        "code": "delete_options: Mutex<Vec<DeleteOptionsData>>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 75,
-       "code": "options: DeleteOptionsData,",
+       "line": 61,
+       "code": "pub fn delete_options(&self) -> Vec<DeleteOptionsData> {",
        "kind": "fnty",
        "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
+      },
       {
-       "line": 80,
-       "code": "_options: DeleteOptionsData,",
+       "line": 131,
+       "code": "options: DeleteOptionsData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -1757,7 +1747,7 @@
     "pub fn deleted_previous(self) -> bool",
     "pub fn deleted_quarantine(self) -> bool"
    ],
-   "consumer_count": 3,
+   "consumer_count": 2,
    "consumers": [
     {
      "file": "agent/features/context/src/adapters/atomic_blob_session.rs",
@@ -1776,46 +1766,23 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
       "调用"
      ],
      "snippets": [
       {
-       "line": 76,
+       "line": 132,
        "code": ") -> Result<DeleteOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 78,
-       "code": "Ok(DeleteOutcomeData::new(false, false, false))",
-       "kind": "call",
-       "label": "调用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用",
-      "调用"
-     ],
-     "snippets": [
-      {
-       "line": 81,
-       "code": ") -> Result<DeleteOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 82,
-       "code": "Ok(DeleteOutcomeData::new(false, false, false))",
+       "line": 135,
+       "code": "Ok(DeleteOutcomeData::new(removed, false, false))",
        "kind": "call",
        "label": "调用"
       }
@@ -1847,7 +1814,7 @@
      ],
      "snippets": [
       {
-       "line": 667,
+       "line": 674,
        "code": "WriteOptionsData::new(DurabilityData::ProcessCrashSafe),",
        "kind": "ref",
        "label": "路径引用"
@@ -2019,7 +1986,7 @@
      ],
      "snippets": [
       {
-       "line": 503,
+       "line": 516,
        "code": "storage::WriteOptionsData::new(storage::DurabilityData::ProcessCrashSafe),",
        "kind": "ref",
        "label": "路径引用"
@@ -2039,7 +2006,7 @@
     "Previous"
    ],
    "methods": [],
-   "consumer_count": 10,
+   "consumer_count": 9,
    "consumers": [
     {
      "file": "agent/features/config/src/adapters.rs",
@@ -2050,7 +2017,7 @@
      ],
      "snippets": [
       {
-       "line": 646,
+       "line": 653,
        "code": ".read(&Self::key(project_key)?, GenerationData::Primary)",
        "kind": "ref",
        "label": "路径引用"
@@ -2173,34 +2140,6 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 7,
-       "code": "AtomicBlobPort, DeleteOptionsData, DeleteOutcomeData, GenerationData, PromoteOutcomeData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 37,
-       "code": "generation: GenerationData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 60,
-       "code": "generation: GenerationData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
      "file": "agent/features/runtime/src/adapters/tool_result_blob.rs",
      "module": "runtime :: adapters/tool_result_blob.rs",
      "is_test": false,
@@ -2225,13 +2164,13 @@
      ],
      "snippets": [
       {
-       "line": 517,
+       "line": 530,
        "code": "let bytes = match blob.read(&key, storage::GenerationData::Primary).await? {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 526,
+       "line": 539,
        "code": "storage::GenerationData::Primary,",
        "kind": "ref",
        "label": "路径引用"
@@ -2255,39 +2194,44 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
       "路径引用",
-      "类型引用",
-      "路径引用"
+      "类型引用"
      ],
      "snippets": [
       {
-       "line": 25,
+       "line": 20,
+       "code": "reads: Mutex<Vec<GenerationData>>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 55,
+       "code": "pub fn reads(&self) -> Vec<GenerationData> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 75,
        "code": "generation: GenerationData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 27,
+       "line": 78,
        "code": "if generation == GenerationData::Previous {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 66,
+       "line": 114,
        "code": "_generation: GenerationData,",
        "kind": "fnty",
        "label": "类型引用"
-      },
-      {
-       "line": 71,
-       "code": "GenerationData::Primary,",
-       "kind": "ref",
-       "label": "路径引用"
       }
      ]
     }
@@ -2334,58 +2278,50 @@
      "module": "context :: integration_tests/session_snapshot_store_contract.rs",
      "is_test": true,
      "forms": [
-      "类型引用",
-      "路径引用",
-      "类型引用",
       "路径引用"
      ],
      "snippets": [
       {
-       "line": 16,
-       "code": "promote_outcome: Mutex<PromoteOutcomeData>,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 26,
-       "code": "promote_outcome: Mutex::new(PromoteOutcomeData::AlreadyPromoted),",
-       "kind": "ref",
-       "label": "路径引用"
-      },
-      {
-       "line": 54,
-       "code": ") -> Result<PromoteOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 134,
-       "code": "*blob.promote_outcome.lock().unwrap() = PromoteOutcomeData::NotFound;",
+       "line": 52,
+       "code": "blob.set_promote_outcome(PromoteOutcomeData::NotFound);",
        "kind": "ref",
        "label": "路径引用"
       }
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
-      "路径引用"
+      "路径引用",
+      "类型引用"
      ],
      "snippets": [
       {
-       "line": 59,
-       "code": ") -> Result<PromoteOutcomeData, StorageError> {",
+       "line": 24,
+       "code": "promote_outcome: Mutex<PromoteOutcomeData>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 60,
-       "code": "Ok(PromoteOutcomeData::NotFound)",
+       "line": 36,
+       "code": "promote_outcome: Mutex::new(PromoteOutcomeData::AlreadyPromoted),",
        "kind": "ref",
        "label": "路径引用"
+      },
+      {
+       "line": 65,
+       "code": "pub fn set_promote_outcome(&self, outcome: PromoteOutcomeData) {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 108,
+       "code": ") -> Result<PromoteOutcomeData, StorageError> {",
+       "kind": "fnty",
+       "label": "类型引用"
       }
      ]
     }
@@ -2422,48 +2358,25 @@
     "pub fn reason(& self) -> QuarantineReason",
     "pub fn moved(& self) -> bool"
    ],
-   "consumer_count": 2,
+   "consumer_count": 1,
    "consumers": [
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
       "调用"
      ],
      "snippets": [
       {
-       "line": 63,
+       "line": 117,
        "code": ") -> Result<QuarantineOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 68,
-       "code": "Ok(QuarantineOutcomeData::already_absent(",
-       "kind": "call",
-       "label": "调用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用",
-      "调用"
-     ],
-     "snippets": [
-      {
-       "line": 69,
-       "code": ") -> Result<QuarantineOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 70,
+       "line": 122,
        "code": "Ok(QuarantineOutcomeData::already_absent(",
        "kind": "call",
        "label": "调用"
@@ -2484,7 +2397,7 @@
     "PromoteFromCorrupt"
    ],
    "methods": [],
-   "consumer_count": 3,
+   "consumer_count": 2,
    "consumers": [
     {
      "file": "agent/features/context/src/adapters/atomic_blob_session.rs",
@@ -2503,47 +2416,30 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 14,
+       "line": 22,
        "code": "quarantines: Mutex<Vec<(GenerationData, TransactionScopeData, QuarantineReason)>>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 62,
-       "code": "reason: QuarantineReason,",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用",
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 68,
-       "code": "_reason: QuarantineReason,",
+       "line": 58,
+       "code": "pub fn quarantines(&self) -> Vec<(GenerationData, TransactionScopeData, QuarantineReason)> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 73,
-       "code": "QuarantineReason::DecoderRejected,",
-       "kind": "ref",
-       "label": "路径引用"
+       "line": 116,
+       "code": "_reason: QuarantineReason,",
+       "kind": "fnty",
+       "label": "类型引用"
       }
      ]
     }
@@ -2579,7 +2475,7 @@
     "NotFound"
    ],
    "methods": [],
-   "consumer_count": 8,
+   "consumer_count": 7,
    "consumers": [
     {
      "file": "agent/features/config/src/adapters.rs",
@@ -2590,7 +2486,7 @@
      ],
      "snippets": [
       {
-       "line": 650,
+       "line": 657,
        "code": "ReadOutcomeData::NotFound => Ok(None),",
        "kind": "ref",
        "label": "路径引用"
@@ -2646,29 +2542,6 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用",
-      "路径引用"
-     ],
-     "snippets": [
-      {
-       "line": 38,
-       "code": ") -> Result<ReadOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 40,
-       "code": "Ok(ReadOutcomeData::NotFound)",
-       "kind": "ref",
-       "label": "路径引用"
-      }
-     ]
-    },
-    {
      "file": "agent/features/runtime/src/adapters/tool_result_blob.rs",
      "module": "runtime :: adapters/tool_result_blob.rs",
      "is_test": false,
@@ -2693,13 +2566,13 @@
      ],
      "snippets": [
       {
-       "line": 522,
+       "line": 535,
        "code": "storage::ReadOutcomeData::NotFound => {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 531,
+       "line": 544,
        "code": "storage::ReadOutcomeData::NotFound => return Ok(0),",
        "kind": "ref",
        "label": "路径引用"
@@ -2707,9 +2580,9 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
       "路径引用",
@@ -2718,25 +2591,25 @@
      ],
      "snippets": [
       {
-       "line": 26,
+       "line": 76,
        "code": ") -> Result<ReadOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 28,
+       "line": 79,
        "code": "return Ok(ReadOutcomeData::NotFound);",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 31,
+       "line": 82,
        "code": "Some(bytes) => ReadOutcomeData::Found(BlobReadData::new(generation, bytes.clone())),",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 32,
+       "line": 83,
        "code": "None => ReadOutcomeData::NotFound,",
        "kind": "ref",
        "label": "路径引用"
@@ -2885,7 +2758,7 @@
      ],
      "snippets": [
       {
-       "line": 635,
+       "line": 642,
        "code": "SafePathSegmentData::from_str(project_key).map_err(|_| ConfigAdapterError::Invalid)?;",
        "kind": "call",
        "label": "调用"
@@ -3160,7 +3033,7 @@
      ],
      "snippets": [
       {
-       "line": 852,
+       "line": 833,
        "code": ".map(storage::SafePathSegmentData::as_str)",
        "kind": "ref",
        "label": "路径引用"
@@ -3475,13 +3348,13 @@
      ],
      "snippets": [
       {
-       "line": 546,
+       "line": 559,
        "code": "let segment: storage::SafePathSegmentData = session_id",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 557,
+       "line": 570,
        "code": "let segment: storage::SafePathSegmentData = session_id",
        "kind": "fnty",
        "label": "类型引用"
@@ -3700,13 +3573,13 @@
      ],
      "snippets": [
       {
-       "line": 172,
+       "line": 204,
        "code": "storage::SafeStorageRoot::open(agents_dir)",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 310,
+       "line": 345,
        "code": "storage::SafeStorageRoot::open(agents_dir)",
        "kind": "call",
        "label": "调用"
@@ -3756,7 +3629,7 @@
        "label": "调用"
       },
       {
-       "line": 577,
+       "line": 579,
        "code": "storage::SafeStorageRoot::open(&agents_dir).expect(\"storage root\"),",
        "kind": "call",
        "label": "调用"
@@ -4088,7 +3961,7 @@
      ],
      "snippets": [
       {
-       "line": 241,
+       "line": 177,
        "code": "storage::SafeStorageRoot::open(temp.path()).unwrap(),",
        "kind": "call",
        "label": "调用"
@@ -4113,34 +3986,18 @@
     "pub fn size_bytes(& self) -> usize",
     "pub fn generation(& self) -> GenerationData"
    ],
-   "consumer_count": 2,
+   "consumer_count": 1,
    "consumers": [
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 84,
-       "code": ") -> Result<Vec<storage::StorageEntryData>, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 88,
+       "line": 140,
        "code": ") -> Result<Vec<storage::StorageEntryData>, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -4164,7 +4021,7 @@
     "pub fn kind(& self) -> & StorageErrorKind",
     "fn fmt(& self, formatter : & mut fmt :: Formatter < '_ >) -> fmt :: Result"
    ],
-   "consumer_count": 11,
+   "consumer_count": 10,
    "consumers": [
     {
      "file": "agent/features/audit/src/adapters/append.rs",
@@ -4191,7 +4048,7 @@
      ],
      "snippets": [
       {
-       "line": 675,
+       "line": 682,
        "code": "fn map_storage_error(error: storage::StorageError) -> ConfigAdapterError {",
        "kind": "fnty",
        "label": "类型引用"
@@ -4286,52 +4143,6 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 38,
-       "code": ") -> Result<ReadOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 47,
-       "code": ") -> Result<WriteReceiptData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 54,
-       "code": ") -> Result<PromoteOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 63,
-       "code": ") -> Result<QuarantineOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 76,
-       "code": ") -> Result<DeleteOutcomeData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 84,
-       "code": ") -> Result<Vec<storage::StorageEntryData>, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
      "file": "agent/features/memory/src/adapters.rs",
      "module": "memory :: adapters.rs",
      "is_test": false,
@@ -4420,49 +4231,49 @@
      ],
      "snippets": [
       {
-       "line": 484,
+       "line": 497,
        "code": ") -> Result<(), storage::StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 498,
+       "line": 511,
        "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 515,
+       "line": 528,
        "code": ") -> Result<usize, storage::StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 537,
+       "line": 550,
        "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 545,
+       "line": 558,
        "code": "fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 548,
+       "line": 561,
        "code": ".map_err(|error: storage::StorageError| error)?;",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 556,
+       "line": 569,
        "code": "fn legacy_ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 559,
+       "line": 572,
        "code": ".map_err(|error: storage::StorageError| error)?;",
        "kind": "fnty",
        "label": "类型引用"
@@ -4470,9 +4281,9 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
       "调用",
@@ -4480,43 +4291,43 @@
      ],
      "snippets": [
       {
-       "line": 26,
+       "line": 76,
        "code": ") -> Result<ReadOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 41,
+       "line": 91,
        "code": ") -> Result<WriteReceiptData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 43,
+       "line": 93,
        "code": "return Err(StorageError::new(storage::StorageErrorKind::Io, message));",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 59,
+       "line": 108,
        "code": ") -> Result<PromoteOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 69,
+       "line": 117,
        "code": ") -> Result<QuarantineOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 81,
+       "line": 132,
        "code": ") -> Result<DeleteOutcomeData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 88,
+       "line": 140,
        "code": ") -> Result<Vec<storage::StorageEntryData>, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -4567,25 +4378,25 @@
      ],
      "snippets": [
       {
-       "line": 677,
+       "line": 684,
        "code": "StorageErrorKind::PermissionDenied => ConfigAdapterError::PermissionDenied,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 678,
+       "line": 685,
        "code": "StorageErrorKind::UnsupportedDurability => ConfigAdapterError::UnsupportedDurability,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 680,
+       "line": 687,
        "code": "StorageErrorKind::InvalidKey => ConfigAdapterError::Invalid,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 681,
+       "line": 688,
        "code": "StorageErrorKind::Io | StorageErrorKind::ConcurrentWrite => ConfigAdapterError::Io,",
        "kind": "ref",
        "label": "路径引用"
@@ -4713,13 +4524,13 @@
      ],
      "snippets": [
       {
-       "line": 498,
+       "line": 511,
        "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 537,
+       "line": 550,
        "code": "storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())",
        "kind": "ref",
        "label": "路径引用"
@@ -4727,15 +4538,15 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "路径引用"
      ],
      "snippets": [
       {
-       "line": 43,
+       "line": 93,
        "code": "return Err(StorageError::new(storage::StorageErrorKind::Io, message));",
        "kind": "ref",
        "label": "路径引用"
@@ -4759,7 +4570,7 @@
     "pub fn namespace(& self) -> StorageNamespaceData",
     "pub fn segments(& self) -> & [SafePathSegmentData]"
    ],
-   "consumer_count": 9,
+   "consumer_count": 8,
    "consumers": [
     {
      "file": "agent/features/config/src/adapters.rs",
@@ -4777,7 +4588,7 @@
        "label": "类型引用"
       },
       {
-       "line": 636,
+       "line": 643,
        "code": "StorageKeyData::new(StorageNamespaceData::Config, vec![segment])",
        "kind": "call",
        "label": "调用"
@@ -4866,46 +4677,6 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 36,
-       "code": "_key: &StorageKeyData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 44,
-       "code": "_key: &StorageKeyData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 53,
-       "code": "_key: &StorageKeyData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 59,
-       "code": "_key: &StorageKeyData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 74,
-       "code": "_key: &StorageKeyData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
      "file": "agent/features/runtime/src/adapters/tool_result_blob.rs",
      "module": "runtime :: adapters/tool_result_blob.rs",
      "is_test": false,
@@ -4940,25 +4711,25 @@
      ],
      "snippets": [
       {
-       "line": 545,
+       "line": 558,
        "code": "fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 549,
+       "line": 562,
        "code": "storage::StorageKeyData::new(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 556,
+       "line": 569,
        "code": "fn legacy_ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 560,
+       "line": 573,
        "code": "storage::StorageKeyData::new(",
        "kind": "call",
        "label": "调用"
@@ -4982,46 +4753,52 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 10,
+       "line": 11,
        "code": "StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 24,
+       "line": 52,
+       "code": "pub fn writes(&self) -> Vec<(StorageKeyData, Vec<u8>, WriteOptionsData)> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 74,
        "code": "key: &StorageKeyData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 38,
+       "line": 88,
        "code": "key: &StorageKeyData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 58,
+       "line": 107,
        "code": "_key: &StorageKeyData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 65,
+       "line": 113,
        "code": "_key: &StorageKeyData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 79,
-       "code": "_key: &StorageKeyData,",
+       "line": 130,
+       "code": "key: &StorageKeyData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -5053,7 +4830,7 @@
     "pub fn minimum_durability(self) -> DurabilityData",
     "pub fn effective_durability(self, requested : DurabilityData) -> DurabilityData"
    ],
-   "consumer_count": 20,
+   "consumer_count": 19,
    "consumers": [
     {
      "file": "agent/features/config/src/adapters.rs",
@@ -5064,7 +4841,7 @@
      ],
      "snippets": [
       {
-       "line": 636,
+       "line": 643,
        "code": "StorageKeyData::new(StorageNamespaceData::Config, vec![segment])",
        "kind": "ref",
        "label": "路径引用"
@@ -5194,7 +4971,7 @@
      ],
      "snippets": [
       {
-       "line": 837,
+       "line": 818,
        "code": "storage::StorageNamespaceData::Session,",
        "kind": "ref",
        "label": "路径引用"
@@ -5236,22 +5013,6 @@
        "code": "StorageNamespaceData::Session,",
        "kind": "ref",
        "label": "路径引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 83,
-       "code": "_namespace: storage::StorageNamespaceData,",
-       "kind": "fnty",
-       "label": "类型引用"
       }
      ]
     },
@@ -5372,13 +5133,13 @@
      ],
      "snippets": [
       {
-       "line": 550,
+       "line": 563,
        "code": "storage::StorageNamespaceData::BackgroundProcess,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 561,
+       "line": 574,
        "code": "storage::StorageNamespaceData::LegacyBackgroundTask,",
        "kind": "ref",
        "label": "路径引用"
@@ -5402,15 +5163,15 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 87,
+       "line": 139,
        "code": "_namespace: storage::StorageNamespaceData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -5430,7 +5191,7 @@
     "Dataset"
    ],
    "methods": [],
-   "consumer_count": 3,
+   "consumer_count": 2,
    "consumers": [
     {
      "file": "agent/features/context/src/adapters/atomic_blob_session.rs",
@@ -5449,47 +5210,30 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 9,
-       "code": "TransactionScopeData, WriteOptionsData, WriteReceiptData,",
+       "line": 22,
+       "code": "quarantines: Mutex<Vec<(GenerationData, TransactionScopeData, QuarantineReason)>>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 61,
-       "code": "scope: TransactionScopeData,",
+       "line": 58,
+       "code": "pub fn quarantines(&self) -> Vec<(GenerationData, TransactionScopeData, QuarantineReason)> {",
        "kind": "fnty",
        "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用",
-      "路径引用"
-     ],
-     "snippets": [
+      },
       {
-       "line": 67,
+       "line": 115,
        "code": "_scope: TransactionScopeData,",
        "kind": "fnty",
        "label": "类型引用"
-      },
-      {
-       "line": 72,
-       "code": "TransactionScopeData::Blob,",
-       "kind": "ref",
-       "label": "路径引用"
       }
      ]
     }
@@ -5508,7 +5252,7 @@
     "pub fn new(durability : DurabilityData) -> Self",
     "pub fn durability(self) -> DurabilityData"
    ],
-   "consumer_count": 13,
+   "consumer_count": 12,
    "consumers": [
     {
      "file": "agent/features/config/src/adapters.rs",
@@ -5519,7 +5263,7 @@
      ],
      "snippets": [
       {
-       "line": 667,
+       "line": 674,
        "code": "WriteOptionsData::new(DurabilityData::ProcessCrashSafe),",
        "kind": "call",
        "label": "调用"
@@ -5619,28 +5363,6 @@
      ]
     },
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 15,
-       "code": "writes: Mutex<Vec<(Vec<u8>, WriteOptionsData)>>,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 46,
-       "code": "options: WriteOptionsData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
      "file": "agent/features/memory/src/adapters.rs",
      "module": "memory :: adapters.rs",
      "is_test": false,
@@ -5713,7 +5435,7 @@
      ],
      "snippets": [
       {
-       "line": 503,
+       "line": 516,
        "code": "storage::WriteOptionsData::new(storage::DurabilityData::ProcessCrashSafe),",
        "kind": "call",
        "label": "调用"
@@ -5721,21 +5443,27 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 10,
+       "line": 11,
        "code": "StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 40,
+       "line": 52,
+       "code": "pub fn writes(&self) -> Vec<(StorageKeyData, Vec<u8>, WriteOptionsData)> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 90,
        "code": "options: WriteOptionsData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -5757,48 +5485,25 @@
     "pub fn committed(warning : Option < CommitWarningData >) -> Self",
     "pub fn warning(self) -> Option < CommitWarningData >"
    ],
-   "consumer_count": 2,
+   "consumer_count": 1,
    "consumers": [
     {
-     "file": "agent/features/context/src/integration_tests/session_snapshot_store_contract.rs",
-     "module": "context :: integration_tests/session_snapshot_store_contract.rs",
-     "is_test": true,
+     "file": "agent/testing/testkit/src/blob.rs",
+     "module": "unknown :: agent/testing/testkit/src/blob.rs",
+     "is_test": false,
      "forms": [
       "类型引用",
       "调用"
      ],
      "snippets": [
       {
-       "line": 47,
+       "line": 91,
        "code": ") -> Result<WriteReceiptData, StorageError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 49,
-       "code": "Ok(WriteReceiptData::committed(None))",
-       "kind": "call",
-       "label": "调用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/ports/tool_result_blob_contract_tests.rs",
-     "module": "runtime :: ports/tool_result_blob_contract_tests.rs",
-     "is_test": true,
-     "forms": [
-      "类型引用",
-      "调用"
-     ],
-     "snippets": [
-      {
-       "line": 41,
-       "code": ") -> Result<WriteReceiptData, StorageError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 53,
+       "line": 103,
        "code": "Ok(WriteReceiptData::committed(None))",
        "kind": "call",
        "label": "调用"
@@ -5842,19 +5547,19 @@
      ],
      "snippets": [
       {
-       "line": 111,
+       "line": 141,
        "code": "storage::wire_file_system_blob(agents_dir_buf.clone())",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 188,
+       "line": 220,
        "code": "let session_blob = storage::wire_file_system_blob(agents_dir)",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 489,
+       "line": 536,
        "code": "storage::wire_file_system_blob(agents_dir)",
        "kind": "call",
        "label": "调用"
@@ -5914,7 +5619,7 @@
      ],
      "snippets": [
       {
-       "line": 463,
+       "line": 498,
        "code": "let storage = storage::wire_file_system_blob(dir.path()).unwrap();",
        "kind": "call",
        "label": "调用"
@@ -6058,13 +5763,13 @@
      ],
      "snippets": [
       {
-       "line": 230,
+       "line": 166,
        "code": "config::wire_config_override_store(storage::wire_file_system_blob(temp.path()).unwrap()),",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 266,
+       "line": 202,
        "code": "storage::wire_file_system_blob(temp.path()).unwrap(),",
        "kind": "call",
        "label": "调用"
@@ -6096,7 +5801,7 @@
      ],
      "snippets": [
       {
-       "line": 78,
+       "line": 77,
        "code": "storage::wire_file_system_blob(temp.path().join(\"config-overrides\"))",
        "kind": "call",
        "label": "调用"
@@ -6124,19 +5829,19 @@
      ],
      "snippets": [
       {
-       "line": 161,
+       "line": 193,
        "code": "let reflection_legacy_dataset = storage::wire_file_system_dataset(agents_dir)",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 186,
+       "line": 218,
        "code": "let session_dataset = storage::wire_file_system_dataset(agents_dir)",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 304,
+       "line": 339,
        "code": "storage::wire_file_system_dataset(agents_dir_buf.clone())",
        "kind": "call",
        "label": "调用"
@@ -6170,7 +5875,7 @@
        "label": "调用"
       },
       {
-       "line": 571,
+       "line": 573,
        "code": "storage::wire_file_system_dataset(agents_dir.clone()).expect(\"create dataset adapter\");",
        "kind": "call",
        "label": "调用"
@@ -6186,7 +5891,7 @@
      ],
      "snippets": [
       {
-       "line": 764,
+       "line": 745,
        "code": "storage::wire_file_system_dataset(root.path()).expect(\"dataset adapter\");",
        "kind": "call",
        "label": "调用"
@@ -6446,7 +6151,7 @@
      ],
      "snippets": [
       {
-       "line": 238,
+       "line": 174,
        "code": "storage::wire_file_system_dataset(temp.path()).unwrap(),",
        "kind": "call",
        "label": "调用"

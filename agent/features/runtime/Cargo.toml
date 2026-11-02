@@ -49,10 +49,11 @@ logging = { path = "../../../packages/global/logging" }
 tempfile = "3"
 
 [dev-dependencies]
-provider = { path = "../provider", features = ["dev"] }
-storage = { path = "../storage", features = ["dev"] }
-policy = { path = "../policy", features = ["dev"] }
-systemone = { path = "../systemone", features = ["dev"] }
+testkit = { path = "../../testing/testkit" }
+provider = { path = "../provider" }
+storage = { path = "../storage" }
+policy = { path = "../policy" }
+systemone = { path = "../systemone" }
 # 自引用：integration tests（tests/）编译时 lib 不带 --test，
 # test helper 需 dev feature 才可见。
 runtime = { path = ".", features = ["dev"] }

@@ -1,6 +1,9 @@
-//! Shared test doubles for the reflection stage.
+//! reflection 层测试替身（crate 内 lib 测试专用；跨 crate 共享的 runtime fake
+//! 在 `testkit::runtime` 维护——本模块不对外导出）。
 
 use std::sync::Arc;
+
+use crate::ports::{LlmInvokePort, ProviderBindingData};
 
 /// A `ReflectionHistoryStore` that accepts every write, for tests that care
 /// about the run's outcome rather than its durable trace.
@@ -36,10 +39,10 @@ pub(crate) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistor
 
 /// 测试用 provider：`invoke` 恒返回有效 reflection JSON（空 output），供反思
 /// 端到端路径（生产 `execute_reflection`）驱动到 Succeeded 终态。
-pub(crate) fn static_reflection_port() -> Arc<dyn crate::ports::LlmInvokePort> {
+pub(crate) fn static_reflection_port() -> Arc<dyn LlmInvokePort> {
     // #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本化端口。
-    provider::test_support::scripted_llm(|_request| {
-        Ok(provider::test_support::text_stream_with_usage(
+    testkit::provider::scripted_llm(|_request| {
+        Ok(testkit::provider::text_stream_with_usage(
             r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
             1,
             1,
@@ -48,8 +51,8 @@ pub(crate) fn static_reflection_port() -> Arc<dyn crate::ports::LlmInvokePort> {
 }
 
 /// 与 `StaticReflectionProvider` 配套的 binding（身份/能力与 fake invoke 一致）。
-pub(crate) fn static_reflection_binding() -> Arc<crate::ports::ProviderBindingData> {
-    Arc::new(crate::ports::ProviderBindingData {
+pub(crate) fn static_reflection_binding() -> Arc<ProviderBindingData> {
+    Arc::new(ProviderBindingData {
         provider: static_reflection_port(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),

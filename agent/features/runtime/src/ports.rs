@@ -46,5 +46,5 @@ pub use provider_port::{ProviderError, ProviderResponseStream};
 pub use session_query::SessionQueryPort;
 pub use share::ids::{InteractionRequestId, RunStepId, SessionId};
 pub use tool_result_blob::ToolResultBlobPort;
-pub(crate) use tool_result_blob::{ToolResultBlobError, ToolResultBlobRef};
+pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobRef};
 pub use usage_sink::{UnavailableUsageSink, UsageSink};

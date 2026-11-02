@@ -1,16 +1,15 @@
-//! Storage 测试实现面（#2146 实现权治理：AtomicBlobPort 实现权归本 crate，
-//! 跨 crate 测试经此获得替身；生产不编译）。
+//! 内存 Blob 端口替身（#2146 实现权治理后统一归 testkit 维护；
+//! 定义方不提供 fake，消费方经 testkit 获得替身）。
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::domain::{
-    BlobReadData, DeleteOptionsData, DeleteOutcomeData, GenerationData, PromoteOutcomeData,
-    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageError, StorageKeyData,
-    TransactionScopeData, WriteOptionsData, WriteReceiptData,
-};
-use crate::ports::AtomicBlobPort;
 use async_trait::async_trait;
+use storage::{
+    AtomicBlobPort, BlobReadData, DeleteOptionsData, DeleteOutcomeData, GenerationData,
+    PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageError,
+    StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
+};
 
 /// 内存 Blob 替身：HashMap 存储 + 读世代语义（Previous → NotFound）+
 /// 可注入写失败 + writes/reads 记录（契约与快照测试共用）。
@@ -91,7 +90,7 @@ impl AtomicBlobPort for InMemoryBlobPort {
         options: WriteOptionsData,
     ) -> Result<WriteReceiptData, StorageError> {
         if let Some(message) = self.write_failure.lock().unwrap().take() {
-            return Err(StorageError::new(crate::StorageErrorKind::Io, message));
+            return Err(StorageError::new(storage::StorageErrorKind::Io, message));
         }
         self.values
             .lock()
@@ -137,8 +136,8 @@ impl AtomicBlobPort for InMemoryBlobPort {
     }
     async fn list_primary(
         &self,
-        _namespace: crate::domain::StorageNamespaceData,
-    ) -> Result<Vec<crate::domain::StorageEntryData>, StorageError> {
+        _namespace: storage::StorageNamespaceData,
+    ) -> Result<Vec<storage::StorageEntryData>, StorageError> {
         Ok(Vec::new())
     }
 }

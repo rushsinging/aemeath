@@ -1,8 +1,8 @@
 mod execution;
+#[cfg(test)]
+pub(crate) mod fakes;
 mod response;
 mod task;
-#[cfg(test)]
-pub(crate) mod test_support;
 
 pub use execution::CompleteReflectionResult;
 #[cfg_attr(not(test), allow(unused_imports))]

@@ -15,10 +15,6 @@
 //!
 //! 设计依据：`docs/design/02-modules/systemone/01-systemone-scoring.md`。
 
-/// 测试实现面（跨 crate 测试经 dev feature）。
-#[cfg(any(test, feature = "dev"))]
-pub mod test_support;
-
 mod constants;
 pub(crate) use constants::LOG_TARGET;
 mod state;

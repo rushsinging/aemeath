@@ -24,10 +24,10 @@ use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
 use share::ids::SessionId;
 use std::sync::{Arc, Mutex};
+use testkit::tools::{sequential_test_tool_catalog, TestToolExecutionContextBuilder};
 use tools::published::execution::{
     CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolInvocation,
 };
-use tools::test_support::{sequential_test_tool_catalog, TestToolExecutionContextBuilder};
 
 // ── fakes ────────────────────────────────────────────────────────────
 
@@ -94,12 +94,13 @@ fn supervisor_with(
     sleep: Duration,
 ) -> (
     ToolExecutionSupervisor,
-    Arc<context::test_support::StubContextService>,
+    Arc<testkit::context::StubContextService>,
 ) {
-    // #2146：Context 四端口实现权归 context crate；读路径失败 + receipt
-    // 状态记录替身经其 test_support。
-    let port =
-        Arc::new(context::test_support::StubContextService::read_only_failing("test port 不支持"));
+    // 读路径失败 + receipt
+    // 状态记录替身经 testkit 构造。
+    let port = Arc::new(testkit::context::StubContextService::read_only_failing(
+        "test port 不支持",
+    ));
     let supervisor = ToolExecutionSupervisor::new(
         sleeping_tool_port(sleep),
         sequential_test_tool_catalog("SleepTool", 300),
@@ -113,7 +114,7 @@ fn test_context() -> ToolExecutionContext {
 }
 
 async fn wait_for_terminal_state(
-    states: &Arc<context::test_support::StubContextService>,
+    states: &Arc<testkit::context::StubContextService>,
     timeout: Duration,
 ) -> String {
     let started = std::time::Instant::now();
@@ -150,11 +151,11 @@ fn success_text(outcome: &ToolExecutionOutcome) -> String {
 
 // ── tests ────────────────────────────────────────────────────────────
 
-/// 可控时长替身（#2146：实现权归 tools crate）。
+/// 可控时长替身（）。
 fn sleeping_tool_port(
     sleep: std::time::Duration,
 ) -> Arc<dyn tools::published::execution::ToolExecutionPort> {
-    tools::test_support::scripted_tool_execution_async(move |_invocation, _context| async move {
+    testkit::tools::scripted_tool_execution_async(move |_invocation, _context| async move {
         tokio::time::sleep(sleep).await;
         tools::published::execution::ToolExecutionOutcome::success_text("sleep tool finished")
     })
@@ -164,7 +165,7 @@ fn sleeping_tool_port(
 fn capturing_tool_port(
     captured: Arc<std::sync::Mutex<Option<u64>>>,
 ) -> Arc<dyn tools::published::execution::ToolExecutionPort> {
-    tools::test_support::scripted_tool_execution_async(move |invocation, context| {
+    testkit::tools::scripted_tool_execution_async(move |invocation, context| {
         let captured = Arc::clone(&captured);
         let scope = context.scope().clone();
         async move {
@@ -543,12 +544,13 @@ async fn backgrounded_summary_uses_goal_text_not_tool_input() {
 // ── effective timeout 三档（P4）───────────────────────────────────────
 
 type CapturedTimeout = Arc<Mutex<Option<u64>>>;
-type RecordedStates = Arc<context::test_support::StubContextService>;
+type RecordedStates = Arc<testkit::context::StubContextService>;
 
 /// 捕获 supervisor 下传的 effective timeout，并校验 invocation 与 context
 fn supervisor_capturing_timeout() -> (ToolExecutionSupervisor, RecordedStates, CapturedTimeout) {
-    let states =
-        Arc::new(context::test_support::StubContextService::read_only_failing("test port 不支持"));
+    let states = Arc::new(testkit::context::StubContextService::read_only_failing(
+        "test port 不支持",
+    ));
     let captured = Arc::new(Mutex::new(None));
     let supervisor = ToolExecutionSupervisor::new(
         capturing_tool_port(Arc::clone(&captured)),

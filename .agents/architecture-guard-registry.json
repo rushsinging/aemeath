@@ -190,6 +190,19 @@
       "tracking_issue": 1067
     },
     {
+      "id": "construction.context.wire-session-management",
+      "symbol": "wire_session_management",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition",
+        "agent/testing/testkit"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "会话管理装配入口（#1863 F 项遗留）：blob 端口 → SessionManagementPort；composition 装配与 testkit 测试替身经此构造（#1865 fake 治理后 AtomicBlobSessionManagement 不再跨 BC 可达）",
+      "tracking_issue": 1865
+    },
+    {
       "id": "construction.context.workspaceskillqueryfactory",
       "symbol": "WorkspaceSkillQueryFactory",
       "owner_crate": "context",
@@ -1698,11 +1711,11 @@
         "messages_selected_for_precompact_memory",
         "new_session_id",
         "render_invocation_reminder_body",
-        "test_support",
         "wire_isolated_context",
-        "wire_isolated_context_with_workspace_skills"
+        "wire_isolated_context_with_workspace_skills",
+        "wire_session_management"
       ],
-      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+ToolCallReceiptData/ToolCallState：后台进程 Backgrounded 中间态跨 crate 消费（receipt 状态语义）；+BackgroundProcessCompletionStatus/BackgroundProcessReminderItemData：#252 通知数据跨 crate 消费（runtime source 构造 reminder 条目）",
+      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+wire_session_management：#1865 会话管理装配入口（blob 端口 → SessionManagementPort，测试替身通道）；+ToolCallReceiptData/ToolCallState：后台进程 Backgrounded 中间态跨 crate 消费（receipt 状态语义）；+BackgroundProcessCompletionStatus/BackgroundProcessReminderItemData：#252 通知数据跨 crate 消费（runtime source 构造 reminder 条目）",
       "profile": "fast"
     },
     {
@@ -1863,7 +1876,9 @@
         "SessionSwitchCoordinatorBuilder",
         "SessionSwitchDependencies",
         "SkillBootstrapAssemblyData",
+        "ToolResultBlobError",
         "ToolResultBlobPort",
+        "ToolResultBlobRef",
         "ToolResultMaterializationPolicyData",
         "ToolResultMaterializer",
         "TriageEscalation",
@@ -1996,12 +2011,15 @@
         "AuthorizationContext",
         "BackgroundProcessAccess",
         "BackgroundProcessAccessSource",
+        "CancellationDeclaration",
         "CleanupConfirmation",
         "CommittedTaskChange",
+        "ConcurrencyDeclaration",
         "ExecutionScope",
         "FixedGuidance",
         "Guidance",
         "ImageData",
+        "InputSafetyDeclaration",
         "McpTool",
         "MemoryPortSource",
         "MutexReadSet",
@@ -2014,6 +2032,7 @@
         "ToolCatalogPort",
         "ToolCatalogSnapshot",
         "ToolDefinition",
+        "ToolDescriptor",
         "ToolErrorKind",
         "ToolName",
         "ToolOutcome",
@@ -2022,10 +2041,9 @@
         "ToolResult",
         "WorkspaceReadAccess",
         "role_profile_name",
-        "test_support",
         "types"
       ],
-      "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）；+test_support：test-harness feature 门控的 test-only 出口（runtime 执行流测试复用 TestToolExecutionContextBuilder）；+BackgroundProcessAccess/Source：#252 查询端口（runtime 实现、tools 契约，端口类五类判据）",
+      "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）；+ToolDescriptor/ConcurrencyDeclaration/CancellationDeclaration/InputSafetyDeclaration：#1865 跨 crate 测试替身经根路径构造 PL 目录（testkit::tools::sequential_test_tool_catalog）；+BackgroundProcessAccess/Source：#252 查询端口（runtime 实现、tools 契约，端口类五类判据）",
       "profile": "fast"
     },
     {
@@ -2038,7 +2056,8 @@
         "cli": [
           "composition",
           "sdk",
-          "utils"
+          "utils",
+          "testkit"
         ],
         "composition": [
           "audit",
@@ -2059,7 +2078,8 @@
           "task",
           "tools",
           "update",
-          "workflow"
+          "workflow",
+          "testkit"
         ],
         "runtime": [
           "audit",
@@ -2079,7 +2099,8 @@
           "task",
           "tools",
           "utils",
-          "workflow"
+          "workflow",
+          "testkit"
         ],
         "config": [
           "share",
@@ -2091,10 +2112,12 @@
         ],
         "project": [
           "share",
-          "utils"
+          "utils",
+          "testkit"
         ],
         "policy": [
-          "share"
+          "share",
+          "testkit"
         ],
         "context": [
           "config",
@@ -2106,13 +2129,15 @@
           "storage",
           "task",
           "tools",
-          "utils"
+          "utils",
+          "testkit"
         ],
         "memory": [
           "share",
           "storage",
           "systemone",
-          "utils"
+          "utils",
+          "testkit"
         ],
         "provider": [
           "logging",
@@ -2125,10 +2150,12 @@
           "systemone",
           "task",
           "utils",
-          "workflow"
+          "workflow",
+          "testkit"
         ],
         "storage": [
-          "share"
+          "share",
+          "testkit"
         ],
         "task": [
           "share"
@@ -2148,7 +2175,8 @@
         "sdk": [
           "share",
           "tools",
-          "utils"
+          "utils",
+          "testkit"
         ],
         "update": [
           "logging",
@@ -2163,7 +2191,7 @@
           "utils"
         ]
       },
-      "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
+      "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）；testkit（agent/testing/testkit）为 dev-only 测试替身 crate，各 crate 经 dev-dependencies 引用。",
       "profile": "fast"
     },
     {
@@ -2724,6 +2752,18 @@
           "exit_condition": "routing_guard 转为生产域或移除 #[cfg(test)] 门控时迁移其常量",
           "since": "#1146"
         }
+      ]
+    },
+    {
+      "id": "pattern.pl.fake-impl-location",
+      "assertion": "forbidden_segments",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "2026-11-02 拍板：定义方不负责 fake——各 crate 的 src/test_support.rs 通道撤销，跨 crate 共享测试替身统一在 agent/testing/testkit 维护；本规则禁止任何 test_support 路径段重新出现（含 src 下文件与目录形态）。各 crate 测试内局部内联 stub（同文件 #[cfg(test)]、不跨模块导出）仍允许。",
+      "profile": "fast",
+      "forbidden_segments": [
+        "test_support"
       ]
     }
   ],

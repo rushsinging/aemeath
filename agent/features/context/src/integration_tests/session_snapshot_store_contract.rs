@@ -6,7 +6,7 @@ use storage::{GenerationData, PromoteOutcomeData, QuarantineReason, TransactionS
 
 #[tokio::test]
 async fn adapter_maps_context_operations_to_session_atomic_blob_contract() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     let store = AtomicBlobSessionStore::new(blob.clone(), "session-1").unwrap();
     assert!(store
         .read(SessionGeneration::Primary)
@@ -35,7 +35,7 @@ async fn adapter_maps_context_operations_to_session_atomic_blob_contract() {
 
 #[tokio::test]
 async fn adapter_maps_promote_and_delete_to_atomic_blob_contract() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     let store = AtomicBlobSessionStore::new(blob.clone(), "session-1").unwrap();
 
     store.promote_previous().await.unwrap();
@@ -48,7 +48,7 @@ async fn adapter_maps_promote_and_delete_to_atomic_blob_contract() {
 
 #[tokio::test]
 async fn adapter_reports_missing_previous_generation() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     blob.set_promote_outcome(PromoteOutcomeData::NotFound);
     let store = AtomicBlobSessionStore::new(blob, "session-1").unwrap();
 
@@ -58,6 +58,6 @@ async fn adapter_reports_missing_previous_generation() {
 
 #[test]
 fn adapter_rejects_unsafe_session_id_before_touching_storage() {
-    let blob = Arc::new(storage::test_support::InMemoryBlobPort::new());
+    let blob = Arc::new(testkit::blob::InMemoryBlobPort::new());
     assert!(AtomicBlobSessionStore::new(blob, "../escape").is_err());
 }

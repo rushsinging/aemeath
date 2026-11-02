@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-# Enables test-only helpers (`test_support`). Consumers must add `context` to
-# `[dev-dependencies]` with `features = ["dev"]`. Never enabled in production.
+# 跨 crate 测试 fixture（DisplayHistoryStepIndexData::fixture）门控；
+# 消费方经 [dev-dependencies] features = ["dev"] 启用。生产不启用。
 dev = []
 
 [dependencies]
@@ -35,12 +35,13 @@ tokio-util = { workspace = true }
 futures-util = { workspace = true }
 
 [dev-dependencies]
-# 测试经 provider test_support 的脚本化 LlmInvokePort（#2146：该 trait 只允许
+testkit = { path = "../../testing/testkit" }
+# 测试经 testkit::provider 的脚本化 LlmInvokePort（#2146：该 trait 只允许
 # provider 实现）。
-provider = { path = "../provider", features = ["dev"] }
-memory = { path = "../memory", features = ["dev"] }
-storage = { path = "../storage", features = ["dev"] }
-project = { path = "../project", features = ["dev"] }
+provider = { path = "../provider" }
+memory = { path = "../memory" }
+storage = { path = "../storage" }
+project = { path = "../project" }
 tools = { path = "../tools", features = ["test-harness"] }
 tempfile = "3"
 

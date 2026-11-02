@@ -7,9 +7,9 @@ use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderError, Pr
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 
-/// 恒取消的测试调用端口（#2146：实现归 provider test_support）。
+/// 恒取消的测试调用端口。
 pub(crate) fn fake_provider_port() -> Arc<dyn crate::ports::LlmInvokePort> {
-    provider::test_support::scripted_llm(|_request| Err(ProviderError::cancelled()))
+    testkit::provider::scripted_llm(|_request| Err(ProviderError::cancelled()))
 }
 
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
@@ -71,9 +71,9 @@ impl ToolCatalogPort for FakeToolCatalog {
     }
 }
 
-/// #2146：Policy 实现权归 policy crate；替身经其 test_support。
+/// Policy 替身：经 testkit::policy 构造。
 pub(crate) fn fake_policy() -> std::sync::Arc<dyn crate::ports::Policy> {
-    policy::test_support::allow_all_standard()
+    testkit::policy::allow_all_standard()
 }
 
 pub(crate) struct FakeReflectionHistory;
@@ -173,16 +173,14 @@ impl ChatEventSink for RecordingEventSink {
     }
 }
 
-/// #2146：ToolExecutionPort 实现权归 tools crate；替身经其脚本端口。
+/// ToolExecutionPort 替身：经 testkit::tools 脚本端口构造。
 pub(crate) fn fake_tool_execution() -> Arc<dyn tools::published::execution::ToolExecutionPort> {
-    tools::test_support::scripted_tool_execution(|_invocation, _context| {
+    testkit::tools::scripted_tool_execution(|_invocation, _context| {
         tools::published::execution::ToolExecutionOutcome::success_text("fake")
     })
 }
 
-/// #2146：Context 四端口实现权归 context crate；恒错替身经其 test_support。
-pub(crate) fn fake_context_service() -> std::sync::Arc<context::test_support::StubContextService> {
-    std::sync::Arc::new(context::test_support::StubContextService::unavailable(
-        "fake",
-    ))
+/// Context 四端口恒错替身：经 testkit::context 构造。
+pub(crate) fn fake_context_service() -> std::sync::Arc<testkit::context::StubContextService> {
+    std::sync::Arc::new(testkit::context::StubContextService::unavailable("fake"))
 }

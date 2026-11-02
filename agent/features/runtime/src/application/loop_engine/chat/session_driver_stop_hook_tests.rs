@@ -42,7 +42,7 @@ async fn test_run_session_command_driver_stop_hook_blocked_continues_until_succe
 
     let shell = test_shell_with_hooks(blocking_then_success_hook_port(&flag_path));
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-stop-hook-blocked");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -162,7 +162,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
 
     let shell = test_shell_with_hooks(delayed_blocking_then_success_hook_port(&flag_path));
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-stop-hook-follow-up");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -261,7 +261,7 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
 
     let shell = test_shell_with_hooks(blocking_then_success_hook_port(&flag_path));
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         )),
     );
@@ -425,7 +425,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     }, ..share::config::Config::default() })).unwrap());
     shell.workspace = workspace;
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["final response"]),
         )),
     );
@@ -561,7 +561,7 @@ async fn stop_hook_uses_workspace_restored_during_the_same_run() {
         .unwrap());
     shell.workspace = workspace.clone();
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             ExitWorktreeBeforeStopProvider { workspace },
         )),
     );
@@ -632,7 +632,7 @@ async fn test_run_session_command_driver_drains_input_after_stop_hook_before_don
 
     let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             TwoTurnProvider,
         )),
     );
@@ -788,7 +788,7 @@ async fn test_continue_false_json_treated_as_block() {
 
     let shell = test_shell_with_hooks(continue_false_then_allow_hook_port(&flag_path));
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first response", "second response"]),
         )),
     );
@@ -887,7 +887,7 @@ async fn test_stall_triggers_stop_hook_check() {
     // Stop hook 前 3 次阻断，第 4 次放行
     let shell = test_shell_with_hooks(block_n_times_hook_port(&counter_path, 3));
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec![
                 "same output",
                 "same output",

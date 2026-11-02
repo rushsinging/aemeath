@@ -20,6 +20,7 @@ members = [
     "agent/features/update",
     "agent/features/workflow",
     "agent/shared",
+    "agent/testing/testkit",
     "packages/sdk",
     "packages/global/logging",
     "packages/global/utils",

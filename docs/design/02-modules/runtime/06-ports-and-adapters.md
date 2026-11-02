@@ -300,38 +300,33 @@ submit(trigger, owned message snapshot)
 - Run teardown 必须 drain 该 Run 的 Reflection slot；到结束 deadline 仍未完成时 cancel，并等待 cancellation/timeout 终态清槽后再释放 Run lease，**NEVER** 留下 detached job。adapter 自身的执行 timeout 同样只产出安全终态 metadata。
 
 
-### 2.4 PL trait 实现权登记表（#2146 治理）
+### 2.4 PL trait 实现权与测试替身治理（2026-11-02 拍板，取代 #2146 三档制）
 
-全仓 pub trait 按四档治理（97 个盘点；登记表当前 **54 条**）：**capability(pure)** 用
-Sealed trait 编译期强制（`pub(crate) mod sealed` + 超 trait 绑定，实现权物理归属定义
-crate）；**injected-host** 与 **comp-bridge** 的 trait 保持开放，按
-`allowed_impl_crates` 白名单登记校验（宿主 / composition 桥接实现合法）；
-**fake-pending** 是过渡债务档（存量测试 fake 按所在 crate 锁死、只减不增），当前已
-**清零**——66 处存量 fake 全部收敛到定义方 `test_support`，该档从登记表移除。
+**终态口径**：实现权不靠 sealed、也不靠逐条登记，靠「**定义方不负责 fake** +
+测试替身集中 + 依赖矩阵管方向」。
 
-| 档位 | 语义 | 治理 |
-|---|---|---|
-| capability(pure) | 协议语义唯一（原子性、revision 单调、评分一致性等），实现权唯一 | **Sealed trait 编译期强制** + `pattern.pl.trait-implementation-registry` 双保险 |
-| injected-host | 宿主 crate 合法实现（如 runtime 实现 tools 定义的 ToolCatalogPort） | 守卫按 `allowed_impl_crates` 校验，未登记实现即违规 |
-| comp-bridge | 仅 composition 桥接实现（如 ProviderFactory / UsageSink） | 同上 |
-| ~~fake-pending~~ | ~~capability 有存量消费方 fake~~ → **已清零**（#2146 收敛完成） | 若再现即为违规，不再新增该档 |
+| 关注点 | 机制 |
+|---|---|
+| 生产实现位置 | 由 `dependency.workspace-matrix` 管依赖方向（无位置守卫：宿主实现跨 BC 合法，如 runtime 实现 tools 定义的 `ToolCatalogPort`） |
+| 测试替身 | **统一在 `agent/testing/testkit` 维护**（本仓测试基建目录，未来 fixture/harness 同级扩展）；各 crate 经 `[dev-dependencies] testkit` 引用，不进生产依赖图 |
+| 定义方 fake 通道 | 撤销：`src/test_support.rs`（含目录形态）由守卫 `pattern.pl.fake-impl-location`（`forbidden_segments: ["test_support"]`）禁止重新出现；`dev` feature 一并删除 |
+| 局部内联 stub | 允许：同文件 `#[cfg(test)]` 内、不跨模块导出的局部替身无需进 testkit |
 
-**治理原则（2026-11-02 拍板）**：
+**历史与撤销理由**（#2146 → 2026-11-02）：
 
-- **测试不是开放实现权的理由**：测试 fake 唯一通道 = 定义方 `test_support`
-  （`#[cfg(any(test, feature = "dev"))]`，如 storage `InMemoryBlobPort`）。不为测试开
-  `injected-host` 白名单、不扩散 `dev` feature 例外。
-- **开放实现权只由产品需求驱动**（如 storage 多后端可替换）；出现该需求时把对应
-  sealed trait 改判 `injected-host` 并登记白名单，NEVER 为测试理由松绑。
-- **sealed 松绑判据**：仅当「依赖方自定义实现」成为产品能力时。`AtomicBlobPort` /
-  `AtomicDatasetPort` / `MemoryPort` / `SessionManagementPort` 是多后端需求的候选观察项。
-- **守卫校验边界**（`enforce_impl_registry` 实际行为）：白名单制（未登记 trait 不校验，
-  登记即锁）；按 `impl <path::>Trait for` 头部 trait 简单名匹配；owner、composition、
-  `allowed_impl_crates` 三者之一放行；多行 `impl` 头部与宏展开实现不在静态扫描面。
+- #2146 引入 `Sealed` 超 trait 编译期密封（28 条）与 `impl_registry` 逐条登记
+  （54 条 / sealed·injected-host·comp-bridge·fake-pending 四档），并把存量 fake 迁入
+  定义方 `test_support`（`dev` feature 跨 crate 导出）。
+- 撤销原因：① sealed 阻止依赖方按需实现（产品级多后端/扩展点无法松绑）；② 逐条登记
+  维护成本高、登记与真实实现易漂移；③ 定义方维护 fake 造成「fake 归属错位」且需
+  `dev` feature 例外扩散；④ 位置类守卫实测会误杀 injected-host 合法宿主实现。
+- 迁移记录：#2146 的四档登记、`Sealed` 绑定与 `impl_registry` 断言已全部删除；28 个
+  跨 crate fake 迁入 testkit（148 处引用改经 `testkit::`）；定义方 `dev` feature 与
+  `test_support` 文件清零。
 
-登记表唯一真相源：`.agents/architecture-guard-registry.json` 的
-`pattern.pl.trait-implementation-registry`。新增 PL trait MUST 登记（能力端口同时加
-Sealed），登记即锁。
+**新增 PL trait 时**：无需任何登记动作（实现权治理随之自动适用）；测试替身加在
+testkit 对应模块。守卫真相源：`.agents/architecture-guard-registry.json` 的
+`pattern.pl.fake-impl-location`。
 
 ## 3. RuntimeContext、SessionState 与 IoC 装配
 

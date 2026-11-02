@@ -47,7 +47,7 @@ fn base_request() -> ContextRequestData {
 async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
     let port = crate::wire_isolated_context_with_skill(
         "isolated-session",
-        Arc::new(tools::test_support::FixedSkillCatalog(vec![
+        Arc::new(testkit::tools::FixedSkillCatalog(vec![
             SkillDescriptor::new(
                 "release",
                 "create a release",

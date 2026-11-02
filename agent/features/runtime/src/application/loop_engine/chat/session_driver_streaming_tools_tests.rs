@@ -128,7 +128,7 @@ async fn assert_streaming_named_tool_observes_step_cancel(tool_name: &'static st
         .unwrap();
     let shell = test_shell_with_catalog(test_hook_port(), wired);
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider),
+        crate::application::model::fakes::binding_from_llm_provider(provider),
     );
     let active_run = shell.active_run.clone();
     let context = test_session_driver_input(sink.clone(), input_events, shell);
@@ -217,7 +217,7 @@ async fn streaming_tool_call_executes_before_stream_completes() {
 
     let shell = test_shell_with_catalog(test_hook_port(), wired);
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-streaming-tool-execution");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -395,7 +395,7 @@ async fn streaming_tool_results_dropped_on_retry() {
 
     let shell = test_shell_with_catalog(test_hook_port(), wired);
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-streaming-tool-retry-drop");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
@@ -569,7 +569,7 @@ async fn streaming_tool_retry_discards_stale_round_from_failed_attempt() {
 
     let shell = test_shell_with_catalog(test_hook_port(), wired);
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+        crate::application::model::fakes::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-streaming-tool-retry-orphan");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);

@@ -90,6 +90,32 @@ pub async fn wire_session_switch_coordinator(
 use config::{ConfigReader, ProjectConfigParticipant};
 #[cfg(any(test, feature = "dev"))]
 use context::{MainContextFactory, SessionManagementPort};
+#[cfg(any(test, feature = "dev"))]
+use memory::api::{MemoryOpener, MemoryOpenerError, MemoryPort};
+
+/// 测试装配专用内存 opener（`dev` feature 生产链不可见；保持本文件内联）。
+#[cfg(any(test, feature = "dev"))]
+#[derive(Clone, Default)]
+struct InMemoryTestOpener;
+
+#[cfg(any(test, feature = "dev"))]
+#[async_trait::async_trait]
+impl MemoryOpener for InMemoryTestOpener {
+    async fn open_memory(
+        &self,
+        _key: &ProjectMemoryKey,
+        _config: &share::config::MemoryConfig,
+    ) -> Result<std::sync::Arc<dyn MemoryPort>, MemoryOpenerError> {
+        Ok(std::sync::Arc::new(
+            memory::api::InMemoryMemory::new(memory::api::MemoryPolicy::default())
+                .expect("default MemoryPolicy is always valid"),
+        ))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn MemoryOpener> {
+        Box::new(self.clone())
+    }
+}
 
 #[cfg(any(test, feature = "dev"))]
 pub async fn wire_test_session_switch(
@@ -105,7 +131,7 @@ pub async fn wire_test_session_switch(
         task_restore,
         config_reader,
         config_participant,
-        memory_opener: Box::new(context::test_support::InMemoryTestOpener),
+        memory_opener: Box::new(InMemoryTestOpener),
         session_management,
         context_factory,
     })

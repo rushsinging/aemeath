@@ -4,5 +4,5 @@ pub mod triage;
 pub use triage::PolicyTriage;
 pub(crate) mod execution_supervisor;
 #[cfg(test)]
-pub(crate) mod test_support;
+pub(crate) mod fakes;
 pub mod tool_result_materializer;

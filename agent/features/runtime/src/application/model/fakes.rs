@@ -1,13 +1,19 @@
+//! model 层测试替身（crate 内 lib 测试专用；跨 crate 共享的 runtime fake 在
+//! `testkit::runtime` 维护——本模块不对外导出）。
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::stream;
 use provider::{
-    ProviderContentData, ProviderError, ProviderResponseChunk, ProviderResponseStream,
-    ResponseStopReason, TokenUsageData,
+    ProviderContentData, ProviderError, ProviderRequestData, ProviderResponseChunk,
+    ProviderResponseStream, ResponseStopReason, TokenUsageData,
 };
 
+use crate::ports::{LlmInvokePort, ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
+
+/// 文本成功闭合帧序列：`Content(Text)` + `Usage` + `Stop`。
 pub(crate) fn text_completion_stream(
     text: impl Into<String>,
     input_tokens: u32,
@@ -53,7 +59,7 @@ impl ScriptedInvocationProvider {
 pub(crate) trait ScriptedLlmProvider: Send + Sync {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::ProviderRequestData,
+        request: &ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError>;
 
     fn model_name(&self) -> &str {
@@ -69,7 +75,7 @@ pub(crate) trait ScriptedLlmProvider: Send + Sync {
 impl ScriptedLlmProvider for ScriptedInvocationProvider {
     async fn scripted_invocation_stream(
         &self,
-        _request: &crate::ports::provider_port::ProviderRequestData,
+        _request: &ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         *self.calls.lock().unwrap() += 1;
         let events = self
@@ -103,18 +109,7 @@ pub(crate) fn successful_completion(text: &str) -> Vec<ProviderResponseChunk> {
     ]
 }
 
-pub(crate) const RETRY_ADVANCE_LIMITS: [std::time::Duration; 10] = [
-    std::time::Duration::from_secs(11),
-    std::time::Duration::from_secs(21),
-    std::time::Duration::from_secs(41),
-    std::time::Duration::from_secs(81),
-    std::time::Duration::from_secs(121),
-    std::time::Duration::from_secs(121),
-    std::time::Duration::from_secs(121),
-    std::time::Duration::from_secs(121),
-    std::time::Duration::from_secs(121),
-    std::time::Duration::from_secs(121),
-];
+pub(crate) use super::constants::RETRY_ADVANCE_LIMITS;
 
 pub(crate) async fn advance_until_retry_condition(
     description: &str,
@@ -155,20 +150,15 @@ pub(crate) async fn advance_until_retry_condition(
 /// without writing bespoke provider port impls.
 ///
 /// Uses `for<'a>` HRTB so closures can capture the borrowed `&ProviderRequestData`
-/// into their returned `Future + 'a`（#2146：取消走 `request.cancellation`，
-/// 端口无独立取消参数）。
+/// into their returned `Future + 'a`。
 pub(crate) type TestInvocationFn = Arc<
     dyn for<'a> Fn(
             usize,
-            &'a crate::ports::provider_port::ProviderRequestData,
+            &'a ProviderRequestData,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<
-                        Output = Result<
-                            crate::ports::provider_port::ProviderResponseStream,
-                            crate::ports::provider_port::ProviderError,
-                        >,
-                    > + Send
+                dyn std::future::Future<Output = Result<ProviderResponseStream, ProviderError>>
+                    + Send
                     + 'a,
             >,
         > + Send
@@ -178,7 +168,7 @@ pub(crate) type TestInvocationFn = Arc<
 /// A programmable `ProviderPort` for tests.
 pub(crate) struct TestProviderPort {
     pub responses: Arc<Mutex<VecDeque<String>>>,
-    pub error: Option<crate::ports::provider_port::ProviderError>,
+    pub error: Option<ProviderError>,
     pub model: provider::ModelInfo,
     pub blocking: bool,
     pub seen: Option<Arc<Mutex<Vec<::logging::LogContext>>>>,
@@ -210,17 +200,15 @@ impl TestProviderPort {
 }
 
 impl TestProviderPort {
-    /// 该测试脚手架的调用端口（#2146：LlmInvokePort 只允许 provider 实现，
-    /// 这里经 provider 的异步脚本化端口复用原调度逻辑）。
-    pub fn port(&self) -> Arc<dyn crate::ports::LlmInvokePort> {
-        use crate::ports::provider_port::ProviderError;
+    /// 该测试脚手架的调用端口。
+    pub fn port(&self) -> Arc<dyn LlmInvokePort> {
         let calls = Arc::clone(&self.calls);
         let seen = self.seen.clone();
         let invocation_fn = self.invocation_fn.clone();
         let error = self.error.clone();
         let blocking = self.blocking;
         let responses = Arc::clone(&self.responses);
-        provider::test_support::scripted_llm_async(move |request| {
+        testkit::provider::scripted_llm_async(move |request| {
             let calls = Arc::clone(&calls);
             let seen = seen.clone();
             let invocation_fn = invocation_fn.clone();
@@ -261,10 +249,10 @@ impl TestProviderPort {
     }
 }
 
-pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBindingData> {
+pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<ProviderBindingData> {
     let model = test_model_info();
     let port = TestProviderPort::new(responses, model.clone());
-    Arc::new(crate::ports::ProviderBindingData {
+    Arc::new(ProviderBindingData {
         provider: port.port(),
         model,
         max_tokens: 8192,
@@ -272,11 +260,9 @@ pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBi
     })
 }
 
-pub(crate) fn test_binding_from_port(
-    port: TestProviderPort,
-) -> Arc<crate::ports::ProviderBindingData> {
+pub(crate) fn test_binding_from_port(port: TestProviderPort) -> Arc<ProviderBindingData> {
     let model = port.model.clone();
-    Arc::new(crate::ports::ProviderBindingData {
+    Arc::new(ProviderBindingData {
         provider: port.port(),
         model,
         max_tokens: 8192,
@@ -307,27 +293,22 @@ pub(crate) fn test_model_info() -> provider::ModelInfo {
 /// `TestProviderPort`) is what we want exercised, regardless of how the
 /// runner resolved the `ProviderBuildSpecData` from `ModelsConfig`.
 pub(crate) struct ConstantTestFactory {
-    binding: Arc<crate::ports::ProviderBindingData>,
+    binding: Arc<ProviderBindingData>,
 }
 
 impl ConstantTestFactory {
-    pub fn new(binding: Arc<crate::ports::ProviderBindingData>) -> Self {
+    pub fn new(binding: Arc<ProviderBindingData>) -> Self {
         Self { binding }
     }
 }
 
-impl crate::ports::ProviderFactory for ConstantTestFactory {
-    fn build(
-        &self,
-        _spec: crate::ports::ProviderBuildSpecData,
-    ) -> Result<crate::ports::ProviderBindingData, crate::ports::provider_port::ProviderError> {
+impl ProviderFactory for ConstantTestFactory {
+    fn build(&self, _spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(self.binding.as_ref().clone())
     }
 }
 
-pub(crate) fn constant_factory(
-    binding: Arc<crate::ports::ProviderBindingData>,
-) -> Arc<dyn crate::ports::ProviderFactory> {
+pub(crate) fn constant_factory(binding: Arc<ProviderBindingData>) -> Arc<dyn ProviderFactory> {
     Arc::new(ConstantTestFactory::new(binding))
 }
 
@@ -337,9 +318,9 @@ pub(crate) fn constant_factory(
 /// `Arc<dyn LlmInvokePort>`（经 provider test_support 的异步脚本端口；
 /// runtime **NEVER** 自行实现该 trait）。
 pub(crate) fn scripted_provider_port(
-    provider: std::sync::Arc<dyn ScriptedLlmProvider>,
-) -> Arc<dyn crate::ports::LlmInvokePort> {
-    provider::test_support::scripted_llm_async(move |request| {
+    provider: Arc<dyn ScriptedLlmProvider>,
+) -> Arc<dyn LlmInvokePort> {
+    testkit::provider::scripted_llm_async(move |request| {
         let provider = Arc::clone(&provider);
         Box::pin(async move { provider.scripted_invocation_stream(request).await })
     })
@@ -352,8 +333,8 @@ pub(crate) fn scripted_provider_port(
 /// The binding's `model`/`max_tokens` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
 pub(crate) fn binding_from_llm_provider(
-    provider: std::sync::Arc<dyn ScriptedLlmProvider>,
-) -> std::sync::Arc<crate::ports::ProviderBindingData> {
+    provider: Arc<dyn ScriptedLlmProvider>,
+) -> Arc<ProviderBindingData> {
     let model = provider::ModelInfo {
         provider: provider.provider_name().to_string(),
         model: provider.model_name().to_string(),
@@ -365,7 +346,7 @@ pub(crate) fn binding_from_llm_provider(
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     };
-    std::sync::Arc::new(crate::ports::ProviderBindingData {
+    Arc::new(ProviderBindingData {
         provider: scripted_provider_port(provider),
         model,
         max_tokens: 8192,

@@ -145,11 +145,11 @@ fn small_policy() -> MemoryPolicy {
     }
 }
 
-/// #2146：ScoringPort 实现权归 systemone crate；存根替身经其脚本端口。
+/// ScoringPort 替身：经 testkit::systemone 脚本端口构造。
 fn stub_scoring(
     outcome: Result<usize, systemone::UnavailableKind>,
 ) -> std::sync::Arc<dyn systemone::ScoringPort> {
-    systemone::test_support::scripted_scoring(move |_state, questions| {
+    testkit::systemone::scripted_scoring(move |_state, questions| {
         let criterion_count = match &questions[0] {
             systemone::ScoringQuestion::Choice { criteria, .. } => criteria.len(),
             _ => panic!("重排应使用 Choice 题型"),

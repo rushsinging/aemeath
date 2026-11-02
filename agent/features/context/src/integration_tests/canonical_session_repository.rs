@@ -167,13 +167,13 @@ struct FixedTextInvoker {
 }
 
 impl FixedTextInvoker {
-    /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 异步脚本。
+    /// LlmInvokePort 替身：经 testkit::provider 异步脚本构造。
     fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
         let text = self.text.clone();
         let started = self.started.clone();
         let release = self.release.clone();
         let fail_with_cancel = self.fail_with_cancel;
-        provider::test_support::scripted_llm_async(move |_request| {
+        testkit::provider::scripted_llm_async(move |_request| {
             let text = text.clone();
             let started = started.clone();
             let release = release.clone();
@@ -185,7 +185,7 @@ impl FixedTextInvoker {
                 if fail_with_cancel {
                     return Err(provider::ProviderError::cancelled());
                 }
-                Ok(provider::test_support::text_stream(&text))
+                Ok(testkit::provider::text_stream(&text))
             })
         })
     }
@@ -221,11 +221,11 @@ struct ProviderFailingInvoker {
 }
 
 impl ProviderFailingInvoker {
-    /// #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本。
+    /// LlmInvokePort 替身：经 testkit::provider 脚本构造。
     fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
         use std::sync::atomic::Ordering;
         let calls = Arc::clone(&self.calls);
-        provider::test_support::scripted_llm(move |_request| {
+        testkit::provider::scripted_llm(move |_request| {
             calls.fetch_add(1, Ordering::SeqCst);
             Err(provider::ProviderError::fatal(
                 provider::ProviderErrorKind::UpstreamUnavailable,
@@ -301,7 +301,7 @@ fn repository_with_session(
         CanonicalSessionRepository::new(
             holder.clone(),
             Arc::new(EmptyTask),
-            Arc::new(project::test_support::FixedWorkspaceWriter(workspace())),
+            Arc::new(testkit::project::FixedWorkspaceWriter(workspace())),
             writer,
             Arc::new(tokio::sync::Mutex::new(())),
         ),
@@ -627,7 +627,7 @@ async fn concurrent_skill_load_records_return_one_fresh_decision() {
     );
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalSession {
     let tool_result =
         Message::tool_results(vec![("tool-1".to_string(), "payload".to_string(), false)]);
@@ -669,7 +669,7 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
     }
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 #[tokio::test]
 async fn lifecycle_capture_reports_structure_and_releases_replaced_generation() {
     let writer = Arc::new(RecordingWriter::default());
@@ -706,7 +706,7 @@ async fn lifecycle_capture_reports_structure_and_releases_replaced_generation() 
     assert_eq!(holder.read().unwrap().revision, 2);
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 #[tokio::test]
 async fn lifecycle_weak_probe_stays_live_until_external_arc_is_dropped() {
     let writer = Arc::new(RecordingWriter::default());
@@ -723,7 +723,7 @@ async fn lifecycle_weak_probe_stays_live_until_external_arc_is_dropped() {
     assert!(replaced.upgrade().is_none());
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 #[tokio::test]
 async fn snapshot_does_not_publish_a_new_session_generation() {
     let writer = Arc::new(RecordingWriter::default());
@@ -842,7 +842,7 @@ async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
     );
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 #[tokio::test]
 async fn clear_reports_zero_persisted_structure_and_releases_old_generation() {
     let writer = Arc::new(RecordingWriter::default());
@@ -864,7 +864,7 @@ async fn clear_reports_zero_persisted_structure_and_releases_old_generation() {
     assert!(transition.replaced_generation.upgrade().is_none());
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 #[tokio::test]
 async fn compaction_changes_visibility_without_dropping_persisted_structure() {
     let writer = Arc::new(RecordingWriter::default());
@@ -897,7 +897,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
     assert!(transition.replaced_generation.upgrade().is_none());
 }
 
-#[cfg(feature = "dev")]
+#[cfg(test)]
 #[tokio::test]
 async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
     for step_count in [100usize, 500, 1_000] {

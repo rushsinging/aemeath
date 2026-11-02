@@ -12,9 +12,9 @@ fn session_with_reasoning_effort(
     session
 }
 
-/// #2146：实现权归 context crate。stored 决定 load 出的 metadata 字段。
-fn metadata_port(stored: Option<String>) -> Arc<context::test_support::ScriptedSessionManagement> {
-    Arc::new(context::test_support::ScriptedSessionManagement::new(
+/// 。stored 决定 load 出的 metadata 字段。
+fn metadata_port(stored: Option<String>) -> Arc<testkit::context::ScriptedSessionManagement> {
+    Arc::new(testkit::context::ScriptedSessionManagement::new(
         move |id| session_with_reasoning_effort(id, stored.clone()),
     ))
 }

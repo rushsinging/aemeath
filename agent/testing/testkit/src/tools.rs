@@ -1,13 +1,25 @@
-use crate::domain::{
-    AgentDispatch, CancellationSignal, ExecutionScope, FixedGuidance, MutexReadSet, ProgressSink,
-    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
-};
+//! tools 测试替身（#2146 治理后统一由 testkit 维护）。
+//!
+//! ToolExecutionPort / SkillCatalogPort / CancellationSignal 等实现权归 tools crate，
+//! 跨 crate 测试经本模块获得替身；消费方经 `[dev-dependencies] testkit` 引用，
+//! 不进生产依赖图。
+
 use async_trait::async_trait;
 use project::{WorkspaceControl, WorkspaceReader};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
+use tools::published::agent::AgentDispatch;
+use tools::published::execution::{
+    CancellationSignal, ProgressSink, ToolExecutionContext, ToolExecutionPorts,
+};
+use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
+use tools::{
+    AuthorizationContext, CancellationDeclaration, ConcurrencyDeclaration, ExecutionScope,
+    FixedGuidance, InputSafetyDeclaration, MutexReadSet, ToolCapabilities, ToolCatalogSnapshot,
+    ToolDescriptor, ToolName, WorkspaceReadAccess,
+};
 
 /// Pure domain fake: it owns no runtime token or executor resource.
 struct FakeCancellation;
@@ -24,9 +36,7 @@ impl CancellationSignal for FakeCancellation {
     }
 }
 
-fn fake_workspace_read_access(
-    workspace: project::test_support::FakeWorkspace,
-) -> WorkspaceReadAccess {
+fn fake_workspace_read_access(workspace: crate::project::FakeWorkspace) -> WorkspaceReadAccess {
     fake_controls()
         .lock()
         .expect("fake workspace controls")
@@ -40,18 +50,6 @@ fn fake_workspace_read_access(
 fn fake_controls() -> &'static Mutex<HashMap<String, Arc<dyn WorkspaceControl>>> {
     static CONTROLS: OnceLock<Mutex<HashMap<String, Arc<dyn WorkspaceControl>>>> = OnceLock::new();
     CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// bash adapter 内联测试专用 fake（仅 cfg(test) 编译；test-harness feature
-/// 的 lib 侧消费者不需要它，加 cfg 防 dead_code）。
-#[cfg(test)]
-pub(crate) fn workspace_control(ctx: &ToolExecutionContext) -> Arc<dyn WorkspaceControl> {
-    fake_controls()
-        .lock()
-        .expect("fake workspace controls")
-        .get(&ctx.scope().workspace_id().as_str().to_string())
-        .expect("fake workspace control")
-        .clone()
 }
 
 /// Purpose-built, runtime-free fixture for domain and ordinary adapter unit tests.
@@ -91,11 +89,11 @@ impl TestToolExecutionContextBuilder {
     }
     pub fn build(self) -> ToolExecutionContext {
         let authorization = if self.allow_all {
-            crate::domain::context::AuthorizationContext::ALLOW_ALL
+            AuthorizationContext::ALLOW_ALL
         } else {
-            crate::domain::context::AuthorizationContext::STANDARD
+            AuthorizationContext::STANDARD
         };
-        let workspace = project::test_support::FakeWorkspace::new(self.root);
+        let workspace = crate::project::FakeWorkspace::new(self.root);
         let scope = ExecutionScope::builder(
             "test-run",
             workspace.workspace_id(),
@@ -118,49 +116,40 @@ impl TestToolExecutionContextBuilder {
 }
 
 /// 测试用单工具 Catalog：sequential / NonCooperative / 指定 timeout。
-pub fn sequential_test_tool_catalog(
-    tool_name: &str,
-    timeout_secs: u64,
-) -> crate::ToolCatalogSnapshot {
-    let descriptor = crate::domain::published_language::ToolDescriptor {
-        name: crate::ToolName::new(tool_name),
+pub fn sequential_test_tool_catalog(tool_name: &str, timeout_secs: u64) -> ToolCatalogSnapshot {
+    let descriptor = ToolDescriptor {
+        name: ToolName::new(tool_name),
         description: format!("test tool {tool_name}"),
         input_schema: serde_json::json!({}),
-        required_capabilities: crate::ToolCapabilities::empty(),
-        concurrency: crate::domain::published_language::ConcurrencyDeclaration::serialized(),
-        cancellation: crate::domain::published_language::CancellationDeclaration::NonCooperative,
+        required_capabilities: ToolCapabilities::empty(),
+        concurrency: ConcurrencyDeclaration::serialized(),
+        cancellation: CancellationDeclaration::NonCooperative,
         timeout_secs,
-        max_timeout_secs: crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+        // 与生产 DEFAULT_TOOL_MAX_TIMEOUT_SECS（86400）等值：timeout 上限 clamp
+        // 语义是既有测试断言的一部分，故不随本次 timeout_secs 变化。
+        max_timeout_secs: 86_400,
         read_only: true,
-        input_safety: crate::domain::published_language::InputSafetyDeclaration::Always,
+        input_safety: InputSafetyDeclaration::Always,
         data_schema: serde_json::json!({}),
         background_log_direct: false,
     };
-    crate::ToolCatalogSnapshot::new("main", "standard", vec![descriptor])
+    ToolCatalogSnapshot::new("main", "standard", vec![descriptor])
 }
 
-/// 固定描述符集的 SkillCatalogPort 替身（#2146：实现权归 tools crate）。
-pub struct FixedSkillCatalog(pub Vec<crate::domain::skill_pl::SkillDescriptor>);
+/// 固定描述符集的 SkillCatalogPort 替身（）。
+pub struct FixedSkillCatalog(pub Vec<SkillDescriptor>);
 
-impl crate::domain::skill_ports::SkillCatalogPort for FixedSkillCatalog {
-    fn list(
-        &self,
-        _query: crate::domain::skill_pl::SkillQuery,
-    ) -> Vec<crate::domain::skill_pl::SkillDescriptor> {
+impl SkillCatalogPort for FixedSkillCatalog {
+    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
         self.0.clone()
     }
 }
 
 /// 可变描述符集替身（共享 Mutex，模拟轮次间磁盘变化）。
-pub struct MutableSkillCatalog(
-    pub std::sync::Arc<std::sync::Mutex<Vec<crate::domain::skill_pl::SkillDescriptor>>>,
-);
+pub struct MutableSkillCatalog(pub std::sync::Arc<std::sync::Mutex<Vec<SkillDescriptor>>>);
 
-impl crate::domain::skill_ports::SkillCatalogPort for MutableSkillCatalog {
-    fn list(
-        &self,
-        _query: crate::domain::skill_pl::SkillQuery,
-    ) -> Vec<crate::domain::skill_pl::SkillDescriptor> {
+impl SkillCatalogPort for MutableSkillCatalog {
+    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -168,18 +157,18 @@ impl crate::domain::skill_ports::SkillCatalogPort for MutableSkillCatalog {
     }
 }
 
-/// 工具执行替身（#2146：ToolExecutionPort 实现权归 tools crate）：
+/// 工具执行替身：
 /// execute 按脚本返回 outcome（不可 await；需要 sleep/取消交互的测试
 /// 用 `scripted_tool_execution_async`）。
 pub fn scripted_tool_execution(
     script: impl Fn(
-            &crate::published::execution::ToolInvocation,
-            &crate::domain::context::ToolExecutionContext,
-        ) -> crate::published::execution::ToolExecutionOutcome
+            &tools::published::execution::ToolInvocation,
+            &ToolExecutionContext,
+        ) -> tools::published::execution::ToolExecutionOutcome
         + Send
         + Sync
         + 'static,
-) -> std::sync::Arc<dyn crate::published::execution::ToolExecutionPort> {
+) -> std::sync::Arc<dyn tools::published::execution::ToolExecutionPort> {
     std::sync::Arc::new(ScriptedToolExecution {
         script: std::sync::Arc::new(script),
     })
@@ -187,9 +176,9 @@ pub fn scripted_tool_execution(
 
 /// 工具执行脚本（同步形态）。
 type SyncToolScript = dyn Fn(
-        &crate::published::execution::ToolInvocation,
-        &crate::domain::context::ToolExecutionContext,
-    ) -> crate::published::execution::ToolExecutionOutcome
+        &tools::published::execution::ToolInvocation,
+        &ToolExecutionContext,
+    ) -> tools::published::execution::ToolExecutionOutcome
     + Send
     + Sync;
 
@@ -197,13 +186,13 @@ struct ScriptedToolExecution {
     script: std::sync::Arc<SyncToolScript>,
 }
 
-#[async_trait::async_trait]
-impl crate::published::execution::ToolExecutionPort for ScriptedToolExecution {
+#[async_trait]
+impl tools::published::execution::ToolExecutionPort for ScriptedToolExecution {
     async fn execute(
         &self,
-        invocation: crate::published::execution::ToolInvocation,
-        context: &crate::domain::context::ToolExecutionContext,
-    ) -> crate::published::execution::ToolExecutionOutcome {
+        invocation: tools::published::execution::ToolInvocation,
+        context: &ToolExecutionContext,
+    ) -> tools::published::execution::ToolExecutionOutcome {
         (self.script)(&invocation, context)
     }
 }
@@ -211,16 +200,13 @@ impl crate::published::execution::ToolExecutionPort for ScriptedToolExecution {
 /// 异步工具执行替身：脚本返回 Future（sleep / 取消交互场景）。
 pub fn scripted_tool_execution_async<F, Fut>(
     script: F,
-) -> std::sync::Arc<dyn crate::published::execution::ToolExecutionPort>
+) -> std::sync::Arc<dyn tools::published::execution::ToolExecutionPort>
 where
-    F: for<'a> Fn(
-            crate::published::execution::ToolInvocation,
-            &'a crate::domain::context::ToolExecutionContext,
-        ) -> Fut
+    F: for<'a> Fn(tools::published::execution::ToolInvocation, &'a ToolExecutionContext) -> Fut
         + Send
         + Sync
         + 'static,
-    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+    Fut: std::future::Future<Output = tools::published::execution::ToolExecutionOutcome> + Send,
 {
     std::sync::Arc::new(AsyncScriptedToolExecution {
         script: std::sync::Arc::new(script),
@@ -231,22 +217,19 @@ struct AsyncScriptedToolExecution<F> {
     script: std::sync::Arc<F>,
 }
 
-#[async_trait::async_trait]
-impl<F, Fut> crate::published::execution::ToolExecutionPort for AsyncScriptedToolExecution<F>
+#[async_trait]
+impl<F, Fut> tools::published::execution::ToolExecutionPort for AsyncScriptedToolExecution<F>
 where
-    F: for<'a> Fn(
-            crate::published::execution::ToolInvocation,
-            &'a crate::domain::context::ToolExecutionContext,
-        ) -> Fut
+    F: for<'a> Fn(tools::published::execution::ToolInvocation, &'a ToolExecutionContext) -> Fut
         + Send
         + Sync,
-    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
+    Fut: std::future::Future<Output = tools::published::execution::ToolExecutionOutcome> + Send,
 {
     async fn execute(
         &self,
-        invocation: crate::published::execution::ToolInvocation,
-        context: &crate::domain::context::ToolExecutionContext,
-    ) -> crate::published::execution::ToolExecutionOutcome {
+        invocation: tools::published::execution::ToolInvocation,
+        context: &ToolExecutionContext,
+    ) -> tools::published::execution::ToolExecutionOutcome {
         (self.script)(invocation, context).await
     }
 }

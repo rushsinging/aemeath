@@ -24,7 +24,7 @@ fn build_agent_runner_constructs_without_panic() {
         Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         10,
         Arc::new(tokio::sync::Semaphore::new(4)),
-        crate::application::tool::test_support::test_tool_result_materializer(),
+        crate::application::tool::fakes::test_tool_result_materializer(),
         workspace,
         skill_catalog.clone(),
         ParentRunContextSource::new(),

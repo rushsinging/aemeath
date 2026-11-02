@@ -1,6 +1,8 @@
-//! Context 四端口测试替身（#2146 实现权治理：ContextWindowPort /
-//! ContextCompactPort / ContextAppendPort / ReminderControlPort 实现权归本
-//! crate，跨 crate 测试经此获得替身；生产不编译）。
+//! context 测试替身（#2146 治理后统一由 testkit 维护）。
+//!
+//! ContextWindowPort / ContextCompactPort / ContextAppendPort / ReminderControlPort /
+//! SessionManagementPort / MemoryOpener 实现权归 context crate，跨 crate 测试经本
+//! 模块获得替身；消费方经 `[dev-dependencies] testkit` 引用，不进生产依赖图。
 //!
 //! 两件套：
 //! - [`recording_context_over`]：装饰器——包装任意 inner `ContextPorts`，
@@ -9,20 +11,187 @@
 //! - [`StubContextService`]：独立响应替身——默认成功固定响应，
 //!   `compact_outcome` 可配置（take 一次）、`compact_calls` 记录压缩请求、
 //!   `unavailable` 模式恒 Err（fakes 场景）。
+//!
+//! 会话管理侧保留 `InMemoryTestOpener` / `UnavailableSessionManagement` /
+//! `ScriptedSessionManagement`；`AtomicBlobSessionManagement` 不再以类型形式迁移，
+//! 消费方改走 `context::wire_session_management(blob)`。
 
 use std::sync::{Arc, Mutex};
 
-use crate::ports::context_port::{
-    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
-    CompactTrigger, CompactionDecisionData, ContextAppendData, ContextAppendError,
-    ContextAppendPort, ContextCompactPort, ContextPortError, ContextPorts, ContextRequestData,
-    ContextWindowPort, SessionAppendReceiptData, SessionRevision,
-};
-use crate::ports::context_port::{
-    ReminderControlPort, RunStepReceiptData, ToolReceiptMutationError,
-};
 use async_trait::async_trait;
+use context::compact::{CompactResult, CompactSummaryQuality};
+use context::context_port::{
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextAppendPort,
+    ContextCompactPort, ContextPortError, ContextPorts, ContextRequestData, ContextWindowData,
+    ContextWindowPort, DecisionReason, ReminderControlPort, RunStepReceiptData,
+    SessionAppendReceiptData, SessionRevision, SystemBlock, TokenBudget, Urgency,
+};
+use context::session::{CanonicalSession, SessionMetadata};
+use context::tool_receipt::ToolCallReceiptData;
+use context::{
+    ReminderEventSource, ReminderKind, SessionManagementError, SessionManagementPort,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+};
+use memory::api::{MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use sdk::RunId;
+
+#[derive(Clone, Default)]
+pub struct InMemoryTestOpener;
+
+#[async_trait]
+impl MemoryOpener for InMemoryTestOpener {
+    async fn open_memory(
+        &self,
+        _key: &ProjectMemoryKey,
+        _config: &share::config::MemoryConfig,
+    ) -> Result<Arc<dyn MemoryPort>, MemoryOpenerError> {
+        Ok(Arc::new(
+            memory::api::InMemoryMemory::new(memory::api::MemoryPolicy::default())
+                .expect("default MemoryPolicy is always valid"),
+        ))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn MemoryOpener> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Default)]
+pub struct UnavailableSessionManagement;
+
+#[async_trait]
+impl SessionManagementPort for UnavailableSessionManagement {
+    async fn load_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<CanonicalSession, SessionManagementError> {
+        Err(SessionManagementError::NotFound(id.to_string()))
+    }
+
+    async fn list_for_project(
+        &self,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
+        Ok(Vec::new())
+    }
+
+    async fn export_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<Vec<u8>, SessionManagementError> {
+        Err(SessionManagementError::NotFound(id.to_string()))
+    }
+
+    async fn import_for_project(
+        &self,
+        _bytes: &[u8],
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
+        Err(SessionManagementError::Storage(
+            "test session port unavailable".to_string(),
+        ))
+    }
+
+    async fn update_metadata_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+        _update: SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
+        Err(SessionManagementError::NotFound(id.to_string()))
+    }
+
+    async fn delete_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<(), SessionManagementError> {
+        Err(SessionManagementError::NotFound(id.to_string()))
+    }
+}
+
+/// 会话管理替身（#2146 实现权归 context crate）：load 按脚本产出，
+/// update_metadata 记录并按脚本回执；其余通道恒 Err(unused)。
+pub struct ScriptedSessionManagement {
+    load: Box<dyn Fn(&str) -> CanonicalSession + Send + Sync>,
+    update_result: Box<dyn Fn() -> sdk::SessionItemList + Send + Sync>,
+    updates: std::sync::Mutex<Vec<SessionMetadata>>,
+}
+
+impl ScriptedSessionManagement {
+    pub fn new(load: impl Fn(&str) -> CanonicalSession + Send + Sync + 'static) -> Self {
+        Self {
+            load: Box::new(load),
+            update_result: Box::new(|| sdk::SessionItemList {
+                id: "session-1".to_string(),
+                title: None,
+                project: None,
+                model: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                message_count: 0,
+                preview: None,
+                summary: String::new(),
+            }),
+            updates: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    pub fn updates(&self) -> Vec<SessionMetadata> {
+        self.updates.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl SessionManagementPort for ScriptedSessionManagement {
+    async fn load_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<CanonicalSession, SessionManagementError> {
+        Ok((self.load)(id))
+    }
+    async fn list_for_project(
+        &self,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
+        Ok(Vec::new())
+    }
+    async fn export_for_project(
+        &self,
+        _id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<Vec<u8>, SessionManagementError> {
+        Err(SessionManagementError::Storage("unused".to_owned()))
+    }
+    async fn import_for_project(
+        &self,
+        _bytes: &[u8],
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
+        Err(SessionManagementError::Storage("unused".to_owned()))
+    }
+    async fn update_metadata_for_project(
+        &self,
+        _id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+        update: SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
+        self.updates.lock().unwrap().push(update);
+        Ok((self.update_result)())
+    }
+    async fn delete_for_project(
+        &self,
+        _id: &str,
+        _project: &share::session_types::ProjectIdentityData,
+    ) -> Result<(), SessionManagementError> {
+        Err(SessionManagementError::Storage("unused".to_owned()))
+    }
+}
+
+// ─── 四端口装饰器 / 独立响应替身 ────────────────────────────────
 
 /// 装饰器记录的持久化调用（方法名 + 关键参数快照）。
 #[derive(Debug, Clone, PartialEq)]
@@ -97,8 +266,8 @@ impl ContextCompactPort for RecordingContext {
         request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         let trigger = match request.trigger {
-            CompactTrigger::Automatic => "automatic",
-            CompactTrigger::Manual => "manual",
+            context::CompactTrigger::Automatic => "automatic",
+            context::CompactTrigger::Manual => "manual",
         };
         self.calls
             .lock()
@@ -138,8 +307,8 @@ impl ContextAppendPort for RecordingContext {
     }
     async fn advance_tool_receipt(
         &self,
-        mutation: crate::ToolReceiptMutationData,
-    ) -> Result<crate::ToolReceiptMutationReceiptData, crate::ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         self.calls
             .lock()
             .unwrap()
@@ -192,14 +361,14 @@ impl ContextAppendPort for RecordingContext {
 }
 
 impl ReminderControlPort for RecordingContext {
-    fn create_reminder_pipeline(&self, _run_id: sdk::RunId, _allowed: Vec<crate::ReminderKind>) {}
+    fn create_reminder_pipeline(&self, _run_id: sdk::RunId, _allowed: Vec<ReminderKind>) {}
     fn drop_reminder_pipeline(&self, run_id: &RunId) {
         self.inner.reminders.drop_reminder_pipeline(run_id)
     }
     fn reminder_run_started(&self, run_id: &RunId) {
         self.inner.reminders.reminder_run_started(run_id)
     }
-    fn reminder_handle_event(&self, run_id: &RunId, event_source: &crate::ReminderEventSource) {
+    fn reminder_handle_event(&self, run_id: &RunId, event_source: &ReminderEventSource) {
         self.calls
             .lock()
             .unwrap()
@@ -320,7 +489,7 @@ impl ContextWindowPort for StubContextService {
     async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<crate::ports::context_port::ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, ContextPortError> {
         self.record("build_window");
         if self.fail_all {
             return Err(self.err());
@@ -328,9 +497,9 @@ impl ContextWindowPort for StubContextService {
         if self.fail_read_only {
             return Err(ContextPortError::SessionRepository(self.message.clone()));
         }
-        Ok(crate::ports::context_port::ContextWindowData {
+        Ok(ContextWindowData {
             backing_revision: SessionRevision::new(1),
-            system_blocks: vec![crate::ports::context_port::SystemBlock {
+            system_blocks: vec![SystemBlock {
                 kind: "system_prompt".to_string(),
                 content: "system".to_string(),
                 cacheable: true,
@@ -338,20 +507,20 @@ impl ContextWindowPort for StubContextService {
             }],
             messages: request.pending_messages.clone().into(),
             tool_schemas: request.tool_schemas.clone(),
-            token_estimation: crate::ports::context_port::TokenBudget {
+            token_estimation: TokenBudget {
                 system_tokens: 2,
                 tool_schema_tokens: 3,
                 message_tokens: 5,
                 total_tokens: 10,
             },
-            compaction_decision: crate::ports::context_port::CompactionDecisionData {
+            compaction_decision: CompactionDecisionData {
                 needed: false,
-                urgency: crate::ports::context_port::Urgency::None,
+                urgency: Urgency::None,
                 decision_token_count: 0,
                 threshold: 1,
                 context_size: 200_000,
                 effective_window: 180_000,
-                reason: crate::ports::context_port::DecisionReason::HeuristicFallback,
+                reason: DecisionReason::HeuristicFallback,
             },
         })
     }
@@ -372,12 +541,12 @@ impl ContextCompactPort for StubContextService {
         }
         Ok(CompactionDecisionData {
             needed: true,
-            urgency: crate::ports::context_port::Urgency::Must,
+            urgency: Urgency::Must,
             decision_token_count: 100,
             threshold: 90,
             context_size: 200_000,
             effective_window: 180_000,
-            reason: crate::ports::context_port::DecisionReason::ActualProviderUsage,
+            reason: DecisionReason::ActualProviderUsage,
         })
     }
     async fn compact(
@@ -395,15 +564,13 @@ impl ContextCompactPort for StubContextService {
         if self.fail_read_only {
             return Err(ContextPortError::SessionRepository(self.message.clone()));
         }
-        Ok(CompactOutcome::Committed(
-            crate::ports::context_port::CompactResult {
-                summary: "summary".to_string(),
-                recent_messages: request.source.pending_messages.clone(),
-                source_revision: SessionRevision::new(1),
-                quality: crate::ports::context_port::CompactSummaryQuality::LocalOnly,
-                metrics: Box::default(),
-            },
-        ))
+        Ok(CompactOutcome::Committed(CompactResult {
+            summary: "summary".to_string(),
+            recent_messages: request.source.pending_messages.clone(),
+            source_revision: SessionRevision::new(1),
+            quality: CompactSummaryQuality::LocalOnly,
+            metrics: Box::default(),
+        }))
     }
 }
 
@@ -448,20 +615,18 @@ impl ContextAppendPort for StubContextService {
     }
     async fn advance_tool_receipt(
         &self,
-        mutation: crate::ToolReceiptMutationData,
-    ) -> Result<crate::ToolReceiptMutationReceiptData, crate::ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         self.record("advance_tool_receipt");
         if self.fail_all {
-            return Err(crate::ToolReceiptMutationError::Storage(
-                self.message.clone(),
-            ));
+            return Err(ToolReceiptMutationError::Storage(self.message.clone()));
         }
         self.receipt_states
             .lock()
             .unwrap()
             .push(format!("{:?}", mutation.next));
-        Ok(crate::ToolReceiptMutationReceiptData {
-            receipt: crate::domain::tool_receipt::ToolCallReceiptData {
+        Ok(ToolReceiptMutationReceiptData {
+            receipt: ToolCallReceiptData {
                 identity: mutation.identity,
                 input_preview: mutation.input_preview.unwrap_or_default(),
                 state: mutation.next,

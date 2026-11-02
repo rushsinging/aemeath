@@ -343,12 +343,11 @@ fn background_log_direct_defaults_false_and_is_opt_in() {
 #[test]
 fn bash_tool_declares_background_log_direct() {
     let workspace = tempfile::tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
     let bash = crate::adapters::bash::BashTool {
-        control: crate::domain::test_support::workspace_control(&ctx),
+        control: crate::domain::fakes::workspace_control(&ctx),
     };
     assert!(bash.background_log_direct(), "Bash 优先参与输出直绑");
 }
@@ -356,10 +355,9 @@ fn bash_tool_declares_background_log_direct() {
 #[test]
 fn execution_context_background_log_path_is_per_call_opt_in() {
     let workspace = tempfile::tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
     assert!(
         ctx.background_log_path().is_none(),
         "默认无路径（行为不变）"
