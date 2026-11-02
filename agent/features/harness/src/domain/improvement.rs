@@ -14,6 +14,11 @@ use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
+use crate::domain::scope_dedup::{
+    build_adjudication_prompt, build_global_authority_prompt, find_cross_scope_candidates,
+    parse_adjudications, parse_global_rule_moves, remove_rule_lines, rule_units,
+    CrossScopeCandidate, DuplicateVerdict,
+};
 use crate::domain::task::CycleOutcome;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -804,6 +809,486 @@ async fn complete_with_usage_event(
     result
 }
 
+/// 结构化判定跨 scope 候选；解析失败追加一次紧凑重试，仍失败则 fail-closed。
+async fn adjudicate_cross_scope_candidates(
+    llm: &dyn RsiLlmPort,
+    candidates: &[CrossScopeCandidate],
+    stage: &str,
+    block_index: usize,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<
+    Vec<(
+        CrossScopeCandidate,
+        DuplicateVerdict,
+        Option<String>,
+        String,
+    )>,
+    HarnessError,
+> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(recorder) = recorder {
+        let mut by_peer: std::collections::BTreeMap<(String, String), usize> =
+            std::collections::BTreeMap::new();
+        for candidate in candidates {
+            *by_peer
+                .entry((
+                    candidate.project_component.to_string(),
+                    candidate.global_component.to_string(),
+                ))
+                .or_default() += 1;
+        }
+        for ((project_component, global_component), count) in by_peer {
+            recorder.record(
+                &crate::domain::events::RsiCycleEvent::CrossScopeDuplicateCandidates {
+                    project_component,
+                    global_component,
+                    count,
+                },
+            );
+        }
+    }
+    let prompt = build_adjudication_prompt(candidates);
+    let first = complete_with_usage_event(llm, &prompt, stage, block_index, recorder).await?;
+    let mut adjudications = parse_adjudications(&first.text).ok();
+    if adjudications.is_none() {
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                block_index,
+                stage: format!("{stage}_parse"),
+                message: "scope 仲裁 JSON 解析失败，准备紧凑重试".to_string(),
+            });
+        }
+        let retry_prompt = format!(
+            "{prompt}\n\n上一次输出不是合法 JSON。重新只输出一个 JSON 对象，verdicts MUST 覆盖全部 index。"
+        );
+        let retry = complete_with_usage_event(
+            llm,
+            &retry_prompt,
+            &format!("{stage}_retry"),
+            block_index,
+            recorder,
+        )
+        .await?;
+        adjudications = parse_adjudications(&retry.text).ok();
+    }
+    let Some(adjudications) = adjudications else {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            "scope 仲裁连续解析失败（fail-closed，不落盘）",
+        ));
+    };
+    let mut by_index = std::collections::BTreeMap::new();
+    for item in adjudications {
+        if item.index >= candidates.len() {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("scope 仲裁 index 越界：{}", item.index),
+            ));
+        }
+        by_index.insert(item.index, item);
+    }
+    let mut output = Vec::with_capacity(candidates.len());
+    for (index, candidate) in candidates.iter().enumerate() {
+        let Some(item) = by_index.get(&index) else {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!("scope 仲裁缺少 index {index}（fail-closed，不落盘）"),
+            ));
+        };
+        if let Some(authority) = item.authority.as_deref() {
+            if !matches!(authority, "global" | "project") {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    format!("scope 仲裁 authority 非法：{authority}"),
+                ));
+            }
+        }
+        if let Some(recorder) = recorder {
+            recorder.record(
+                &crate::domain::events::RsiCycleEvent::CrossScopeDuplicateAdjudicated {
+                    project_component: candidate.project_component.to_string(),
+                    global_component: candidate.global_component.to_string(),
+                    verdict: item.verdict.as_str().to_string(),
+                    authority: item.authority.clone(),
+                    reason: item.reason.chars().take(120).collect(),
+                },
+            );
+        }
+        output.push((
+            candidate.clone(),
+            item.verdict,
+            item.authority.clone(),
+            item.reason.clone(),
+        ));
+    }
+    Ok(output)
+}
+
+fn lesson_evidence_projects(lessons: &[LessonEntry], component_kind: &str) -> Vec<String> {
+    let mut projects: Vec<String> = Vec::new();
+    for lesson in lessons
+        .iter()
+        .filter(|lesson| lesson.component_kind == component_kind)
+    {
+        for binding in &lesson.evidence {
+            let Some(source) = &binding.source else {
+                continue;
+            };
+            let project = source_project_label(&source.session_id);
+            if project != "unknown" && !projects.contains(&project) {
+                projects.push(project);
+            }
+        }
+    }
+    projects
+}
+
+/// 存量收敛：project overlay 与 global prose 的重复规则由结构化判定决定权威
+/// 落点，宿主只删除对应规则行；NEVER 让 LLM 直接改写整份组件正文。
+async fn reconcile_cross_scope_duplicates(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lessons: &[LessonEntry],
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    cycle_id: &str,
+) -> Result<usize, HarnessError> {
+    let ids = registry.list();
+    let mut contents: Vec<(ComponentId, ComponentContent)> = Vec::new();
+    for id in &ids {
+        contents.push((id.clone(), registry.read(id)?));
+    }
+    let bodies: Vec<(ComponentId, String)> = contents
+        .iter()
+        .map(|(id, content)| (id.clone(), content.body.clone()))
+        .collect();
+    let (projects, globals) = crate::domain::scope_dedup::split_scope_components(&bodies);
+    if projects.is_empty() || globals.is_empty() {
+        return Ok(0);
+    }
+
+    let mut project_removals: std::collections::BTreeMap<ComponentId, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    let mut global_removals: std::collections::BTreeMap<ComponentId, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    let mut event_facts: Vec<(String, String, String)> = Vec::new();
+    for (project_id, project_body) in &projects {
+        let global_refs: Vec<((ComponentId, String), &str)> = globals
+            .iter()
+            .map(|(id, body)| ((id.clone(), body.clone()), body.as_str()))
+            .collect();
+        let candidates = find_cross_scope_candidates((project_id, project_body), &global_refs);
+        if candidates.is_empty() {
+            continue;
+        }
+        let adjudicated = adjudicate_cross_scope_candidates(
+            llm,
+            &candidates,
+            "cross_scope_reconcile",
+            0,
+            recorder,
+        )
+        .await?;
+        for (candidate, verdict, authority, _reason) in adjudicated {
+            if verdict != DuplicateVerdict::Duplicate {
+                continue;
+            }
+            match authority.as_deref().unwrap_or("global") {
+                "project" => {
+                    global_removals
+                        .entry(candidate.global_component.clone())
+                        .or_default()
+                        .push(candidate.global_line);
+                    event_facts.push((
+                        candidate.global_component.to_string(),
+                        candidate.project_component.to_string(),
+                        "remove_global".to_string(),
+                    ));
+                }
+                _ => {
+                    project_removals
+                        .entry(candidate.project_component.clone())
+                        .or_default()
+                        .push(candidate.project_line);
+                    event_facts.push((
+                        candidate.project_component.to_string(),
+                        candidate.global_component.to_string(),
+                        "remove_project".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+    // 存量 global 单项目规则下沉：仅当某 global 组件的全部 lesson 证据都来自
+    // 同一 project segment 时审计；跨项目证据或无证据的 global 规则不迁移。
+    let mut project_appends: std::collections::BTreeMap<ComponentId, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (global_id, global_body) in &globals {
+        let evidence_projects = lesson_evidence_projects(lessons, global_id.kind.as_str());
+        if evidence_projects.len() != 1 {
+            continue;
+        }
+        let project_segment = evidence_projects[0].as_str();
+        let Some((project_id, project_body)) = projects
+            .iter()
+            .find(|(id, _)| id.name.as_str() == project_segment)
+        else {
+            continue;
+        };
+        let excluded = global_removals.get(global_id).cloned().unwrap_or_default();
+        let global_rules: Vec<_> = rule_units(global_body)
+            .into_iter()
+            .filter(|rule| !excluded.contains(&rule.line_index))
+            .collect();
+        if global_rules.is_empty() {
+            continue;
+        }
+        let prompt = build_global_authority_prompt(
+            global_id,
+            &global_rules,
+            project_id,
+            project_body,
+            &evidence_projects,
+        );
+        let first =
+            complete_with_usage_event(llm, &prompt, "cross_scope_global_authority", 0, recorder)
+                .await?;
+        let mut moves = parse_global_rule_moves(&first.text).ok();
+        if moves.is_none() {
+            let retry = complete_with_usage_event(
+                llm,
+                &format!("{prompt}\n\n上一次输出不是合法 JSON。重新只输出一个 JSON 对象。"),
+                "cross_scope_global_authority_retry",
+                0,
+                recorder,
+            )
+            .await?;
+            moves = parse_global_rule_moves(&retry.text).ok();
+        }
+        let Some(moves) = moves else {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                "global 权威审计连续解析失败（fail-closed，不落盘）",
+            ));
+        };
+        for movement in moves {
+            let Some(rule) = global_rules.get(movement.index) else {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    format!("global 权威审计 index 越界：{}", movement.index),
+                ));
+            };
+            if movement.project != project_segment {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    format!(
+                        "global 权威审计迁移目标非法：{}（证据项目 {project_segment}）",
+                        movement.project
+                    ),
+                ));
+            }
+            global_removals
+                .entry(global_id.clone())
+                .or_default()
+                .push(rule.line_index);
+            project_appends
+                .entry(project_id.clone())
+                .or_default()
+                .push(rule.text.clone());
+            event_facts.push((
+                global_id.to_string(),
+                project_id.to_string(),
+                "move_global_to_project".to_string(),
+            ));
+        }
+    }
+    if project_removals.is_empty() && global_removals.is_empty() && project_appends.is_empty() {
+        return Ok(0);
+    }
+
+    let version_ref = format!("scope-reconcile-{cycle_id}");
+    let mut removed_rules = 0;
+    let mut changed_ids: std::collections::BTreeSet<ComponentId> =
+        std::collections::BTreeSet::new();
+    for id in project_removals.keys().chain(global_removals.keys()) {
+        changed_ids.insert(id.clone());
+    }
+    for id in project_appends.keys() {
+        changed_ids.insert(id.clone());
+    }
+    for id in changed_ids {
+        let lines = project_removals
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| global_removals.get(&id).cloned().unwrap_or_default());
+        let Some((_, old_content)) = contents.iter().find(|(candidate, _)| candidate == &id) else {
+            continue;
+        };
+        let mut new_body = remove_rule_lines(&old_content.body, lines.clone());
+        if let Some(appends) = project_appends.get(&id) {
+            if !new_body.ends_with('\n') && !new_body.is_empty() {
+                new_body.push('\n');
+            }
+            for rule in appends {
+                new_body.push_str("- ");
+                new_body.push_str(rule);
+                new_body.push('\n');
+            }
+        }
+        let new_content = ComponentContent {
+            frontmatter: old_content.frontmatter.clone(),
+            body: new_body,
+        };
+        registry.validate(&id, &new_content)?;
+        if dry_run {
+            preview_lines.push(format!(
+                "[dry-run][scope-dedup] upsert {id}：移除 {} 条跨 scope 重复规则",
+                lines.len()
+            ));
+        } else {
+            if let Some(version_store) = version_store {
+                if let Err(error) = version_store.capture(registry, &id, &version_ref, "upsert") {
+                    log::warn!(target: crate::LOG_TARGET,
+                        "scope 去重快照失败（回滚能力缺失）：{error}");
+                }
+            }
+            registry.write(&id, &new_content)?;
+        }
+        removed_rules += lines.len();
+        if let Some(recorder) = recorder {
+            let (component, peer, action) = event_facts
+                .iter()
+                .find(|(changed, _, _)| changed == &id.to_string())
+                .cloned()
+                .unwrap_or_else(|| {
+                    (
+                        id.to_string(),
+                        "global/project".to_string(),
+                        "dedup".to_string(),
+                    )
+                });
+            recorder.record(
+                &crate::domain::events::RsiCycleEvent::CrossScopeDuplicateResolved {
+                    component,
+                    peer,
+                    action,
+                    removed_rules: lines.len(),
+                },
+            );
+        }
+    }
+    Ok(removed_rules)
+}
+
+/// 新增提案的宿主硬门禁：目标 body 与相反 scope 的既有规则语义重复时，
+/// duplicate/conflict 一律拒绝；specialization/distinct 放行。
+async fn cross_scope_duplicate_gate(
+    target: &ComponentId,
+    proposed_body: &str,
+    components: &[(ComponentId, ComponentContent)],
+    block_index: usize,
+    llm: &dyn RsiLlmPort,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<bool, HarnessError> {
+    let is_project =
+        target.kind == ComponentKind::SystemPromptOverlay && target.name.as_str() != "global";
+    let is_global = matches!(
+        target.kind,
+        ComponentKind::ToolGuidance | ComponentKind::Guardrails
+    ) || (target.kind == ComponentKind::SystemPromptOverlay
+        && target.name.as_str() == "global");
+    if !is_project && !is_global {
+        return Ok(true);
+    }
+    let candidates = if is_project {
+        let globals: Vec<((ComponentId, String), &str)> = components
+            .iter()
+            .filter(|(id, _)| {
+                id != target
+                    && (matches!(
+                        id.kind,
+                        ComponentKind::ToolGuidance | ComponentKind::Guardrails
+                    ) || (id.kind == ComponentKind::SystemPromptOverlay
+                        && id.name.as_str() == "global"))
+            })
+            .map(|(id, content)| ((id.clone(), String::new()), content.body.as_str()))
+            .collect();
+        find_cross_scope_candidates((target, proposed_body), &globals)
+    } else {
+        let mut candidates = Vec::new();
+        for (project_id, project_content) in components.iter().filter(|(id, _)| {
+            id.kind == ComponentKind::SystemPromptOverlay && id.name.as_str() != "global"
+        }) {
+            let global_refs = vec![((target.clone(), String::new()), proposed_body)];
+            candidates.extend(
+                find_cross_scope_candidates(
+                    (project_id, project_content.body.as_str()),
+                    &global_refs,
+                )
+                .into_iter()
+                .filter(|candidate| candidate.global_component == *target),
+            );
+        }
+        candidates
+    };
+    if candidates.is_empty() {
+        return Ok(true);
+    }
+    let adjudicated = adjudicate_cross_scope_candidates(
+        llm,
+        &candidates,
+        "cross_scope_duplicate_gate",
+        block_index,
+        recorder,
+    )
+    .await?;
+    for (candidate, verdict, _authority, reason) in adjudicated {
+        if !matches!(
+            verdict,
+            DuplicateVerdict::Duplicate | DuplicateVerdict::Conflict
+        ) {
+            continue;
+        }
+        let (target_rule, peer) = if candidate.global_component == *target {
+            (
+                candidate.global_rule.clone(),
+                candidate.project_component.to_string(),
+            )
+        } else {
+            (
+                candidate.project_rule.clone(),
+                candidate.global_component.to_string(),
+            )
+        };
+        let peer_rule = if candidate.global_component == *target {
+            candidate.project_rule.clone()
+        } else {
+            candidate.global_rule.clone()
+        };
+        if let Some(recorder) = recorder {
+            recorder.record(
+                &crate::domain::events::RsiCycleEvent::CrossScopeDuplicateRejected {
+                    block_index,
+                    component: target.to_string(),
+                    peer,
+                    target_rule: target_rule.chars().take(160).collect(),
+                    peer_rule: peer_rule.chars().take(160).collect(),
+                    reason: format!("{}: {}", verdict.as_str(), reason)
+                        .chars()
+                        .take(200)
+                        .collect(),
+                },
+            );
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// 记录宿主路由决策：候选、确定性选择与 unresolved 均进入事件流。
 fn record_route_decisions(
     chunk: &[(ComponentId, ComponentContent)],
@@ -1523,10 +2008,29 @@ pub async fn run_two_phase_cycle(
 ) -> Result<RunTwoPhaseOutcome, HarnessError> {
     let cycle_ref = cycle_id.to_string();
     let lessons = lesson_store.load_active()?;
+    // #2168：先收敛存量跨 scope 重复，再做本轮证据路由。新增提案仍会经过
+    // 下方 cross-scope gate，两层共同防止历史重复与增量复发。
+    let reconciliation_lessons = lesson_store.load_all()?;
+    let reconciled_rules = reconcile_cross_scope_duplicates(
+        registry,
+        llm,
+        &reconciliation_lessons,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        &cycle_ref,
+    )
+    .await?;
     let component_ids = registry.list();
     let mut component_contents = Vec::with_capacity(component_ids.len());
     for id in &component_ids {
         component_contents.push((id.clone(), registry.read(id)?));
+    }
+    if reconciled_rules > 0 {
+        preview_lines.push(format!(
+            "  [scope-dedup] 移除 {reconciled_rules} 条 global/project 重复规则"
+        ));
     }
 
     // #2092 强度门禁：observe 档只观察，NEVER 进入诊断候选。
@@ -2077,6 +2581,19 @@ pub async fn run_two_phase_cycle(
                             message: error.message().chars().take(120).collect(),
                         });
                     }
+                    discarded += issues.len();
+                    continue;
+                }
+                if !cross_scope_duplicate_gate(
+                    &component_id,
+                    &new_content.body,
+                    &component_contents,
+                    block_index,
+                    llm,
+                    recorder,
+                )
+                .await?
+                {
                     discarded += issues.len();
                     continue;
                 }

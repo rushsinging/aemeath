@@ -57,11 +57,10 @@ fn project_overlay_only_accepts_matching_single_project_signal() {
         &crate::domain::routing::RouteContext::default(),
     );
     match decision {
-        crate::domain::routing::RouteDecision::Choose { candidates, .. } => {
-            assert!(candidates.contains(&project_a));
-            assert!(!candidates.contains(&project_b));
+        crate::domain::routing::RouteDecision::Exact { component, .. } => {
+            assert_eq!(component, project_a);
         }
-        other => panic!("预期候选集：{other:?}"),
+        other => panic!("单项目内置工具信号 MUST 只落项目 overlay：{other:?}"),
     }
 
     let cross_project = signal_with_session(
@@ -84,12 +83,48 @@ fn project_overlay_only_accepts_matching_single_project_signal() {
 }
 
 #[test]
-fn builtin_tool_failure_routes_to_guidance_or_guardrails() {
-    let candidates = vec![tool_guidance(), guardrails()];
+fn single_project_signal_without_matching_overlay_stays_unresolved() {
+    let decision = crate::domain::routing::route_signal(
+        &signal_with_session(
+            SignalKind::RepeatedFailure,
+            "repeated_failure:Bash:project-only",
+            &["0123456789abcdef/s1.dataset"],
+        ),
+        &[tool_guidance(), guardrails()],
+        &crate::domain::routing::RouteContext::default(),
+    );
+    assert!(matches!(
+        decision,
+        crate::domain::routing::RouteDecision::Unresolved { reason, .. }
+            if reason.contains("缺少同名项目 overlay")
+    ));
+}
+
+#[test]
+fn builtin_tool_signal_without_project_source_stays_unresolved() {
     let decision = crate::domain::routing::route_signal(
         &signal(
             SignalKind::RepeatedFailure,
+            "repeated_failure:Bash:unknown-source",
+        ),
+        &[tool_guidance(), guardrails()],
+        &crate::domain::routing::RouteContext::default(),
+    );
+    assert!(matches!(
+        decision,
+        crate::domain::routing::RouteDecision::Unresolved { reason, .. }
+            if reason.contains("项目归属未知")
+    ));
+}
+
+#[test]
+fn builtin_tool_failure_routes_to_guidance_or_guardrails() {
+    let candidates = vec![tool_guidance(), guardrails()];
+    let decision = crate::domain::routing::route_signal(
+        &signal_with_session(
+            SignalKind::RepeatedFailure,
             "repeated_failure:Bash:permission denied",
+            &["0123456789abcdef/s1.dataset", "fedcba9876543210/s2.dataset"],
         ),
         &candidates,
         &crate::domain::routing::RouteContext::default(),
@@ -104,9 +139,10 @@ fn builtin_tool_failure_routes_to_guidance_or_guardrails() {
 #[test]
 fn builtin_tool_failure_exactly_routes_when_one_candidate_exists() {
     let decision = crate::domain::routing::route_signal(
-        &signal(
+        &signal_with_session(
             SignalKind::RetryPattern,
             "retry_pattern:Read:{\"file_path\":\"x\"}",
+            &["0123456789abcdef/s1.dataset", "fedcba9876543210/s2.dataset"],
         ),
         &[tool_guidance()],
         &crate::domain::routing::RouteContext::default(),
@@ -193,13 +229,11 @@ fn builtin_tool_signal_never_falls_back_to_overlay_alone() {
         &[overlay],
         &crate::domain::routing::RouteContext::default(),
     );
-    assert_eq!(
+    assert!(matches!(
         decision,
-        crate::domain::routing::RouteDecision::Unresolved {
-            reason: "缺少 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 兜底到 overlay"
-                .to_string(),
-        }
-    );
+        crate::domain::routing::RouteDecision::Unresolved { reason, .. }
+            if reason.contains("项目归属未知")
+    ));
 }
 
 #[test]

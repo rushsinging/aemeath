@@ -30,11 +30,18 @@ fn evidence() -> EvidenceBundle {
             summary: "Bash 连续失败 ×2".to_string(),
             excerpt: Some("exit code 1".to_string()),
             occurrences: 3,
-            sources: vec![EvidenceSourceRef {
-                session_id: "s1.dataset".to_string(),
-                run_id: "run-1".to_string(),
-                step_id: "step-1".to_string(),
-            }],
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".to_string(),
+                    run_id: "run-1".to_string(),
+                    step_id: "step-1".to_string(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".to_string(),
+                    run_id: "run-1".to_string(),
+                    step_id: "step-1".to_string(),
+                },
+            ],
         }],
     }
 }
@@ -83,6 +90,286 @@ impl RsiLlmPort for TwoPhaseLlm {
     }
 }
 
+fn single_project_evidence() -> EvidenceBundle {
+    EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RepeatedFailure,
+            signal_id: "repeated_failure:Bash:project-only".to_string(),
+            summary: "Bash 连续失败 ×2".to_string(),
+            excerpt: Some("exit code 1".to_string()),
+            occurrences: 3,
+            sources: vec![EvidenceSourceRef {
+                session_id: "0123456789abcdef/s1.dataset".to_string(),
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+            }],
+        }],
+    }
+}
+
+/// 跨 scope 硬门禁：project overlay 新提案复述 global tool guidance 时，
+/// 宿主 MUST 拒绝整份提案且零落盘。
+#[tokio::test]
+async fn two_phase_rejects_project_body_duplicating_global_guidance() {
+    let project = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("0123456789abcdef"),
+    };
+    let global = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![
+        (
+            global.clone(),
+            body_content("- Read 超长时先分段、过滤或摘要，只保留诊断片段。\n"),
+        ),
+        (project.clone(), body_content("# Project\n")),
+    ]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Read 超长","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"Read 超长","direction":"分段读取","route_reason":"项目证据"}]}"#.to_string(),
+        serde_json::json!({
+            "decision": "propose",
+            "reason": "补充读取规则",
+            "evidence_refs": ["E0"],
+            "body": "# Project\n- Read 超长时先分段、过滤或摘要，只保留诊断片段。\n"
+        })
+        .to_string(),
+        r#"{"verdicts":[{"index":0,"verdict":"duplicate","authority":"global","reason":"复述全局规则"}]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        single_project_evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "采纳 0 / 无变更 0 / 作废 1");
+    assert_eq!(llm.call_count(), 3);
+    assert!(llm.prompt(2).contains("scope 仲裁器"));
+    assert_eq!(
+        registry
+            .content_of(&project)
+            .map(|content| content.body.clone()),
+        Some("# Project\n".to_string())
+    );
+    assert!(lesson_store.load_active().expect("lessons").is_empty());
+}
+
+/// 存量收敛：结构化判定为 duplicate 且权威在 global 时，宿主只删除项目侧
+/// 重复规则行；global 语义保留，且不生成半截正文。
+#[tokio::test]
+async fn two_phase_reconciles_existing_cross_scope_duplicate() {
+    let project = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("0123456789abcdef"),
+    };
+    let global = tool_guidance();
+    let global_body = "# Tool Guidance\n- Read 超长时先分段、过滤或摘要，只保留诊断片段。\n";
+    let mut registry = FakeRegistry::with_entries(vec![
+        (global.clone(), body_content(global_body)),
+        (
+            project.clone(),
+            body_content(
+                "# Project\n- Read 超长时先分段、过滤或摘要，只保留诊断片段。\n- 保留项目差异。\n",
+            ),
+        ),
+    ]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"verdicts":[{"index":0,"verdict":"duplicate","authority":"global","reason":"项目复述全局"}]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        EvidenceBundle {
+            sessions_covered: 1,
+            signals: vec![EvidenceSignal {
+                kind: SignalKind::RunOutcome,
+                signal_id: "run_outcome:aggregate".to_string(),
+                summary: "观察".to_string(),
+                excerpt: None,
+                occurrences: 1,
+                sources: Vec::new(),
+            }],
+        },
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "无候选组件：仅观察");
+    assert_eq!(
+        registry
+            .content_of(&project)
+            .map(|content| content.body.clone()),
+        Some("# Project\n- 保留项目差异。\n".to_string())
+    );
+    assert_eq!(
+        registry
+            .content_of(&global)
+            .map(|content| content.body.clone()),
+        Some(global_body.to_string())
+    );
+}
+
+/// 权威在项目时，存量收敛 MUST 下沉规则：删除 global 重复行，保留项目差异。
+#[tokio::test]
+async fn two_phase_reconcile_moves_project_authority_out_of_global() {
+    let project = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("0123456789abcdef"),
+    };
+    let global = tool_guidance();
+    let project_body = "# Project\n- aemeath cargo test 输出必须先按 crate 过滤再读取。\n";
+    let mut registry = FakeRegistry::with_entries(vec![
+        (
+            global.clone(),
+            body_content("# Tool Guidance\n- aemeath cargo test 输出必须先按 crate 过滤再读取。\n"),
+        ),
+        (project.clone(), body_content(project_body)),
+    ]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"verdicts":[{"index":0,"verdict":"duplicate","authority":"project","reason":"规则含项目专属命令"}]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        EvidenceBundle {
+            sessions_covered: 1,
+            signals: Vec::new(),
+        },
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "无候选组件：仅观察");
+    assert_eq!(
+        registry
+            .content_of(&global)
+            .map(|content| content.body.clone()),
+        Some("# Tool Guidance\n".to_string())
+    );
+    assert_eq!(
+        registry
+            .content_of(&project)
+            .map(|content| content.body.clone()),
+        Some(project_body.to_string())
+    );
+}
+
+/// 无重复 pair 但 global 规则的证据只来自单项目且语义项目专属时，
+/// 审计 MUST 把该规则下沉到对应 project overlay。
+#[tokio::test]
+async fn two_phase_moves_single_project_global_rule_to_project_overlay() {
+    let project = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("0123456789abcdef"),
+    };
+    let global = tool_guidance();
+    let global_rule = "aemeath cargo test 输出必须先按 crate 过滤再读取。";
+    let mut registry = FakeRegistry::with_entries(vec![
+        (
+            global.clone(),
+            body_content(&format!("# Tool Guidance\n- {global_rule}\n")),
+        ),
+        (project.clone(), body_content("# Project\n")),
+    ]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let historical_lesson = crate::domain::lesson::LessonEntry::new(
+        "lesson-single-project".to_string(),
+        "tool-guidance",
+        "单项目 cargo test 输出规则",
+        vec![crate::domain::lesson::EvidenceBinding {
+            run_ref: "cycle-old".to_string(),
+            signal: SignalKind::OversizedResult,
+            excerpt: "cargo test 输出超长".to_string(),
+            signal_id: "oversized_result:Bash:cargo-test".to_string(),
+            source: Some(EvidenceSourceRef {
+                session_id: "0123456789abcdef/s1.dataset".to_string(),
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+            }),
+        }],
+        1,
+    )
+    .expect("lesson");
+    lesson_store
+        .append(&historical_lesson)
+        .expect("append lesson");
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"moves":[{"index":0,"project":"0123456789abcdef","reason":"包含 aemeath 专属 cargo test 命令"}]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        EvidenceBundle {
+            sessions_covered: 1,
+            signals: Vec::new(),
+        },
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "无候选组件：仅观察");
+    assert_eq!(
+        registry
+            .content_of(&global)
+            .map(|content| content.body.clone()),
+        Some("# Tool Guidance\n".to_string())
+    );
+    assert_eq!(
+        registry
+            .content_of(&project)
+            .map(|content| content.body.clone()),
+        Some(format!("# Project\n- {global_rule}\n"))
+    );
+}
+
 #[tokio::test]
 async fn two_phase_routes_candidate_then_executes_fixed_component() {
     let target = tool_guidance();
@@ -114,7 +401,7 @@ async fn two_phase_routes_candidate_then_executes_fixed_component() {
     assert_eq!(outcome.outcome.summary, "采纳 1 / 无变更 0 / 作废 0");
     let diagnosis_prompt = llm.prompt(0);
     assert!(diagnosis_prompt.contains("\"scope\":\"global\""));
-    assert!(diagnosis_prompt.contains("项目: unknown"));
+    assert!(diagnosis_prompt.contains("项目: 0123456789abcdef,fedcba9876543210"));
     assert!(diagnosis_prompt.contains("scope=global 候选只承接跨项目通用规律"));
     assert!(diagnosis_prompt.contains("项目 A 证据 NEVER 选择项目 B 候选"));
     assert!(diagnosis_prompt.contains("工具参数类问题 NEVER 复述或改写工具 schema"));

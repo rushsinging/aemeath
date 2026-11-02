@@ -54,6 +54,32 @@ pub enum RsiCycleEvent {
         signal_ids: Vec<String>,
         message: String,
     },
+    CrossScopeDuplicateCandidates {
+        project_component: String,
+        global_component: String,
+        count: usize,
+    },
+    CrossScopeDuplicateAdjudicated {
+        project_component: String,
+        global_component: String,
+        verdict: String,
+        authority: Option<String>,
+        reason: String,
+    },
+    CrossScopeDuplicateRejected {
+        block_index: usize,
+        component: String,
+        peer: String,
+        target_rule: String,
+        peer_rule: String,
+        reason: String,
+    },
+    CrossScopeDuplicateResolved {
+        component: String,
+        peer: String,
+        action: String,
+        removed_rules: usize,
+    },
     ExecutionTargetFixed {
         block_index: usize,
         component: String,

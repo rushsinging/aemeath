@@ -40,11 +40,18 @@ fn evidence_with_signal() -> crate::domain::evidence::EvidenceBundle {
             summary: "工具 Bash 重复失败 ×2".into(),
             excerpt: Some("cargo build failed".into()),
             occurrences: 2,
-            sources: vec![crate::domain::evidence::EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
-                run_id: "run-1".into(),
-                step_id: "step-1".into(),
-            }],
+            sources: vec![
+                crate::domain::evidence::EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                crate::domain::evidence::EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     }
 }
@@ -179,11 +186,18 @@ async fn lesson_is_persisted_when_signal_summary_is_long() {
             summary: "长".repeat(512),
             excerpt: None,
             occurrences: 3,
-            sources: vec![crate::domain::evidence::EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
-                run_id: "run-1".into(),
-                step_id: "step-1".into(),
-            }],
+            sources: vec![
+                crate::domain::evidence::EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                crate::domain::evidence::EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     let lesson_store = crate::domain::lesson::LessonStore::new(

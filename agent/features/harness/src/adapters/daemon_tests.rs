@@ -257,7 +257,7 @@ async fn trigger_runs_cycle_and_writes_component_file() {
     let stream = crate::domain::stream_port::FakeEvidenceStream {
         plans: std::sync::Mutex::new(vec![crate::domain::stream::EvidenceBlockPlan {
             runs: vec![crate::domain::stream::RunRef {
-                session_key: "s1.dataset".to_string(),
+                session_key: "0123456789abcdef/s1.dataset".to_string(),
                 run_id: "run-1".to_string(),
             }],
         }]),
@@ -270,7 +270,18 @@ async fn trigger_runs_cycle_and_writes_component_file() {
                 summary: "工具 Bash 重复失败 ×2".to_string(),
                 excerpt: None,
                 occurrences: 2,
-                sources: Vec::new(),
+                sources: vec![
+                    crate::domain::evidence::EvidenceSourceRef {
+                        session_id: "0123456789abcdef/s1.dataset".to_string(),
+                        run_id: "run-1".to_string(),
+                        step_id: "step-1".to_string(),
+                    },
+                    crate::domain::evidence::EvidenceSourceRef {
+                        session_id: "fedcba9876543210/s2.dataset".to_string(),
+                        run_id: "run-1".to_string(),
+                        step_id: "step-1".to_string(),
+                    },
+                ],
             }],
         }),
         contexts: std::sync::Mutex::new(Vec::new()),
