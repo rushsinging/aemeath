@@ -152,6 +152,20 @@ pub enum InvocationReminderData {
     BackgroundProcessCompleted {
         items: Vec<BackgroundProcessReminderItemData>,
     },
+    /// Workflow 状态提示（#2088）：只声明 workflow id 与当前模式，
+    /// 不携带 Graph 内容（Graph 由 workflow_query 读取）。
+    WorkflowState {
+        workflow_id: String,
+        mode: WorkflowStateModeData,
+    },
+}
+
+/// Workflow 活跃模式（渲染语义枚举归 Context，runtime 侧映射）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowStateModeData {
+    Executing,
+    Replanning,
 }
 
 /// 记忆召回条目预览（id + 截断内容）。
@@ -222,6 +236,7 @@ impl InvocationReminderData {
             Self::MemoryUpdated { .. } => "memory_updated",
             Self::MemoryRecall { .. } => "memory_recall",
             Self::BackgroundProcessCompleted { .. } => "background_process",
+            Self::WorkflowState { .. } => "workflow_state",
         }
     }
 }
@@ -511,14 +526,19 @@ pub enum CompactTrigger {
 /// compact 摘要的 LLM 绑定（调用方按轮注入；依赖 provider 通用端口）。
 #[derive(Clone)]
 pub struct CompactLlmBinding {
-    /// 通用 LLM 文本调用端口（runtime 注入 provider 实现）。
-    pub invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    /// 通用 LLM 调用端口（runtime 注入 provider 实现，#2146 单端口：
+    /// 文本消费走端口默认方法 `invoke_text`，取消走 `request.cancellation`）。
+    pub invoker: std::sync::Arc<dyn provider::LlmInvokePort>,
     /// 目标 compact 模型。
     pub model: provider::ModelInfo,
     /// 摘要输出上限。
     pub max_output_tokens: u32,
     /// compact 调用模型的输入窗口（None = 与注入窗口一致）。
     pub compact_context_window: Option<usize>,
+    /// compact 调用的推理档位（#2133：语义任务默认开思考，成本经 usage 统计）。
+    pub reasoning: share::reasoning::ReasoningLevel,
+    /// map 阶段并发上限（配置 `context.compact_concurrency`，默认 5，上限 10）。
+    pub max_concurrency: usize,
 }
 
 #[derive(Clone)]

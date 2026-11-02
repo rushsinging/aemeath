@@ -75,7 +75,7 @@ impl InMemoryWorkflowBackend {
                 completion_criteria: node.completion_criteria.clone(),
                 conclusion: aggregate.node_conclusion(&node.node_id).map(str::to_owned),
                 evidence_refs: aggregate.node_evidence(&node.node_id).unwrap_or_default(),
-                successors: Vec::new(),
+                successors: aggregate.node_exits(&node.node_id).unwrap_or_default(),
             })
             .collect();
         WorkflowDetailData {
@@ -114,7 +114,9 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
         }
         let aggregate = WorkflowAggregate::new(spec, (self.id_generator)(), (self.clock)())?;
         let summary = Self::summary_data(&aggregate);
+        let snapshot = aggregate.to_snapshot();
         self.store.insert(aggregate)?;
+        self.store.persist_snapshot(&snapshot);
         Ok(summary)
     }
 
@@ -170,12 +172,16 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
                 aggregate.fail(&reason)?
             }
         }
-        Ok(LifecycleResultData {
+        let result = LifecycleResultData {
             workflow_id: aggregate.workflow_id.clone(),
             status: aggregate.status(),
             active_mode: aggregate.active_mode(),
             pending_mode: aggregate.pending_mode(),
-        })
+        };
+        let snapshot = aggregate.to_snapshot();
+        drop(aggregate);
+        self.store.persist_snapshot(&snapshot);
+        Ok(result)
     }
 
     async fn node_update(
@@ -190,32 +196,37 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
                 workflow_id: command.workflow_id.clone(),
             });
         }
-        match command.action {
-            crate::domain::tool_data::NodeAction::Fail => {
-                let node_id = command.node_id.clone();
-                let stopped = aggregate.fail_node(&node_id.clone(), command.conclusion)?;
-                let frozen_fact_refs = command.evidence_refs.clone();
-                Ok(NodeUpdateResultData {
-                    workflow_id: aggregate.workflow_id.clone(),
-                    node_id: node_id.clone(),
-                    node_status: NodeStatus::Failed,
-                    status: aggregate.status(),
-                    active_mode: aggregate.active_mode(),
-                    activated_node_ids: Vec::new(),
-                    stopped_node_ids: stopped.clone(),
-                    replan_boundary: Some(crate::domain::tool_data::ReplanBoundary {
-                        trigger_node_id: node_id.clone(),
-                        stopped_node_ids: stopped,
-                        frozen_fact_refs,
-                    }),
-                })
-            }
-            crate::domain::tool_data::NodeAction::Complete => {
-                Err(WorkflowToolError::NodeNotActive {
-                    node_id: command.node_id,
-                })
-            }
-        }
+        let node_id = command.node_id.clone();
+        let outcome = aggregate.advance_node(
+            &node_id,
+            command.action,
+            command.conclusion,
+            command.evidence_refs.clone(),
+            command.successors.clone(),
+        )?;
+        let replan_boundary = if outcome.node_status == NodeStatus::Failed {
+            Some(crate::domain::tool_data::ReplanBoundary {
+                trigger_node_id: node_id.clone(),
+                stopped_node_ids: outcome.stopped_node_ids.clone(),
+                frozen_fact_refs: command.evidence_refs,
+            })
+        } else {
+            None
+        };
+        let result = NodeUpdateResultData {
+            workflow_id: aggregate.workflow_id.clone(),
+            node_id,
+            node_status: outcome.node_status,
+            status: aggregate.status(),
+            active_mode: aggregate.active_mode(),
+            activated_node_ids: outcome.activated_node_ids,
+            stopped_node_ids: outcome.stopped_node_ids,
+            replan_boundary,
+        };
+        let snapshot = aggregate.to_snapshot();
+        drop(aggregate);
+        self.store.persist_snapshot(&snapshot);
+        Ok(result)
     }
 
     async fn replan(
@@ -223,16 +234,13 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
         command: ReplanWorkflowCommand,
     ) -> Result<ReplanResultData, WorkflowToolError> {
         let aggregate = self.store.get(&command.workflow_id)?;
-        let aggregate = aggregate.lock().expect("aggregate lock");
-        // 非 Replanning 拒绝是真实语义；Replanning 中的 continuation 校验由
-        // #2087 实现（过渡占位，生产开关开启前不暴露）。
-        if aggregate.active_mode() != Some(crate::domain::ActiveMode::Replanning) {
-            return Err(WorkflowToolError::WorkflowNotReplanning {
-                workflow_id: command.workflow_id.clone(),
-            });
+        let mut aggregate = aggregate.lock().expect("aggregate lock");
+        let result = aggregate.replan(command);
+        let snapshot = result.as_ref().ok().map(|_| aggregate.to_snapshot());
+        drop(aggregate);
+        if let Some(snapshot) = snapshot {
+            self.store.persist_snapshot(&snapshot);
         }
-        Err(WorkflowToolError::WorkflowCannotContinue {
-            workflow_id: command.workflow_id,
-        })
+        result
     }
 }

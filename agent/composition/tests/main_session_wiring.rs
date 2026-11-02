@@ -482,6 +482,8 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         None,
         None,
         None,
+        None,
+        None,
     ));
     let agent_runner = runtime::AgentRunnerAssemblyData {
         runner: Arc::new(NoopRunner),

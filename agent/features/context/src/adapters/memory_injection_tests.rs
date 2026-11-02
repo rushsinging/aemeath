@@ -1,14 +1,9 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use async_trait::async_trait;
-use memory::api::reflection::{ReflectionApplyResult, ReflectionOutput};
-use memory::api::search::{
-    MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
-};
+use memory::api::search::{MemoryRetrievalMode, MemorySearchHit, MemorySearchResult};
 use memory::api::{
-    CompactResult, MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer, MemoryLocation,
-    MemoryPort, MemoryQuery, MemorySource, MemoryStats, WriteResult,
+    MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryLocation, MemoryQuery, MemorySource,
 };
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -20,67 +15,14 @@ use super::*;
 use crate::domain::Language;
 use share::ids::InteractionRequestId;
 
-struct FakeMemory {
-    result: MemorySearchResult,
-    queries: Mutex<Vec<MemoryQuery>>,
-}
-
-impl FakeMemory {
-    fn new(mode: MemoryRetrievalMode, hits: Vec<MemorySearchHit>) -> Self {
-        Self {
-            result: MemorySearchResult { mode, hits },
-            queries: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-#[async_trait]
-impl MemoryPort for FakeMemory {
-    async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
-        self.queries.lock().unwrap().push(query.clone());
-        self.result.clone()
-    }
-
-    async fn search(&self, _query: &MemorySearchQuery) -> MemorySearchResult {
-        panic!("search must not be used for context injection")
-    }
-
-    async fn write(&self, _entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn update(&self, _id: &MemoryId, _content: &str) -> Result<bool, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn delete(&self, _id: &MemoryId) -> Result<bool, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn pin(&self, _id: &MemoryId, _pinned: bool) -> Result<bool, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn mark_outdated(&self, _id: &MemoryId) -> Result<bool, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn apply_reflection(
-        &self,
-        _output: &ReflectionOutput,
-    ) -> Result<ReflectionApplyResult, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn archive(&self, _ids: &[MemoryId]) -> Result<bool, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn restore(&self, _id: &MemoryId) -> Result<memory::api::RestoreResult, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn compact(&self) -> Result<CompactResult, MemoryError> {
-        panic!("context injection must not mutate memory")
-    }
-    async fn list(&self, _layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
-        panic!("context injection must use retrieve_for_inject")
-    }
-    async fn stats(&self) -> MemoryStats {
-        panic!("context injection must use retrieve_for_inject")
-    }
+/// #2146：MemoryPort 实现权归 memory crate；注入替身经其 test_support。
+fn memory_test_injection(
+    mode: MemoryRetrievalMode,
+    hits: Vec<MemorySearchHit>,
+) -> Arc<memory::test_support::InjectionOnlyMemory> {
+    Arc::new(memory::test_support::InjectionOnlyMemory::new(
+        MemorySearchResult { mode, hits },
+    ))
 }
 
 fn hit(id: &str, category: MemoryCategory, content: &str, pinned: bool) -> MemorySearchHit {
@@ -247,7 +189,7 @@ fn request(enabled: bool, inject_token_budget: Option<usize>) -> ContextRequestD
 /// token 预算决定（见 `token_budget_keeps_only_the_ordered_prefix`）。
 #[tokio::test]
 async fn preserves_hit_order_within_the_budget() {
-    let memory = Arc::new(FakeMemory::new(
+    let memory = memory_test_injection(
         MemoryRetrievalMode::InjectionPriority,
         vec![
             hit(
@@ -269,7 +211,7 @@ async fn preserves_hit_order_within_the_budget() {
                 false,
             ),
         ],
-    ));
+    );
     let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 4242));
 
     let result = adapter
@@ -284,7 +226,7 @@ async fn preserves_hit_order_within_the_budget() {
         );
     assert_ne!(result.revision, 0);
     assert_eq!(
-        memory.queries.lock().unwrap().as_slice(),
+        memory.queries().as_slice(),
         &[MemoryQuery {
             limit: super::INJECTION_CANDIDATE_LIMIT,
             layer: None,
@@ -297,10 +239,10 @@ async fn preserves_hit_order_within_the_budget() {
 #[tokio::test]
 async fn excludes_all_hit_and_entry_metadata() {
     let id = "01890f3c-7c00-7000-8000-000000000004";
-    let memory = Arc::new(FakeMemory::new(
+    let memory = memory_test_injection(
         MemoryRetrievalMode::InjectionPriority,
         vec![hit(id, MemoryCategory::Preference, "visible only", true)],
-    ));
+    );
     let adapter = MemoryRetrieveAdapter::with_clock(memory, Arc::new(|| 99));
 
     let block = &adapter
@@ -322,10 +264,7 @@ async fn excludes_all_hit_and_entry_metadata() {
 
 #[tokio::test]
 async fn disabled_config_returns_empty_without_retrieving() {
-    let memory = Arc::new(FakeMemory::new(
-        MemoryRetrievalMode::InjectionPriority,
-        vec![],
-    ));
+    let memory = memory_test_injection(MemoryRetrievalMode::InjectionPriority, vec![]);
     let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 1));
 
     let result = adapter
@@ -335,12 +274,12 @@ async fn disabled_config_returns_empty_without_retrieving() {
 
     assert!(result.blocks.is_empty());
     assert_eq!(result.revision, 0);
-    assert!(memory.queries.lock().unwrap().is_empty());
+    assert!(memory.queries().is_empty());
 }
 
 #[tokio::test]
 async fn token_budget_keeps_only_the_ordered_prefix() {
-    let memory = Arc::new(FakeMemory::new(
+    let memory = memory_test_injection(
         MemoryRetrievalMode::InjectionPriority,
         vec![
             hit(
@@ -362,7 +301,7 @@ async fn token_budget_keeps_only_the_ordered_prefix() {
                 false,
             ),
         ],
-    ));
+    );
     let adapter = MemoryRetrieveAdapter::with_clock(memory, Arc::new(|| 1));
 
     let result = adapter.materialize(&request(true, Some(8))).await.unwrap();
@@ -375,22 +314,19 @@ async fn token_budget_keeps_only_the_ordered_prefix() {
 
 #[tokio::test]
 async fn zero_token_budget_disables_injection_without_retrieving() {
-    let memory = Arc::new(FakeMemory::new(
-        MemoryRetrievalMode::InjectionPriority,
-        vec![],
-    ));
+    let memory = memory_test_injection(MemoryRetrievalMode::InjectionPriority, vec![]);
     let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 1));
 
     let result = adapter.materialize(&request(true, Some(0))).await.unwrap();
 
     assert!(result.blocks.is_empty());
-    assert!(memory.queries.lock().unwrap().is_empty());
+    assert!(memory.queries().is_empty());
 }
 
 #[tokio::test]
 async fn disabled_result_is_empty_but_other_modes_are_errors() {
     let disabled = MemoryRetrieveAdapter::with_clock(
-        Arc::new(FakeMemory::new(MemoryRetrievalMode::Disabled, vec![])),
+        memory_test_injection(MemoryRetrievalMode::Disabled, vec![]),
         Arc::new(|| 1),
     );
     assert!(disabled
@@ -401,7 +337,7 @@ async fn disabled_result_is_empty_but_other_modes_are_errors() {
         .is_empty());
 
     let explicit = MemoryRetrieveAdapter::with_clock(
-        Arc::new(FakeMemory::new(MemoryRetrievalMode::ExplicitSearch, vec![])),
+        memory_test_injection(MemoryRetrievalMode::ExplicitSearch, vec![]),
         Arc::new(|| 1),
     );
     let error = explicit

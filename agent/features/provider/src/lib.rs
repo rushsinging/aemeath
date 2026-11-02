@@ -43,10 +43,15 @@ mod domain;
 mod ports;
 pub mod published_language;
 
+/// 测试实现面（#2146：LlmInvokePort 除 provider 外不得实现）。
+/// 跨 crate 测试经 `feature = "dev"` 可见；生产构建不编译。
+#[cfg(any(test, feature = "dev"))]
+pub mod test_support;
+
 pub use published_language::{
-    ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind, ProviderRequestData,
-    ProviderResponse, ProviderResponseChunk, ProviderResponseStream, ResponseStopReason,
-    TokenUsageData,
+    LlmInvokePort, LlmTextOutputData, ModelInfo, ProviderContentData, ProviderError,
+    ProviderErrorKind, ProviderRequestData, ProviderResponse, ProviderResponseChunk,
+    ProviderResponseStream, ResponseStopReason, TokenUsageData,
 };
 
 pub(crate) use domain::capability::ProviderDriverKind;
@@ -56,7 +61,6 @@ pub mod composition {
     pub use crate::adapters::client::{wire_provider_client, LlmClient, ProviderClientSpecData};
     pub use crate::adapters::pool::TransportPool;
     pub use crate::adapters::probe::wire_test_provider_client;
-    pub use crate::adapters::text_invoke::{LlmTextInvokePort, LlmTextOutputData};
 }
 
 #[derive(Debug, thiserror::Error)]

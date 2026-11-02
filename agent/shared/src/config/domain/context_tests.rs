@@ -48,6 +48,9 @@ fn compact_model_patch_overrides_without_touching_other_context_fields() {
             microcompact_enabled: false,
             auto_compact_failure_limit: 7,
             compact_model: Some("Zhipu/glm-5.3".to_string()),
+            compact_reasoning: None,
+            compact_max_output_tokens: None,
+            compact_concurrency: None,
             auto_compact_threshold_ratio: 0.8,
         },
         ..Config::default()
@@ -73,6 +76,9 @@ fn compact_model_patch_without_value_preserves_existing_selection() {
     let base = Config {
         context: crate::config::context::ContextConfig {
             compact_model: Some("Zhipu/glm-5.3".to_string()),
+            compact_reasoning: None,
+            compact_max_output_tokens: None,
+            compact_concurrency: None,
             ..Default::default()
         },
         ..Config::default()
@@ -93,6 +99,9 @@ fn compact_model_patch_with_blank_value_clears_selection() {
     let base = Config {
         context: crate::config::context::ContextConfig {
             compact_model: Some("Zhipu/glm-5.3".to_string()),
+            compact_reasoning: None,
+            compact_max_output_tokens: None,
+            compact_concurrency: None,
             ..Default::default()
         },
         ..Config::default()
@@ -164,6 +173,9 @@ fn threshold_ratio_patch_overrides_without_touching_other_context_fields() {
             microcompact_enabled: false,
             auto_compact_failure_limit: 7,
             compact_model: Some("Zhipu/glm-5.3".to_string()),
+            compact_reasoning: None,
+            compact_max_output_tokens: None,
+            compact_concurrency: None,
             auto_compact_threshold_ratio: 0.8,
         },
         ..Config::default()

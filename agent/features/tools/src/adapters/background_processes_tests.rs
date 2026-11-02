@@ -9,6 +9,7 @@ use std::sync::Arc;
 struct FakeAccess {
     summaries: Vec<BackgroundProcessSummaryData>,
     log_text: String,
+    log_file: Option<String>,
 }
 
 impl BackgroundProcessAccess for FakeAccess {
@@ -52,6 +53,9 @@ impl BackgroundProcessAccess for FakeAccess {
             text: String::from_utf8_lossy(slice).into_owned(),
             cursor: end as u64,
             total_written: size,
+            start_offset: start as u64,
+            is_tail: cursor.is_none(),
+            log_file: self.log_file.clone(),
         })
     }
 
@@ -84,6 +88,7 @@ fn source() -> Arc<StaticSource> {
                 duration_ms: Some(1500),
             }],
             log_text: "line-1\nline-2\n".to_string(),
+            log_file: None,
         }),
     })
 }
@@ -226,6 +231,7 @@ async fn watch_tool_result_text_includes_log_tail_within_budget() {
                 duration_ms: Some(10),
             }],
             log_text: huge,
+            log_file: None,
         }),
     });
     let tool = BackgroundProcessWatchTool { source };
@@ -263,6 +269,7 @@ async fn watch_tool_terminal_state_returns_terminal_outcome() {
                 duration_ms: Some(10),
             }],
             log_text: "done-line\n".to_string(),
+            log_file: None,
         }),
     });
     let tool = BackgroundProcessWatchTool { source };
@@ -276,4 +283,87 @@ async fn watch_tool_terminal_state_returns_terminal_outcome() {
         crate::domain::types::background_processes::BackgroundProcessWatchOutcome::Terminal
     );
     assert!(result.text.contains("done-line"), "终态 text 应含 log tail");
+}
+
+/// 尾窗必须自述区间并指向全量日志文件：LLM 不得靠「开头是半截内容」推断损坏。
+#[tokio::test]
+async fn logs_tool_text_declares_tail_window_and_points_to_log_file() {
+    let source = Arc::new(StaticSource {
+        access: Arc::new(FakeAccess {
+            summaries: vec![BackgroundProcessSummaryData {
+                task_id: "task-tail".to_string(),
+                tool_name: "Bash".to_string(),
+                state: "succeeded".to_string(),
+                goal: "Bash · flush".to_string(),
+                duration_ms: Some(9),
+            }],
+            log_text: format!("HEAD-MARKER\n{}\nTAIL-MARKER\n", "y".repeat(400)),
+            log_file: Some("/tmp/task-tail.log".to_string()),
+        }),
+    });
+    let tool = BackgroundProcessLogsTool { source };
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "task-tail", "max_bytes": 64}),
+            &test_context(),
+        )
+        .await;
+    assert!(!result.is_error);
+    let text = &result.text;
+    assert!(
+        text.starts_with("[log bytes "),
+        "首行必须自述窗口区间: {text}"
+    );
+    assert!(
+        text.contains("earlier bytes are NOT included"),
+        "必须说明前文未包含: {text}"
+    );
+    assert!(
+        text.contains("/tmp/task-tail.log"),
+        "必须给出全量日志文件路径: {text}"
+    );
+    assert!(
+        text.contains("read that file directly"),
+        "必须引导直接读文件: {text}"
+    );
+    let data = result.data.expect("结构化数据");
+    assert!(data.log.is_tail);
+    assert!(data.log.start_offset > 0);
+    assert_eq!(data.log.log_file.as_deref(), Some("/tmp/task-tail.log"));
+}
+
+/// Watch header 同样给出尾窗起点与全量日志文件路径。
+#[tokio::test]
+async fn watch_tool_text_points_to_log_file_when_tail_window_truncated() {
+    let source = Arc::new(StaticSource {
+        access: Arc::new(FakeAccess {
+            summaries: vec![BackgroundProcessSummaryData {
+                task_id: "task-watch".to_string(),
+                tool_name: "Bash".to_string(),
+                state: "succeeded".to_string(),
+                goal: "Bash · watch".to_string(),
+                duration_ms: Some(11),
+            }],
+            log_text: format!("{}\nWATCH-TAIL\n", "z".repeat(4_000)),
+            log_file: Some("/tmp/task-watch.log".to_string()),
+        }),
+    });
+    let tool = BackgroundProcessWatchTool { source };
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "task-watch", "timeout": 1}),
+            &test_context(),
+        )
+        .await;
+    assert!(!result.is_error);
+    assert!(
+        result.text.contains("tail window from byte"),
+        "header 必须自述尾窗起点: {}",
+        result.text
+    );
+    assert!(
+        result.text.contains("/tmp/task-watch.log"),
+        "header 必须给出全量日志文件路径: {}",
+        result.text
+    );
 }

@@ -1044,7 +1044,8 @@ mod interaction_routing {
     async fn require_approval_approve_full_roundtrip() {
         let mut run = Run::new(RunSpec::main(), None);
         let cancel = CancellationToken::new();
-        let fake = Arc::new(FakeToolExecutionPort::new());
+        let fake = FakeToolExecutionPort::new();
+        let fake_port = fake.port();
         fake.set_result_text("approved result");
 
         let call = call("Bash", json!({"command": "ls"}));
@@ -1080,7 +1081,7 @@ mod interaction_routing {
                 }],
             }]),
             drain_outcomes: drain_q,
-            fake_tool_port: Some(fake.clone()),
+            fake_tool_port: Some(fake_port.clone()),
             ..Default::default()
         };
 
@@ -1157,7 +1158,8 @@ mod interaction_routing {
     async fn require_approval_deny_full_roundtrip() {
         let mut run = Run::new(RunSpec::main(), None);
         let cancel = CancellationToken::new();
-        let fake = Arc::new(FakeToolExecutionPort::new());
+        let fake = FakeToolExecutionPort::new();
+        let fake_port = fake.port();
 
         let call = call("Bash", json!({"command": "rm -rf /"}));
         let call_id = call.id.clone();
@@ -1192,7 +1194,7 @@ mod interaction_routing {
                 }],
             }]),
             drain_outcomes: drain_q,
-            fake_tool_port: Some(fake.clone()),
+            fake_tool_port: Some(fake_port.clone()),
             ..Default::default()
         };
 

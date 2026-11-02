@@ -1,6 +1,4 @@
 use super::*;
-use provider::ProviderError;
-use runtime::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 use share::config::Config;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -149,26 +147,18 @@ fn logging_init_decision_rejects_conflicting_output_mode() {
     assert!(error.contains("Stderr"));
 }
 
-#[derive(Default)]
-struct CountingProviderFactory {
-    build_calls: AtomicUsize,
+/// 记录子代理 usage 的脚本 factory（#2146：ProviderFactory 实现权归
+/// runtime，经其 test_support 构造）。
+fn counting_test_factory() -> (Arc<dyn runtime::ProviderFactory>, Arc<AtomicUsize>) {
+    runtime::test_support::counting_provider_factory(
+        crate::provider::provider_factory() as Arc<dyn runtime::ProviderFactory>
+    )
 }
 
-struct ReportedUsageProvider {
-    invocation_count: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl runtime::ProviderPort for ReportedUsageProvider {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-    async fn invoke(
-        &self,
-        _request: provider::ProviderRequestData,
-        _cancellation: &dyn runtime::CancellationSignal,
-    ) -> Result<provider::ProviderResponseStream, ProviderError> {
-        let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
-        // v3 拆帧：原 Completed{output, usage, stop} → Content… + Usage + Stop。
+/// 按调用序号回放脚本流（#2146：LlmInvokePort 实现权归 provider）。
+fn reported_usage_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::LlmInvokePort> {
+    provider::test_support::scripted_llm(move |_request| {
+        let invocation_index = invocation_count.fetch_add(1, Ordering::SeqCst);
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
                 vec![provider::ProviderContentData::ToolCall {
@@ -218,28 +208,15 @@ impl runtime::ProviderPort for ReportedUsageProvider {
             chunks.push(provider::ProviderResponseChunk::Usage(usage));
         }
         chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
-        Ok(Box::pin(futures_util::stream::iter(chunks)))
-    }
+        Ok(provider::test_support::stream_from_chunks(chunks))
+    })
 }
 
-struct ReportedUsageProviderFactory {
-    invocation_count: Arc<AtomicUsize>,
-}
-
-impl ReportedUsageProviderFactory {
-    fn new() -> Self {
-        Self {
-            invocation_count: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-}
-
-impl ProviderFactory for ReportedUsageProviderFactory {
-    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
-        Ok(ProviderBindingData {
-            provider: Arc::new(ReportedUsageProvider {
-                invocation_count: self.invocation_count.clone(),
-            }),
+fn reported_usage_test_factory() -> Arc<dyn runtime::ProviderFactory> {
+    let invocation_count = Arc::new(AtomicUsize::new(0));
+    runtime::test_support::scripted_provider_factory(move |spec| {
+        Ok(runtime::ProviderBindingData {
+            provider: reported_usage_port(Arc::clone(&invocation_count)),
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -254,14 +231,30 @@ impl ProviderFactory for ReportedUsageProviderFactory {
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
         })
-    }
+    })
 }
 
-impl ProviderFactory for CountingProviderFactory {
-    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
-        self.build_calls.fetch_add(1, Ordering::SeqCst);
-        crate::provider::provider_factory().build(spec)
-    }
+/// 直绑后台脚本 factory（#2146：实现权归 runtime test_support）。
+fn direct_log_test_factory() -> Arc<dyn runtime::ProviderFactory> {
+    let invocation_count = Arc::new(AtomicUsize::new(0));
+    runtime::test_support::scripted_provider_factory(move |spec| {
+        Ok(runtime::ProviderBindingData {
+            provider: direct_log_script_port(Arc::clone(&invocation_count)),
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                server_effort_map: Vec::new(),
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
+            max_tokens: spec.max_tokens,
+            requested_reasoning: spec.requested_reasoning,
+        })
+    })
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -323,10 +316,7 @@ async fn successful_runtime_invocation_persists_versioned_session_usage_jsonl() 
     .expect("config wiring");
     let workspace =
         wire_workspace_with_config(args.cwd.as_deref().expect("cwd"), &config).expect("workspace");
-    let gateways = FeatureGateways::new(
-        Arc::new(ReportedUsageProviderFactory::new()),
-        configured_policy(&config),
-    );
+    let gateways = FeatureGateways::new(reported_usage_test_factory(), configured_policy(&config));
     let mut assembly =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await
@@ -466,7 +456,7 @@ async fn build_agent_client_with_gateways_consumes_injected_provider() {
     .expect("write config");
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).expect("write MCP config");
 
-    let provider = Arc::new(CountingProviderFactory::default());
+    let (provider, build_calls) = counting_test_factory();
     let gateways = FeatureGateways::new(provider.clone(), policy::allow_all());
     let args = AgentArgs {
         cwd: Some(root),
@@ -480,7 +470,7 @@ async fn build_agent_client_with_gateways_consumes_injected_provider() {
     let result = build_agent_client_with_gateways(args, gateways, &agents_dir).await;
 
     result.expect("build client with injected gateways");
-    assert_eq!(provider.build_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(build_calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -582,10 +572,7 @@ async fn bootstrap_assembly_carries_scoring_startup_notice_when_scenario_enabled
     .expect("write config");
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).expect("write MCP config");
 
-    let gateways = FeatureGateways::new(
-        Arc::new(CountingProviderFactory::default()),
-        policy::allow_all(),
-    );
+    let gateways = FeatureGateways::new(counting_test_factory().0, policy::allow_all());
     let args = AgentArgs {
         cwd: Some(root),
         api_key: Some("test-api-key".to_string()),
@@ -655,10 +642,7 @@ async fn bootstrap_assembly_has_no_scoring_notice_when_scenarios_disabled() {
     .expect("write config");
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).expect("write MCP config");
 
-    let gateways = FeatureGateways::new(
-        Arc::new(CountingProviderFactory::default()),
-        policy::allow_all(),
-    );
+    let gateways = FeatureGateways::new(counting_test_factory().0, policy::allow_all());
     let args = AgentArgs {
         cwd: Some(root),
         api_key: Some("test-api-key".to_string()),
@@ -694,18 +678,10 @@ async fn bootstrap_assembly_has_no_scoring_notice_when_scenarios_disabled() {
 
 /// 脚本：invocation 0 返回 Bash tool call（长命令触发转后台直绑），
 /// 之后 EndTurn 收口（占位即 tool result）。
-struct DirectLogScriptProvider {
-    invocation_count: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl runtime::ProviderPort for DirectLogScriptProvider {
-    async fn invoke(
-        &self,
-        _request: provider::ProviderRequestData,
-        _cancellation: &dyn runtime::CancellationSignal,
-    ) -> Result<provider::ProviderResponseStream, ProviderError> {
-        let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
+/// 直绑后台脚本流（#2146：实现归 provider test_support）。
+fn direct_log_script_port(invocation_count: Arc<AtomicUsize>) -> Arc<dyn provider::LlmInvokePort> {
+    provider::test_support::scripted_llm(move |_request| {
+        let invocation_index = invocation_count.fetch_add(1, Ordering::SeqCst);
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
                 vec![provider::ProviderContentData::ToolCall {
@@ -748,35 +724,8 @@ impl runtime::ProviderPort for DirectLogScriptProvider {
             chunks.push(provider::ProviderResponseChunk::Usage(usage));
         }
         chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
-        Ok(Box::pin(futures_util::stream::iter(chunks)))
-    }
-}
-
-struct DirectLogProviderFactory {
-    invocation_count: Arc<AtomicUsize>,
-}
-
-impl ProviderFactory for DirectLogProviderFactory {
-    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
-        Ok(ProviderBindingData {
-            provider: Arc::new(DirectLogScriptProvider {
-                invocation_count: self.invocation_count.clone(),
-            }),
-            model: provider::ModelInfo {
-                provider: spec.source_key.clone(),
-                model: spec.model.clone(),
-                supports_tools: true,
-                supports_parallel_tool_calls: true,
-                supports_streaming: true,
-                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
-                server_effort_map: Vec::new(),
-                context_limit: spec.context_window,
-                output_limit: Some(spec.max_tokens as usize),
-            },
-            max_tokens: spec.max_tokens,
-            requested_reasoning: spec.requested_reasoning,
-        })
-    }
+        Ok(provider::test_support::stream_from_chunks(chunks))
+    })
 }
 
 /// L4：真实装配（真 Bash + runtime 派发 + session 级 BackgroundProcess
@@ -836,12 +785,7 @@ async fn l4_real_assembly_direct_log_end_to_end_chain() {
     .expect("config wiring");
     let workspace =
         wire_workspace_with_config(args.cwd.as_deref().expect("cwd"), &config).expect("workspace");
-    let gateways = FeatureGateways::new(
-        Arc::new(DirectLogProviderFactory {
-            invocation_count: Arc::new(AtomicUsize::new(0)),
-        }),
-        configured_policy(&config),
-    );
+    let gateways = FeatureGateways::new(direct_log_test_factory(), configured_policy(&config));
     let _assembly =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await

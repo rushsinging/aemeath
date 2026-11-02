@@ -315,3 +315,6 @@ async fn golden_supersede_missing_reference_rejected_but_suggestion_lands() {
     );
     assert_eq!(memory.inner.stats().await.project_count, 2);
 }
+
+// #2146 密封解锁：实现权归属声明（crate 内）。
+impl crate::sealed::Sealed for MemoryWithEvents {}

@@ -101,6 +101,32 @@ pub enum RuleSpec {
         #[serde(default)]
         exclusions: Vec<Exclusion>,
     },
+    /// #2146 PL trait 实现权登记表：sealed trait 由编译器强制（Sealed
+    /// trait），本断言做双保险与未 seal trait 的实现 crate 白名单校验。
+    /// 未登记 trait 的跨 crate 实现不校验（存量逐步登记）。
+    ImplRegistry {
+        entries: Vec<ImplRegistryEntry>,
+    },
+}
+
+/// 登记表行：trait → 实现权归属。
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImplRegistryEntry {
+    /// trait 简名（impl 语句按简名匹配）。
+    pub trait_name: String,
+    /// 定义方 crate 名（天然允许实现）。
+    pub owner_crate: String,
+    /// 实现权归属：`sealed`（编译期强制，仅 owner 可实现）、
+    /// `injected-host`（宿主接口，登记的宿主 crate 可实现）、
+    /// `comp-bridge`（composition 桥接可实现）、
+    /// `fake-pending`（能力端口，消费方存量 fake 已登记待收敛，
+    /// 收敛完成后应转 sealed）。
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    /// 除 owner/composition 外，允许实现该 trait 的 crate 集合
+    /// （宿主 / 存量 fake 所在 crate）。
+    #[serde(default)]
+    allowed_impl_crates: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -306,6 +332,9 @@ pub fn enforce_rule_with_context(
             required_field,
             exclusions,
         ),
+        RuleSpec::ImplRegistry { entries } => {
+            enforce_impl_registry(rule, relative_file, context, entries)
+        }
     }
 }
 
@@ -1220,4 +1249,76 @@ fn constant_name(line: &str) -> String {
         .next()
         .unwrap_or("")
         .to_owned()
+}
+
+/// #2146 PL trait 实现权登记表断言。
+///
+/// 匹配全仓 `impl [path::]Trait for`（含泛型），按登记表校验实现所在
+/// crate；sealed / injected-host / comp-bridge / fake-pending 均以
+/// `owner + composition + allowed_impl_crates` 为白名单。未登记 trait
+/// 不校验（存量渐进登记，登记即锁）。
+fn enforce_impl_registry(
+    rule: &Rule,
+    relative_file: &str,
+    context: &guards_engine::FileContext,
+    entries: &[ImplRegistryEntry],
+) -> Result<Vec<Violation>> {
+    // 实现 crate 判定：agent/features/<crate>/…、agent/composition/…
+    let impl_crate = if let Some(rest) = relative_file.strip_prefix("agent/features/") {
+        rest.split('/').next().unwrap_or("")
+    } else if relative_file.starts_with("agent/composition/") {
+        "composition"
+    } else {
+        return Ok(Vec::new());
+    };
+    let Some(source) = context.text() else {
+        return Ok(Vec::new());
+    };
+    let mut violations = Vec::new();
+    for (offset, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("impl") {
+            continue;
+        }
+        for entry in entries {
+            let Some(pos) = find_trait_in_impl_head(trimmed, &entry.trait_name) else {
+                continue;
+            };
+            let _ = pos;
+            let allowed = impl_crate == entry.owner_crate
+                || impl_crate == "composition"
+                || entry.allowed_impl_crates.iter().any(|c| c == impl_crate);
+            if !allowed {
+                violations.push(Violation {
+                    rule_id: rule.id.clone(),
+                    location: format!("{relative_file}:{}", offset + 1),
+                    message: format!(
+                        "trait `{}`（owner={}，type={}）实现权不含 crate `{impl_crate}`；\
+                         见登记表（sealed 由编译器强制，其余按 allowed_impl_crates）",
+                        entry.trait_name, entry.owner_crate, entry.entry_type
+                    ),
+                });
+            }
+        }
+    }
+    Ok(violations)
+}
+
+/// 在 impl 头部（到 `for` 前的段）定位 trait 简名。
+fn find_trait_in_impl_head(head: &str, trait_name: &str) -> Option<usize> {
+    let for_pos = head.find(" for ")?;
+    let head_seg = &head[..for_pos];
+    // 形态：impl / impl<T> / impl path::Trait / impl Trait
+    let mut last = None;
+    for seg in head_seg.split(|c: char| c.is_whitespace() || c == '<' || c == '>' || c == ':') {
+        if !seg.is_empty() {
+            last = Some(seg);
+        }
+    }
+    let last = last?;
+    if last == trait_name {
+        Some(head_seg.rfind(trait_name)?)
+    } else {
+        None
+    }
 }

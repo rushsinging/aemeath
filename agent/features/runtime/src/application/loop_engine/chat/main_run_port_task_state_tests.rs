@@ -102,14 +102,16 @@ fn observer_with_task_store(
         .with_context_factory(Arc::new(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 Arc::new(crate::application::run::run_factory_support::doubles::FakeToolCatalog),
-                Arc::new(crate::application::run::run_factory_support::doubles::FakeToolExecution),
-                Arc::new(crate::application::run::run_factory_support::doubles::FakePolicyPort),
+                crate::application::run::run_factory_support::doubles::fake_tool_execution(),
+                crate::application::run::run_factory_support::doubles::fake_policy(),
                 Arc::new(
                     crate::application::run::run_factory_support::doubles::FakeReflectionHistory,
                 ),
                 store,
                 Arc::new(crate::application::run::run_factory_support::doubles::FakeHookPort),
                 Arc::new(crate::ports::UnavailableUsageSink),
+                None,
+                None,
                 None,
                 None,
                 None,

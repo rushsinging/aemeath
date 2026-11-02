@@ -392,6 +392,12 @@ pub struct ReflectionRecord {
     /// 保持 None）；与 apply_result 的去噪计数相互独立。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_swept: Option<u32>,
+    /// 失败明细（诊断用）：截断后的原始错误文案，仅 Failed 记录可能填充。
+    ///
+    /// 只记 `error_category` 无法回答「哪一步失败、上游说了什么」，故在失败
+    /// 落盘时随记录保留详情；旧记录缺该字段按 None 兼容。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<String>,
 }
 
 impl ReflectionRecord {
@@ -408,6 +414,7 @@ impl ReflectionRecord {
             duration_ms: 0,
             coverage_end: None,
             stale_swept: None,
+            error_detail: None,
         }
     }
 
@@ -430,7 +437,15 @@ impl ReflectionRecord {
             duration_ms,
             coverage_end: None,
             stale_swept: None,
+            error_detail: None,
         }
+    }
+
+    /// 附加失败明细（诊断用）。`None` 保持原样，序列化时字段整体省略。
+    #[must_use]
+    pub fn with_error_detail(mut self, detail: Option<String>) -> Self {
+        self.error_detail = detail;
+        self
     }
 
     pub fn safe_summary(&self) -> ReflectionSafeSummary {

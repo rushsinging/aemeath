@@ -766,6 +766,9 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
     }
 }
 
+// #2146 密封解锁：实现权归属声明（crate 内）。
+impl<S: MemoryDatasetStore> crate::sealed::Sealed for MemoryService<S> {}
+
 #[async_trait]
 impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     async fn acquire_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {

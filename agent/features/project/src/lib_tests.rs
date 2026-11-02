@@ -109,7 +109,12 @@ fn production_wiring_exposes_three_views_from_one_backing() {
     let persist = wiring.persist();
 
     assert_eq!(read.current_path_base(), tmp.path());
-    control.change_directory(tmp.path().to_path_buf()).unwrap();
+    control
+        .change_directory(
+            tmp.path().to_path_buf(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
+        .unwrap();
     assert_eq!(read.current_path_base(), tmp.path());
     assert_eq!(
         persist.snapshot().path_base,
@@ -127,7 +132,10 @@ fn derived_wiring_has_isolated_state() {
     std::fs::create_dir_all(&child_path).unwrap();
     child
         .control()
-        .change_directory(child_path.clone())
+        .change_directory(
+            child_path.clone(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
         .unwrap();
 
     assert_eq!(child.read().current_path_base(), child_path);

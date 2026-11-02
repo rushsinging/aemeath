@@ -42,6 +42,7 @@ fn reflection_record_summary_is_safe_and_deterministic() {
         duration_ms: 12,
         coverage_end: None,
         stale_swept: None,
+        error_detail: None,
     };
 
     assert_eq!(
@@ -100,6 +101,7 @@ fn safe_summary_with_content_carries_texts_and_suggestions() {
         duration_ms: 7,
         coverage_end: None,
         stale_swept: None,
+        error_detail: None,
     };
 
     let plain = record.safe_summary();

@@ -192,6 +192,7 @@ fn embedded_init_error_maps_to_typed_wiring_error() {
 #[tokio::test]
 async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() {
     struct StubScoringPort;
+    impl crate::sealed::Sealed for StubScoringPort {}
 
     #[async_trait::async_trait]
     impl ScoringPort for StubScoringPort {
@@ -264,6 +265,9 @@ async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() 
 async fn wrap_calibrated_audited_emits_for_all_four_scenarios_including_unavailable() {
     struct OkPort;
     struct UnavailablePort;
+
+    impl crate::sealed::Sealed for OkPort {}
+    impl crate::sealed::Sealed for UnavailablePort {}
 
     #[async_trait::async_trait]
     impl ScoringPort for OkPort {

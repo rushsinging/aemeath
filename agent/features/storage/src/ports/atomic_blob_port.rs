@@ -7,7 +7,7 @@ use crate::{
 };
 
 #[async_trait]
-pub trait AtomicBlobPort: Send + Sync {
+pub trait AtomicBlobPort: crate::sealed::Sealed + Send + Sync {
     async fn read(
         &self,
         key: &StorageKeyData,

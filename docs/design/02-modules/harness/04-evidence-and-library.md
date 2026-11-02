@@ -32,10 +32,12 @@
 
 投影器只读 dataset（manifest 定位成员、按成员清单流式扫描），NEVER 依赖主进程内存态。
 
+**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。上下文读取 `step/accepted_input/messages` 与 `step/outcome/messages`，包含目标 step 与前后各一步：目标 step 800 字符、单邻居 200 字符、单来源总计 1200 字符，目标事实 MUST 保留；缺失来源显式标记不可用。生产读取 MUST 以 datasets root 为基准验证 session id 是单一 Normal `.dataset` 成员，且 canonicalize 后仍在 root 内（拒绝 `..`、绝对路径与 dataset/成员级 symlink 逃逸）；同一 step 的多 revision 只保留最新副本。
+
 ### 2A.2 投影器（`SessionEvidenceProjector`，harness crate）
 
-- **输入**：sessions 根目录 + 证据流窗口（由 2A.5 流模型决定：checkpoint 游标 + 步长 + 首次 30 天窗口；投影器只处理本次周期分到的 session 段）。
-- **输出**：`EvidenceBundle`（分块进材料，见 2A.3），聚合而非全文——**NEVER 把 ToolResult 原文整段进材料**，每信号类最多携带 2 条有界摘录（对齐 memory 内容预览常量族）。
+- **输入**：sessions 根目录 + 证据流窗口（由 2A.5 流模型决定：checkpoint 游标 + 步长 + 首次 30 天窗口；投影器只处理本次周期分到的 session 段）。run 清单使用只含 `cursor.run_id` 的 serde 探针逐成员读取，未知字段不物化。
+- **输出**：`EvidenceBundle`（分块进材料，见 2A.3），聚合而非全文——**NEVER 把 ToolResult 原文整段进材料**，每信号类最多携带 2 条有界摘录（对齐 memory 内容预览常量族），并附有界 `sources` 供 Compose 回读。
 
 聚合信号类（对齐 §2 信号集 + Harness² 三级优先）：
 
@@ -52,7 +54,7 @@
 
 - `ImprovementMaterials` 增第三字段 `evidence: EvidenceBundle`；`build_block_prompt` 在组件块与 lessons 块之间注入 **evidence 块**（证据是改进依据，lessons 是历史经验）。
 - 证据块字符预算独立（`EVIDENCE_BLOCK_MAX_CHARS`，实施定值，量级 6000）；超限按 2A.2 优先级从低往高裁剪。
-- **提案门禁分阶段**：v1 prompt 明文约束「每条编辑 MUST 指出它回应 evidence 中的哪条信号（引用 signal id）；无法对应的编辑是投机，NEVER 提出」；v2（后续）解析侧校验引用存在性，缺失引用的 edit 拒绝。
+- **提案门禁**：`BlockProposal::Propose.signal_ids` 为结构化必填（空、重复、未知 signal id 整份作废）；合法性在解析后、registry 预检前校验，作废写 `proposal_rejected { stage: signals }`。该门禁替代旧的 reason 文本推断。
 - 空证据兜底：窗口内无 session/无信号时渲染「（近期无执行证据）」，周期照常执行（对齐空 corpus JSON 兜底先例）。
 
 ### 2A.4 lesson 证据信号扩展
@@ -71,7 +73,14 @@ enum SignalKind {
 }
 ```
 
-`run_ref` 扩展承载真实 `run_id`（session dataset 的 run 标识）；采纳回写时优先绑定提案引用的真实信号，`CycleObservation` 仅在无引用时兜底。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
+`run_ref` 保留周期/来源兼容字段；真实来源由 `EvidenceBinding.signal_id + source` 承载（source = session/run/step）。采纳回写只使用结构化 `signal_ids` 对应的真实信号；`CycleObservation` 仅作为遗留/兜底信号，正常 Block 与 Compose 采纳 NEVER 再以空绑定抹掉真实证据。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
+
+### 2A.4a Compose 证据继承与历史快照
+
+- 周期在首个 Block 前保存 Active lesson 快照；Compose 使用该快照对照。Block 采纳会退役旧 lesson 并追加本周期 lesson，采纳后再读取会丢失历史并制造「当前提案 ↔ 自身派生 lesson」的伪候选。
+- Compose 只能修正本周期已采纳的组件；修正未采纳组件整份作废且零落盘。
+- Compose `signal_ids` 可为空，表示继承被仲裁采纳的证据；非空时必须是采纳证据 signal id 的去重子集，未知/重复引用整份作废。
+- Compose 修正回写 lesson 时按被修正组件继承对应 `EvidenceBinding`，保留真实 signal/source；NEVER 用 `CycleObservation + signal_id="" + source=None` 覆盖证据链。
 
 ### 2A.4b 验证阶段（#2080）
 
@@ -115,6 +124,8 @@ enum SignalKind {
 
 **事件流**：`strength_gate { signal_id, tier, rationale }`、`lesson_reviewed { lesson_id, action, rationale }`。
 
+**组件路由事件**：`route_candidates { signal_id, candidates, reason }`、`route_selected { signal_id, component, stage, reason }`、`route_unresolved { signal_id, reason }`、`component_route_rejected { component, signal_ids, message }`、`execution_target_fixed { component, signal_ids }`。
+
 ### 2A.5 数据源流模型（checkpoint · 步长 · 数据源分块，2026-10-23 拍板）
 
 > 修正 v1 语义：分块对象是**数据源（session 证据流）**，NEVER 按组件分块——组件面是每轮提案的编辑对象，不是分块单位。模型对齐 Harness² 的 continual-learning 任务流（`schedule.py::stream_order`）与断点纪律（`runmark.py`）：处理单元推进、完成显式打标、指纹校验复用。
@@ -124,7 +135,7 @@ session 流（按 updated_at 全序）
    │  首次：最近 initial_window_days（默认 30）天活跃 session
    │  之后：从 checkpoint 游标往后
    ▼
-[步长裁剪] 每次跑最多 max_sessions_per_cycle 个 session（防单次跑爆）
+[步长裁剪] 每次跑最多 `evidence_max_runs_per_cycle` 个 run（防单次跑爆）
    ▼
 [数据源分块] 切为若干证据块（每块 = 一段 session/run 证据投影）
    ▼
@@ -139,7 +150,7 @@ session 流（按 updated_at 全序）
 1. **显式推进**：只有「块执行完成且落盘成功」才写游标——输出存在不等于完成（"presence of output is not enough"）；
 2. **指纹校验**：checkpoint 记录处理时的组件树指纹；组件树在游标之后被外部修改（指纹不符）时，当块从游标重跑——NEVER 用陈旧组件状态生成的提案覆盖新改动；
 3. **首次窗口**：无 checkpoint 时默认读最近 30 天（`harness.rsi.evidence_initial_window_days`，可配）活跃 session；
-4. **步长上限**：`harness.rsi.evidence_max_sessions_per_cycle`——每次周期最多处理的 session 数，超出的留待下周期（增量消化，NEVER 一次吞尽）。
+4. **步长上限**：`harness.rsi.evidence_max_runs_per_cycle`（默认 50）——每次周期最多处理的 run 数，超出的留待下周期（增量消化，NEVER 一次吞尽）。旧键 `evidence_max_sessions_per_cycle` 仅作兼容 alias，语义同名新键。
 
 **组件面体积控制**：单块内若组件面过大导致材料超预算，按组件分次提案作为**体积兜底**（v1 的 `chunk_max_components` 语义降级至此并标注待废弃；正确的主分块单位永远是数据源块）。
 
@@ -161,7 +172,7 @@ session 流（按 updated_at 全序）
 ```
 
 - **增量判定**：扫描时按 step `cursor.run_id` 分组，跳过 `processed_run_ids` 集合内的 run——session 更新只新增 run，NEVER 漂移、NEVER 漏读、重读零冗余（run_id 集合判定，不依赖 mtime 可比性）；
-- **步长按 run**：`evidence_max_runs_per_cycle`（每周期最多处理 run 数）；块边界优先切在 **session 边界**（尽量完成一个 session）；单 session run 数超块上限才切（`session_complete: false`，下周期续）；
+- **步长按 run**：`evidence_max_runs_per_cycle`（默认 50，每周期最多处理 run 数）；`evidence_block_runs`（默认 5，每块最多 run 数；旧键 `evidence_block_sessions` 仅兼容 alias）。chunk 数 MUST 按被选中的总 run 数与 session 分布估算：先按总 run 数截断，再在 **session 硬边界**切块——即使块未满也 NEVER 跨 session；单 session 超块上限才在 session 内继续切（`session_complete: false`，下周期续）。真实 corpus 中该规则比简单 `ceil(total_runs / block_runs)` 约多 15% chunk；
 - **调度序**：mtime 只决定处理顺序，NEVER 承担游标语义；
 - **自动清理**：checkpoint 条目只保留 ①未完成 session（`session_complete: false`）②最近 N 条（默认 50）已完整处理的 session——超出的删除（重读风险限于极旧 session，且首次窗口天然限制选集）；盘上已消失的 session 条目即时清理。
 
@@ -175,13 +186,15 @@ session 流（按 updated_at 全序）
 
 ```rust
 struct EvidenceBinding {
-    run_ref: String,       // 来源 run 标识
-    signal: SignalKind,    // 信号类别
-    excerpt: String,       // 行为摘录（有界，预览上限对齐 memory 内容预览常量族）
+    run_ref: String,                    // 周期/来源兼容标识
+    signal: SignalKind,                 // 信号类别
+    excerpt: String,                    // 行为摘录（有界）
+    signal_id: String,                  // 结构化证据引用（旧条目为空）
+    source: Option<EvidenceSourceRef>,  // session/run/step，可回读上下文
 }
 ```
 
-**不变量**：经验库中每条被采纳的 lesson MUST 携带至少一条 EvidenceBinding；RSI 提案中每条 edit MUST 引用至少一条信号证据。无证据的提案在 daemon 自校验阶段拒绝。
+**不变量**：经验库中每条被采纳的 lesson MUST 携带至少一条 EvidenceBinding；RSI Block 提案中每条 edit MUST 通过结构化 `signal_ids` 引用本块证据。空、重复或未知引用整份提案作废。
 
 ## 4. 经验库 corpus
 
@@ -217,5 +230,9 @@ struct LessonEntry {
 
 - 证据装配（2A）：投影器从真实 dataset fixture 提取聚合信号（L2）；材料含 evidence 块、空证据兜底渲染（L2）；真模型在有证据材料下提案引用 signal id、lesson 落盘带真实 SignalKind（e2e，#2046 前置）。
 - 证据不变量：无证据提案被拒（L2）；采纳 lesson 均含 EvidenceBinding（L2 + e2e）。
+- 来源回读：`SessionEventRecord` 保留 session/run/step，`EvidenceSignal.sources` 有界且去重（L2）；scanner 从真实形态 dataset 回读目标 step 与相邻上下文（含 `step/accepted_input` 用户任务）并保证目标 step 在 1200 字符预算内，来源缺失/损坏成员不阻断（L2 + 真实 fixture）。
+- 提案门禁：空、重复、未知 `signal_ids` 整份作废且零落盘副作用；合法引用绑定真实 signal kind 与 source（L2）。
+- Compose 证据继承：修正未采纳组件或引用未知 signal 作废且零落盘；修正已采纳组件时新 lesson 保留原 signal/source（L2）。完整周期必须在首个 Block 前保存 Active lesson 快照，Compose prompt 含历史 lesson 与双方上下文，且不含本周期自身派生 lesson（L2）。
+- dry-run 全链路：虚拟采纳 MUST 进入 Compose，并基于内存 overlay 的叠加终态仲裁；真实组件、lesson、checkpoint 与 signal-history 全部零写入（L2 + 真模型 e2e）。
 - 真模型 e2e：一次完整循环后经验库出现带证据的 Active lesson，且下一次改进周期的材料分块消费到该 lesson。
 - JSON 兜底：空组件树/无信号时 daemon 仍输出合法 JSON 结构（对齐反思空 corpus 兜底教训，NEVER 自然语言解释）。

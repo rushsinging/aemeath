@@ -1,18 +1,32 @@
 //! 证据聚合契约测试（#2048 commit 1）。
 
 use crate::domain::evidence::{
-    aggregate_evidence, validate_evidence_bundle, EvidenceBundle, SessionEventRecord, SignalKind,
+    aggregate_evidence, validate_evidence_bundle, EvidenceBundle, EvidenceSourceRef,
+    SessionEventRecord, SignalKind,
 };
 
 fn tool_event(tool: &str, error: Option<&str>, result_chars: usize) -> SessionEventRecord {
     SessionEventRecord {
         session_id: "s1".into(),
         run_id: "r1".into(),
+        step_id: "step-1".into(),
         tool_name: Some(tool.into()),
         is_error: error.is_some(),
         error_text: error.map(str::to_string),
         result_chars,
         call_fingerprint: None,
+    }
+}
+
+fn tool_event_at(
+    tool: &str,
+    error: Option<&str>,
+    result_chars: usize,
+    step_id: &str,
+) -> SessionEventRecord {
+    SessionEventRecord {
+        step_id: step_id.into(),
+        ..tool_event(tool, error, result_chars)
     }
 }
 
@@ -85,6 +99,7 @@ fn run_outcomes_aggregate_and_empty_stream_yields_empty() {
     let run_event = |outcome: &str| SessionEventRecord {
         session_id: "s1".into(),
         run_id: format!("r-{outcome}"),
+        step_id: format!("step-{outcome}"),
         tool_name: None,
         is_error: false,
         error_text: Some(outcome.into()),
@@ -116,6 +131,7 @@ fn sessions_covered_and_signal_cap() {
         events.push(SessionEventRecord {
             session_id: format!("s{index}"),
             run_id: "r".into(),
+            step_id: "step".into(),
             tool_name: Some("Bash".into()),
             is_error: true,
             error_text: Some("exit code 1: boom".to_string()),
@@ -135,6 +151,7 @@ fn sessions_covered_and_signal_cap() {
                 summary: "x".into(),
                 excerpt: None,
                 occurrences: 1,
+                sources: Vec::new(),
             })
             .collect(),
         sessions_covered: 0,
@@ -172,4 +189,67 @@ fn signals_ordered_by_priority() {
         .unwrap();
     assert!(repeated_pos < retry_pos);
     assert!(retry_pos < oversized_pos);
+}
+
+/// 信号聚合保留可回读 session 的来源，并按 step 去重、限制来源数。
+#[test]
+fn signal_sources_are_deduplicated_and_bounded() {
+    let mut events = Vec::new();
+    for index in 0..6 {
+        events.push(tool_event_at(
+            "Bash",
+            Some("exit code 1: cargo build failed"),
+            10,
+            &format!("step-{index}"),
+        ));
+    }
+    let bundle = aggregate_evidence(&events);
+    let repeated = bundle
+        .signals
+        .iter()
+        .find(|signal| signal.kind == SignalKind::RepeatedFailure)
+        .expect("重复失败信号");
+    assert_eq!(repeated.occurrences, 6);
+    assert_eq!(repeated.sources.len(), 3, "来源引用必须有界");
+    assert_eq!(
+        repeated.sources.first(),
+        Some(&EvidenceSourceRef {
+            session_id: "s1".into(),
+            run_id: "r1".into(),
+            step_id: "step-0".into(),
+        })
+    );
+    assert!(repeated
+        .sources
+        .iter()
+        .all(|source| source.step_id.starts_with("step-")));
+}
+
+/// 旧证据 JSON 没有来源字段时按空来源读取，新来源字段可 round-trip。
+#[test]
+fn evidence_signal_sources_default_and_round_trip() {
+    let legacy: crate::domain::evidence::EvidenceSignal =
+        serde_json::from_str(
+            r#"{"kind":"run_outcome","signal_id":"run_outcome:done","summary":"完成","excerpt":null,"occurrences":1}"#,
+        )
+        .expect("旧信号必须兼容");
+    assert!(legacy.sources.is_empty());
+
+    let source = EvidenceSourceRef {
+        session_id: "s1".into(),
+        run_id: "r1".into(),
+        step_id: "step-1".into(),
+    };
+    let current = crate::domain::evidence::EvidenceSignal {
+        kind: SignalKind::RunOutcome,
+        signal_id: "run_outcome:done".into(),
+        summary: "完成".into(),
+        excerpt: None,
+        occurrences: 1,
+        sources: vec![source],
+    };
+    let serialized = serde_json::to_string(&current).expect("序列化");
+    let parsed: crate::domain::evidence::EvidenceSignal =
+        serde_json::from_str(&serialized).expect("round-trip");
+    assert_eq!(parsed, current);
 }

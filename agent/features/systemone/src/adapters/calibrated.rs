@@ -131,3 +131,6 @@ fn weighted_expectation(probabilities: &[f64]) -> f64 {
 #[cfg(test)]
 #[path = "calibrated_tests.rs"]
 mod tests;
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for CalibratedScoringAdapter {}

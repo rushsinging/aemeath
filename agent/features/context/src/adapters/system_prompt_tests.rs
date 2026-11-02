@@ -201,6 +201,10 @@ async fn background_block_follows_threshold() {
 /// 会话级组装：块间以空行拼接，且 execution discipline 位于末尾。
 #[tokio::test]
 async fn session_prompt_includes_discipline_last() {
+    // 隔离 guidance：不读真实工作区默认文件（AGENTS.md 尾空行曾致本地红
+    // CI 绿的环境泄漏——与本文件其它测试同 fixture 模式，顺手修复）。
+    let fixture = GuidanceFixture::new("assembly_discipline_last");
+    fixture.write("_default.md", "discipline-last guidance body");
     let assembly = SystemPromptAssembly::new(None);
     let inputs = SessionPromptInputsData {
         workspace_root: std::path::PathBuf::from("/tmp/pl-session-project"),

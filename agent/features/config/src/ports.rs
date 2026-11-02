@@ -47,7 +47,7 @@ pub trait ConfigWriter: Send + Sync {
 }
 
 #[async_trait]
-pub trait ProjectConfigParticipant: Send + Sync {
+pub trait ProjectConfigParticipant: crate::sealed::Sealed + Send + Sync {
     async fn prepare_for_project(
         &self,
         location: &ProjectConfigLocationData,

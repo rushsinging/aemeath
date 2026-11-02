@@ -155,6 +155,7 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
         noop_background_source(),
         &snapshot,
         env_temp.path(),
+        "session_test",
         // 大窗口下比例收紧不生效，保持该测试原有的默认策略语义
         1_000_000,
     )

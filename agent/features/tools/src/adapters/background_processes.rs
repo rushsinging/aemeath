@@ -9,10 +9,10 @@ use crate::domain::background_process_port::{
 use crate::domain::constants::WATCH_TOOL_TIMEOUT_SECS;
 use crate::domain::types::background_processes::{
     resolve_watch_wait_secs, BackgroundProcessDetailData, BackgroundProcessListInput,
-    BackgroundProcessListResult, BackgroundProcessLogsInput, BackgroundProcessLogsResult,
-    BackgroundProcessStatusInput, BackgroundProcessStatusResult, BackgroundProcessStopInput,
-    BackgroundProcessStopResult, BackgroundProcessSummaryData, BackgroundProcessWatchInput,
-    BackgroundProcessWatchOutcome, BackgroundProcessWatchResult,
+    BackgroundProcessListResult, BackgroundProcessLogData, BackgroundProcessLogsInput,
+    BackgroundProcessLogsResult, BackgroundProcessStatusInput, BackgroundProcessStatusResult,
+    BackgroundProcessStopInput, BackgroundProcessStopResult, BackgroundProcessSummaryData,
+    BackgroundProcessWatchInput, BackgroundProcessWatchOutcome, BackgroundProcessWatchResult,
 };
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
@@ -206,10 +206,42 @@ impl TypedTool for BackgroundProcessLogsTool {
             .read_task_log(&args.task_id, args.cursor, max_bytes)
         {
             Some(log) => {
-                TypedToolResult::success(log.text.clone(), BackgroundProcessLogsResult { log })
+                let text = render_log_text(&log);
+                TypedToolResult::success(text, BackgroundProcessLogsResult { log })
             }
             None => TypedToolResult::error(format!("Task not found: {}", args.task_id)),
         }
+    }
+}
+
+/// 日志读结果自述：窗口字节区间 + 未包含字节数 + 全量日志文件路径。
+///
+/// 缺省游标的尾部窗口只含最后 `max_bytes` 字节；不点明会让读方把
+/// 「开头是半截内容」误判为文件损坏或落盘截断。日志文件是全量真相，
+/// 因此**MUST** 显式给出路径并提示直接读文件，而不是反复调本工具。
+fn render_log_text(log: &BackgroundProcessLogData) -> String {
+    let mut header = format!(
+        "[log bytes {}..{} of {}]",
+        log.start_offset, log.cursor, log.total_written
+    );
+    if log.start_offset > 0 {
+        header.push_str(&format!(
+            "\n{} earlier bytes are NOT included in this text (tail window only)",
+            log.start_offset
+        ));
+    }
+    if let Some(path) = log.log_file.as_deref() {
+        header.push_str(&format!(
+            "\nfull log file: {path} (complete and not truncated — read that file directly for the whole log)"
+        ));
+    }
+    if log.start_offset > 0 {
+        header.push_str("\npass cursor=0 to read from the beginning of this log");
+    }
+    if log.text.is_empty() {
+        header
+    } else {
+        format!("{header}\n{}", log.text)
     }
 }
 
@@ -363,6 +395,8 @@ fn attach_watch_log_tail(
     let Some(log) = access.read_task_log(task_id, None, body_budget) else {
         return;
     };
+    result.log_start_offset = log.start_offset;
+    result.log_file = log.log_file.clone();
     result.log_tail = clip_to_char_budget(&log.text, body_budget);
 }
 
@@ -372,7 +406,7 @@ fn watch_text(result: &BackgroundProcessWatchResult) -> String {
         BackgroundProcessWatchOutcome::StillRunning => "still_running",
         BackgroundProcessWatchOutcome::Cancelled => "cancelled",
     };
-    let header = format!(
+    let mut header = format!(
         "{} outcome={} [{}] {} — log bytes {}",
         result.detail.summary.task_id,
         outcome,
@@ -380,6 +414,17 @@ fn watch_text(result: &BackgroundProcessWatchResult) -> String {
         result.detail.summary.goal,
         result.detail.total_written_bytes
     );
+    if result.log_start_offset > 0 {
+        header.push_str(&format!(
+            " (tail window from byte {})",
+            result.log_start_offset
+        ));
+    }
+    if let Some(path) = result.log_file.as_deref() {
+        header.push_str(&format!(
+            "\nfull log file: {path} (complete and not truncated — read that file directly)"
+        ));
+    }
     if result.log_tail.is_empty() {
         return header;
     }

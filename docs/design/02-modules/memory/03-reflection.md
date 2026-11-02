@@ -6,7 +6,7 @@
 
 ## 1. 定位
 
-Reflection 是 Memory BC 内部的**领域服务**——它不调 LLM，不依赖 ProviderPort。它负责：
+Reflection 是 Memory BC 内部的**领域服务**——它不调 LLM，不依赖 LlmInvokePort。它负责：
 
 1. **构建 prompt**：把当前项目记忆 + 最近对话摘要组装为反思 prompt（纯函数，i18n）。
 2. **解析 output**：把 LLM 返回的 JSON 解析为 `ReflectionOutput`（含 MemorySuggestion）。
@@ -16,7 +16,7 @@ Reflection 是 Memory BC 内部的**领域服务**——它不调 LLM，不依�
 Runtime 负责：
 - **触发判断与 Run 归属**：interval / manual / pre-compact 三种来源的判定；三者统一进入 engine 的反思阶段，由 Runtime loop 状态机完成 `RunStatus::Reflecting` 的进入与返回转换——Interval/PreCompact 在 Conversation Run 内相位往返，Manual 创建 `RunIntent::ManualReflection` 的独立 Run。
 - **状态与 Activity 发布**：`Reflecting` 状态转移、Reflection activity 的发布与终态收口由 Runtime loop 状态机（engine 反思阶段）唯一负责；Activity 是结构化观测事实，不是业务状态机。
-- **LLM 调用**：经 ProviderPort 发起独立 LLM 调用，传入 Memory BC 构建的 prompt。
+- **LLM 调用**：经 LlmInvokePort 发起独立 LLM 调用，传入 Memory BC 构建的 prompt。
 - **历史提交**：将完成结果交给 Memory-owned history adapter；完成后只发布不含正文的计数事实。
 
 ### 职责边界
@@ -29,10 +29,10 @@ Runtime 负责：
 | 触发时机判定 | Runtime | interval / manual / pre-compact |
 | `Reflecting` 状态转换与收口 | Runtime loop 状态机 | `BeginReflection` 进入、`ReflectionCompleted` 返回进入前状态；`Reflecting` 非终态 |
 | Reflection activity 发布与终态收口 | Runtime loop 状态机 | engine 反思阶段唯一负责；观测失败只记 warn，不阻断反思 |
-| LLM 调用 | Runtime | 经 ProviderPort |
+| LLM 调用 | Runtime | 经 LlmInvokePort |
 | Reflection 配置消费 | 双方 | Config 下发 MemoryConfig，Runtime 读触发条件，Memory 读 apply 策略 |
 
-Memory BC **不依赖** ProviderPort——这保持 Context Map 一致（Memory 无 Memory→Provider 边）。
+Memory BC **不依赖** LlmInvokePort——这保持 Context Map 一致（Memory 无 Memory→Provider 边）。
 
 ## 2. MemorySuggestion
 
@@ -525,7 +525,7 @@ struct ReflectionConfig {
 
 - `None`：Reflection 使用与主对话相同的 LLM 模型。
 - `Some("model-id")`：使用指定模型（如更便宜的模型跑反思）。
-- Runtime 读取此配置，经 ProviderPort 选择对应 client。
+- Runtime 读取此配置，经 LlmInvokePort 选择对应 client。
 
 ## 10. 相关文档
 
@@ -533,7 +533,7 @@ struct ReflectionConfig {
 - 领域模型（MemoryEntry / MemorySuggestion）：[01-domain-model.md](01-domain-model.md)
 - 检索与注入：[02-retrieval-and-injection.md](02-retrieval-and-injection.md)
 - 端口与适配器（ReflectionWorkflow / history）：[04-ports-and-adapters.md](04-ports-and-adapters.md)
-- Runtime 端口（ProviderPort）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Runtime 端口（LlmInvokePort）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map（Memory 不依赖 Provider）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 
 ## 修改历史

@@ -1,6 +1,6 @@
 //! ProviderFactory — Runtime-owned factory contract for building provider bindings.
 //!
-//! Composition implements `ProviderFactory` to create `ProviderPort` instances
+//! Composition implements `ProviderFactory` to create `LlmInvokePort` bindings
 //! from a `ProviderBuildSpecData` without depending on provider-internal config
 //! resolution. The factory owns the provider client construction and capability
 //! construction; Runtime only supplies the spec.
@@ -8,12 +8,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ports::provider_port::{ModelInfo, ProviderError, ProviderPort, ReasoningLevel};
+use crate::ports::provider_port::{LlmInvokePort, ModelInfo, ProviderError, ReasoningLevel};
 
 // ─── ProviderBuildSpecData ──────────────────────────────────────
 
 /// Specification sufficient for Composition to construct a provider client
-/// via provider config options and wrap it in a `ProviderPort`.
+/// via provider config options and expose it as an `LlmInvokePort`.
 ///
 /// All fields map directly to provider config options except `context_window`, which
 /// feeds the `ModelInfo.context_limit` constructed alongside the client.
@@ -46,12 +46,15 @@ pub struct ProviderBuildSpecData {
 
 // ─── ProviderBindingData ────────────────────────────────────────
 
-/// An active provider binding: a ready-to-use `ProviderPort` together with the
+/// An active provider binding: a ready-to-use `LlmInvokePort` together with the
 /// `ModelInfo` and constraints that were used to build it.
 #[derive(Clone)]
 pub struct ProviderBindingData {
-    /// The built provider port.
-    pub provider: Arc<dyn ProviderPort>,
+    /// LLM 调用端口（#2146 单端口）：同一 `LlmClient` 同时服务流式
+    /// （`invoke_stream`，会话对话/反思）与文本（`invoke_text` 默认方法，
+    /// compact 等）——能力与 `model` 恒同 transport，跨 driver 的
+    /// `context.compact_model` 配置天然匹配。
+    pub provider: Arc<dyn LlmInvokePort>,
     /// 该 binding 绑定模型的完整元数据（身份 + 能力——config/catalog 投影）。
     pub model: ModelInfo,
     /// Maximum output tokens for invocations through this binding.

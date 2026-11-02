@@ -86,7 +86,7 @@ enum MemoryStorageErrorKind {
 
 - **MUST NOT** 返回内部 Memory service、dataset adapter 实例或文件路径。
 - **MUST NOT** 暴露文件 I/O 细节（路径、序列化格式）。
-- **MUST NOT** 依赖 ProviderPort（Reflection 的 LLM 调用由 Runtime 编排）。
+- **MUST NOT** 依赖 LlmInvokePort（Reflection 的 LLM 调用由 Runtime 编排）。
 - **MUST** 所有可能落盘的 mutation 传播结构化 `MemoryError`；permission、disk-full、serialization 与 atomic-write 失败 **NEVER** 被压成 `false` / `()` 或假成功。Memory BC 把 Storage adapter 错误 ACL 为稳定 `MemoryStorageErrorKind`，**NEVER** 泄漏具体 adapter error。
 - **MUST** Storage 返回 `CorruptTransaction` 时映射为同名稳定类别并 fail closed；其 quarantine receipt 只进入诊断 / 恢复 UI，Memory **NEVER** 把被隔离的 dataset 当作空 store。领域 JSON/schema 校验失败在 open 路径映射为 `MemoryOpenerError::CorruptDataset`（codec 内部仍有 `ActiveStoreCorrupt` / `ArchiveStoreCorrupt` 区分 active/archive，但 **NEVER** 泄漏到公开 `MemoryOpenerError`），**NEVER** 与 Storage crash-protocol corruption 混为一类。
 - **MUST** `open_memory` 在返回前完成 dataset recovery、eager-read 与验证；`MemoryService` 此后持有唯一已验证的 in-memory active + archive state。`retrieve_for_inject` / `search` / `list` / `stats` 只读该 state，**NEVER** 做文件 I/O、lazy decode 或隐式 touch，因此可以返回非 `Result` 的纯查询值。

@@ -88,3 +88,6 @@ impl MemoryEventAppendPort for NoopEventAppend {
         Ok(())
     }
 }
+
+// #2146 密封解锁：实现权归属声明（crate 内）。
+impl crate::sealed::Sealed for NoOpMemory {}

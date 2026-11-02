@@ -64,7 +64,7 @@
 |---|---|---|---|
 | Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 runtime 的 SessionSwitchCoordinator（resume 协调，#2025）与 Runtime（SDK / idle Session 命令）。Session list、resume、export、import、metadata update 与 delete 仅接受当前 `ProjectIdentity`（Git 以 common-dir、非 Git 以 canonical root 匹配）；resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
 | Workflow | C/S（Runtime 是 Customer，Workflow 是 Supplier） | Workflow-owned Graph tools façade：六个始终出现在 LLM Tool Schema 的 `workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update` / `workflow_replan` | 六个 Graph tool 经 Runtime 通用 ToolOrchestration 路由，业务校验与状态迁移归 Workflow Kernel（MVP 无 revision/CAS）；Runtime 每轮按 Session 最新状态组织上下文，**NEVER** 每次 Model Invocation 向 Workflow 发专用查询、**NEVER** 解释节点语义、计算下一节点或推进 Graph；Workflow **NEVER** 调用 LLM、执行 Tool、创建 Run 或驱动 Run 生命周期，也**不是**反向约束 Run 上下文的查询端口；用户不直接操作 Workflow，语义操作只由 LLM 经 Tool 完成 |
-| Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
+| Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `LlmInvokePort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
 | Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Tools 同时发布仅含元数据的 `SkillCatalogPort` 与调用时按 identity 加载单个正文的 `SkillLoadPort`。唯一稳定 `Skill` Tool 只经 ToolExecution 执行；Context 仅消费 Skill metadata directory，Runtime 只编排 `SkillRequest` 与 ToolExecution、不读取 Skill 文件。Skill slash route 与客户端补全由同一个版本化全量快照原子派生；普通 Command 只按 SnapshotQuery / ApplicationControl 确定性路由并保持稳定。#1294 后 Composition 一次构造 filesystem backing 并分发窄端口；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
@@ -73,7 +73,7 @@
 | Application Version Control | C/S | Runtime-owned outbound `ApplicationVersionPort` | 该 seam 隔离 Runtime 的 Application Control policy 与版本模块的 source/cache/installer detail；CLI/TUI 不直接持有更新模块内部端口 |
 | Audit | **Pub/Sub**（Runtime 是 Supplier） | Runtime-owned outbound `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit adapter 独立持久化和查询，不影响 Runtime。**v0.1.0 范围：仅 Usage metadata 持久化与查询**；Cost / Pricing 聚合属 **Future** |
 
-> 本表只登记消费方 outbound SPI 的**关系与所有权**，**NEVER** 充当其战术签名真相源：`ProviderPort`（以及 `ApplicationVersionPort`、`UsageSink` 等同类 Runtime-owned outbound port）的唯一签名以 [Runtime 端口与适配器](../02-modules/runtime/06-ports-and-adapters.md) 为真相源；供应方模块设计（如 [Provider 模块设计](../02-modules/provider/README.md)）只描述其 adapter 如何实现该消费方签名与内部 ACL，**NEVER** 被视为签名真相源、**NEVER** 另行复制或改写该签名。
+> 本表只登记消费方 outbound SPI 的**关系与所有权**，**NEVER** 充当其战术签名真相源：`LlmInvokePort`（以及 `ApplicationVersionPort`、`UsageSink` 等同类 Runtime-owned outbound port）的唯一签名以 [Runtime 端口与适配器](../02-modules/runtime/06-ports-and-adapters.md) 为真相源；供应方模块设计（如 [Provider 模块设计](../02-modules/provider/README.md)）只描述其 adapter 如何实现该消费方签名与内部 ACL，**NEVER** 被视为签名真相源、**NEVER** 另行复制或改写该签名。
 
 > **SubAgent 不在此表**：SubAgent 的派生与执行是 Agent Runtime 的核心能力（子 Run 也是 Runtime 的执行实例），不是一条对外端口。
 
@@ -164,7 +164,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-12 | 补充 Runtime Application Control → Application Version Control 出站边界 | #793 |
 | 2026-07-12 | Policy 收缩为 AllowAll-only 实现；Hook 单端口；Audit MVP 收缩为非阻塞 UsageSink，并明确 Audit→Storage AppendLog 语义 | #790 |
 | 2026-07-14 | 移除不可闭合的 Runtime → Project 端口，改由 Composition internal Run scope 保留隔离 wiring，并补齐 Tool / Context Management 直连 Project 与 TUI ACL 投影边 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 修复评审 #11-#13：入站 C/S 表改为 CLI/TUI 是 Customer、Runtime 是 Supplier；Server 移出 v0.1.0 present 表、只保留于 §9 Future；新增 §4 表后说明，消费方 outbound SPI（如 `ProviderPort`）签名真相源统一指向 Runtime 端口与适配器，供应方模块设计不再称签名真相 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 修复评审 #11-#13：入站 C/S 表改为 CLI/TUI 是 Customer、Runtime 是 Supplier；Server 移出 v0.1.0 present 表、只保留于 §9 Future；新增 §4 表后说明，消费方 outbound SPI（如 `LlmInvokePort`）签名真相源统一指向 Runtime 端口与适配器，供应方模块设计不再称签名真相 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §3 入站 C/S 表补齐 REPL 为 `AgentClient` 的 v0.1.0 Customer（与 CLI / TUI 并列，Server 仍只在 §9 Future），统一 Agent Runtime 是 AgentClient Supplier 的措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #927 明确跨 BC identity 发布机制：语义所有权不变，`SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 经 SDK 发布唯一 UUIDv7 newtype，Audit 与 Context/Runtime 复用而不重复定义 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | 持久化边对齐 AtomicDataset 现状：独立 OHS/adapter、Prepared commit point、roll-forward 与 typed corruption；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |

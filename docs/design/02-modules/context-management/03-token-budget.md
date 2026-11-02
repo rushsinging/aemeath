@@ -142,14 +142,14 @@ Token Budget 不建立聚合全部配置的大型 struct。预算由两类单一
 | 文本 / JSON / 图像估算 | Context-owned 纯函数与局部常量 | `token_budget` |
 | compact family 最近窗口 | 最近 3 个完整 Run | compact 读模型策略 |
 
-compact 的两个窗口 **MUST** 分开归属：`summary_budget` 由**注入窗口**（本 Run `context_size`，即 summary 最终注入的主对话模型）决定；Map 单块目标 `compact_chunk_target_tokens` 与 previous checkpoint 嵌入预算由 **compact 调用模型窗口**决定。两者相同时（未配置 `context.compact_model`）语义与既有行为一致。compact 模型窗口由 Runtime 解析并经 `CompactGenerator::compact_context_window()` 暴露，Context **NEVER** 自行读取模型目录或 Config 推导该窗口。
+compact 的两个窗口 **MUST** 分开归属：`summary_budget` 由**注入窗口**（本 Run `context_size`，即 summary 最终注入的主对话模型）决定；Map 单块目标 `compact_chunk_target_tokens` 与 previous checkpoint 嵌入预算由 **compact 调用模型窗口**决定。两者相同时（未配置 `context.compact_model`）语义与既有行为一致。compact 模型窗口由 Runtime `CompactModelResolver` 解析并投影为 `CompactLlmBinding.compact_context_window`（#2142），Context **NEVER** 自行读取模型目录或 Config 推导该窗口。
 
 ## 4. Effective Context Window
 
 ### 4.1 公式
 
 ```
-resolved         = ProviderPort.resolve_invocation_options(model, requested)
+resolved         = model.resolve_reasoning(requested)   # 现存 clamp 入口（#2032）
 max_output       = resolved.max_output_tokens
 reserved_context = context_size * 5%
 effective        = context_size - reserved_context - max_output
@@ -307,7 +307,7 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 | tool schemas | 2-8% | ToolCatalogPort snapshot |
 | 对话历史 | 60-85% | ChatChain（经 compact 管控） |
 | memory 注入 | <1% | Context memory integration（Config 上限 ∩ 剩余 budget） |
-| response | max_output_tokens | ProviderPort |
+| response | max_output_tokens | LlmInvokePort |
 
 主动管控分两类：
 
@@ -322,7 +322,7 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 
 - Compact 家族：[02-compact.md](02-compact.md)
 - Memory 注入：[05-memory-injection.md](05-memory-injection.md)
-- Runtime 端口（ProviderPort capabilities）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Runtime 端口（LlmInvokePort capabilities）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 - Run 状态机（Compacting 状态触发）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 

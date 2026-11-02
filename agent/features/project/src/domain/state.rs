@@ -178,24 +178,34 @@ fn resolve_worktree_base(base: Option<&str>) -> &str {
 }
 
 impl WorkspaceState {
-    /// 变更当前工作目录（path_base），必须位于 workspace root 内。
-    pub fn change_directory(&mut self, path: PathBuf) -> Result<(), share::error::DomainError> {
+    /// 变更当前工作目录（path_base）。
+    ///
+    /// 非 `allow_outside_workspace` 授权时必须位于 workspace root 内；
+    /// 授权越界（AllowAll 下 bash cd 出工作区）时 path_base 跟随、
+    /// workspace_root 保持不变。
+    pub fn change_directory(
+        &mut self,
+        path: PathBuf,
+        auth: share::tools_vocab::AuthorizationContext,
+    ) -> Result<(), share::error::DomainError> {
         let canonical = path
             .canonicalize()
             .map_err(|_| WorkspaceError::PathNotFound(path.clone()))?;
         if !canonical.is_dir() {
             return Err(WorkspaceError::NotDirectory(canonical).into());
         }
-        let canonical_root = self
-            .workspace_root
-            .canonicalize()
-            .map_err(|_| WorkspaceError::PathNotFound(self.workspace_root.clone()))?;
-        if !canonical.starts_with(&canonical_root) {
-            return Err(WorkspaceError::PathOutsideWorkspaceRoot {
-                path: canonical,
-                root: canonical_root,
+        if !auth.allow_outside_workspace {
+            let canonical_root = self
+                .workspace_root
+                .canonicalize()
+                .map_err(|_| WorkspaceError::PathNotFound(self.workspace_root.clone()))?;
+            if !canonical.starts_with(&canonical_root) {
+                return Err(WorkspaceError::PathOutsideWorkspaceRoot {
+                    path: canonical,
+                    root: canonical_root,
+                }
+                .into());
             }
-            .into());
         }
         self.path_base = canonical;
         Ok(())
@@ -460,7 +470,22 @@ fn restore_identity(
     let path_base_fallback_eligible =
         dto.worktree_kind == WorktreeKind::Primary && dto.context_stack.is_empty();
     let path_base = match restore_path(&dto.path_base) {
-        Ok(path) => path,
+        Ok(path) => match validate_containment(&path, &workspace_root) {
+            Ok(()) => path,
+            // AllowAll 下 bash cd 出工作区的 path_base 被持久化后越界；
+            // restore 发生在会话边界（无逐调用授权上下文），回退 workspace_root。
+            Err(WorkspaceRestoreError::PathOutsideWorkspaceRoot { path, .. })
+                if path_base_fallback_eligible =>
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "workspace restore path_base fallback: persisted path_base={path} 越出 workspace_root，回退 workspace_root={}",
+                    workspace_root.display()
+                );
+                workspace_root.clone()
+            }
+            Err(restore_error) => return Err(restore_error),
+        },
         Err(WorkspaceRestoreError::PathNotFound { path }) if path_base_fallback_eligible => {
             log::warn!(
                 target: crate::LOG_TARGET,
@@ -471,7 +496,6 @@ fn restore_identity(
         }
         Err(restore_error) => return Err(restore_error),
     };
-    validate_containment(&path_base, &workspace_root)?;
     Ok(RestoredPaths {
         initial_cwd,
         workspace_root,

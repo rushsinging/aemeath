@@ -8,24 +8,15 @@ impl runtime::ProviderFactory for TestProviderFactory {
         &self,
         spec: runtime::ProviderBuildSpecData,
     ) -> Result<runtime::ProviderBindingData, provider::ProviderError> {
-        struct UnusedPort;
-        #[async_trait::async_trait]
-        impl runtime::ProviderPort for UnusedPort {
-            // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-            async fn invoke(
-                &self,
-                _request: provider::ProviderRequestData,
-                _cancellation: &dyn runtime::CancellationSignal,
-            ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
-                Err(provider::ProviderError::fatal(
-                    provider::ProviderErrorKind::UpstreamUnavailable,
-                    "unused test provider",
-                ))
-            }
-        }
+        // #2146：LlmInvokePort 只允许 provider 实现；测试用脚本化端口。
+        let port = provider::test_support::scripted_llm(|_request| {
+            Err(provider::ProviderError::fatal(
+                provider::ProviderErrorKind::UpstreamUnavailable,
+                "unused test provider",
+            ))
+        });
         Ok(runtime::ProviderBindingData {
-            provider: Arc::new(UnusedPort),
+            provider: port,
             model: provider::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -140,61 +131,6 @@ fn test_agent_runner_assembly(
 
 struct NoopReflectionHistory;
 
-struct NoopSessionManagement;
-
-#[async_trait::async_trait]
-impl context::SessionManagementPort for NoopSessionManagement {
-    async fn load_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::session::CanonicalSession, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-
-    async fn list_for_project(
-        &self,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<sdk::SessionItemList>, context::SessionManagementError> {
-        Ok(Vec::new())
-    }
-
-    async fn export_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-
-    async fn import_for_project(
-        &self,
-        _bytes: &[u8],
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<sdk::SessionItemList, context::SessionManagementError> {
-        Err(context::SessionManagementError::Storage(
-            "test port".to_string(),
-        ))
-    }
-
-    async fn update_metadata_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-        _update: context::session::SessionMetadata,
-    ) -> Result<sdk::SessionItemList, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-
-    async fn delete_for_project(
-        &self,
-        id: &str,
-        _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
-    }
-}
-
 #[async_trait::async_trait]
 impl memory::api::ReflectionHistoryQuery for NoopReflectionHistory {
     async fn list(
@@ -241,7 +177,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         storage::SafeStorageRoot::open(temp.path()).unwrap(),
     );
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(NoopSessionManagement);
+        Arc::new(context::test_support::UnavailableSessionManagement);
     let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task.persist())),
@@ -283,6 +219,8 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         access.clone(),
         hook_runner.clone(),
         Arc::new(runtime::UnavailableUsageSink),
+        None,
+        None,
         None,
         None,
         None,

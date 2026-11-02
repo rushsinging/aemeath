@@ -11,7 +11,7 @@ Provider 位于 Agent Runtime 与外部 LLM API 之间，是最重的防腐层�
 
 ```text
 Agent Runtime
-    │ ProviderPort + Runtime-owned invocation language
+    │ LlmInvokePort + Runtime-owned invocation language
     ▼
 Provider adapter
     ├── capability resolution
@@ -28,7 +28,7 @@ Provider 的价值不是统一所有供应商特性，而是把差异收敛到�
 
 ## 2. 核心决策
 
-1. **Runtime 拥有出站端口**：`ProviderPort` 是 Agent Runtime 的出站端口，Provider 提供实现；端口签名不得由 HTTP client 或供应商 SDK 反向塑形。
+1. **Runtime 拥有出站端口**：`LlmInvokePort` 是 Agent Runtime 的出站端口，Provider 提供实现；端口签名不得由 HTTP client 或供应商 SDK 反向塑形。
 2. **ACL 全部内聚于 Provider**：供应商 request/response/SSE DTO、header、URL、错误 body 和 tool-call wire 结构不得越过 adapter 边界。
 3. **一次 invoke = 一次语义调用尝试**：Provider 不透明发起第二次模型调用；跨调用重试、退避、compact 后重试、降级与故障转移归 Runtime。
 4. **流与终结态分离**：内容、thinking、tool arguments 和 usage 以有序 delta 输出；完成或结构化错误只能终结一次，终结后不得再发 delta。
@@ -36,7 +36,7 @@ Provider 的价值不是统一所有供应商特性，而是把差异收敛到�
 6. **原始 Usage，不计算 Cost**：Provider 提取供应商返回的 token usage；Audit 拥有 pricing、cost 与聚合。
 7. **共享不可变传输，不共享调用期可变状态**：HTTP 连接池、endpoint 与 driver 可安全共享；model、max output tokens、reasoning 等必须固定在独立 Invocation Scope 中。
 8. **Main/Sub 隔离是状态隔离**：Main/Sub 各自拥有独立调用配置和 Invocation Scope，不要求复制底层 HTTP client；任何 `set_* → 调用 → restore` 模式均不成立。
-9. **Composition Root 唯一装配**：driver、凭证、endpoint、transport pool 与 ProviderPort adapter 只在组合根接线。
+9. **Composition Root 唯一装配**：driver、凭证、endpoint、transport pool 与 LlmInvokePort adapter 只在组合根接线。
 
 ## 3. 责任边界
 
@@ -52,7 +52,7 @@ Provider 的价值不是统一所有供应商特性，而是把差异收敛到�
 
 “Provider 不负责跨调用重试”不等于忽略网络机制。连接建立、协议解码和取消必须正确；一旦失败，Provider 应返回稳定错误类别和 retryable 提示，由 Runtime 决定是否开始下一次 invocation attempt。
 
-> **当前落地（#903/#1033/#905/#907）**：#903 已把 Provider→Runtime 生产链切换为 pull-based `InvocationStream`，Runtime Main/Sub/Reflection/Compact 主动 poll 封闭事件语言。#907 已完成最终 Adapter 收口：Runtime Main/Sub/Reflection/Compact 只依赖 Runtime-owned `ProviderBinding` / `ProviderFactory` / `ProviderPort` 与 Provider Published Language，**NEVER** 直接持有具体 client、pool 或 driver；具体 provider 构造独占在 `agent/composition`（`provider::composition` 模块），非 Composition crate **NEVER** 引用构造符号或穿透 `provider::composition`。旧 `LegacyStreamSink` / gateway callback wrapper / client pool / `set_*→调用→restore` 路径已**物理清零**（符号删除、守卫锁定回流）；Provider driver 内部保留的 `InvocationSink`（`pub(crate)` trait）是私有 decoder seam，不属于 legacy 也不再经跨 BC 暴露。#905 已关闭并迁移跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）所有权到 Runtime。#1033 已把单次 attempt 的机械流程收敛进 crate-private `adapters::http_attempt::HttpAttemptExecutor`。这些落地**不代表** Runtime 已接线 resolver——[#1142](https://github.com/rushsinging/aemeath/issues/1142) 的 `build_window` 前 resolver 接线仍延期，**NEVER** 冒充完成；详见 [Migration Governance §4](../../03-engineering/03-migration-governance.md#4-provider-现状缺口s2-代码盘点)。
+> **当前落地（#903/#1033/#905/#907）**：#903 已把 Provider→Runtime 生产链切换为 pull-based `InvocationStream`，Runtime Main/Sub/Reflection/Compact 主动 poll 封闭事件语言。#907 已完成最终 Adapter 收口：Runtime Main/Sub/Reflection/Compact 只依赖 Runtime-owned `ProviderBinding` / `ProviderFactory` / `LlmInvokePort` 与 Provider Published Language，**NEVER** 直接持有具体 client、pool 或 driver；具体 provider 构造独占在 `agent/composition`（`provider::composition` 模块），非 Composition crate **NEVER** 引用构造符号或穿透 `provider::composition`。旧 `LegacyStreamSink` / gateway callback wrapper / client pool / `set_*→调用→restore` 路径已**物理清零**（符号删除、守卫锁定回流）；Provider driver 内部保留的 `InvocationSink`（`pub(crate)` trait）是私有 decoder seam，不属于 legacy 也不再经跨 BC 暴露。#905 已关闭并迁移跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）所有权到 Runtime。#1033 已把单次 attempt 的机械流程收敛进 crate-private `adapters::http_attempt::HttpAttemptExecutor`。这些落地**不代表** Runtime 已接线 resolver——[#1142](https://github.com/rushsinging/aemeath/issues/1142) 的 `build_window` 前 resolver 接线仍延期，**NEVER** 冒充完成；详见 [Migration Governance §4](../../03-engineering/03-migration-governance.md#4-provider-现状缺口s2-代码盘点)。
 
 ## 4. Target 物理目录
 
@@ -60,13 +60,13 @@ Provider 采用 Hexagonal + Clean 组织（`domain ← application ← ports ←
 
 ```text
 src/
-├── lib.rs                       # 窄 façade：Runtime-owned ProviderPort 的实现 / wiring
+├── lib.rs                       # 窄 façade：Provider-defined `LlmInvokePort` 的实现 / wiring
 ├── domain.rs                    # 领域策略入口
 ├── domain/
 │   ├── capability.rs             # driver + model 能力解析、reasoning clamp
 │   ├── invoke.rs                 # 单次 attempt 与统一流语义
 │   └── error.rs                  # 统一错误分类
-├── ports.rs                     # 对外 port 定义（Runtime-owned ProviderPort 实现签名）
+├── ports.rs                     # 对外 port 定义（Provider-defined `LlmInvokePort` 实现签名）
 └── adapters/
     ├── transport.rs              # 不可变 endpoint / auth / HTTP seam
     ├── anthropic.rs              # 单文件起步
@@ -75,13 +75,13 @@ src/
     └── ollama.rs                 # provider 技术实现
 ```
 
-`ProviderPort` 由 Runtime 拥有，Provider `ports.rs` 只定义实现签名；wire DTO 与具体 client **MUST** 留在 `adapters/` 的 provider/protocol 技术模块内。`NEVER** 为对称预建 `application/`（Provider 当前无独立用例编排层）。
+`LlmInvokePort` 由 Runtime 拥有，Provider `ports.rs` 只定义实现签名；wire DTO 与具体 client **MUST** 留在 `adapters/` 的 provider/protocol 技术模块内。`NEVER** 为对称预建 `application/`（Provider 当前无独立用例编排层）。
 
 ## 5. 与其他 BC 的关系
 
 ### Agent Runtime
 
-Runtime 通过 `ProviderPort` 发起调用、消费有序流并组装 `ModelInvocation`。Runtime 拥有 attempt 编号、重试退避、`ModelInvocationRetrying` 事件、context 超限后的 compact 分支和最终 Run 失败判断。
+Runtime 通过 `LlmInvokePort` 发起调用、消费有序流并组装 `ModelInvocation`。Runtime 拥有 attempt 编号、重试退避、`ModelInvocationRetrying` 事件、context 超限后的 compact 分支和最终 Run 失败判断。
 
 ### Context Management
 
@@ -118,7 +118,7 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 | 文档 | 内容 |
 |---|---|
 | [01-domain-model-and-acl.md](01-domain-model-and-acl.md) | 调用边界语言、模型能力、reasoning clamp、driver 与双向 ACL、不变量 |
-| [02-ports-stream-and-client-scope.md](02-ports-stream-and-client-scope.md) | ProviderPort、流式与错误语义、取消、重试边界、不可变 transport/invocation scope |
+| [02-ports-stream-and-client-scope.md](02-ports-stream-and-client-scope.md) | LlmInvokePort、流式与错误语义、取消、重试边界、不可变 transport/invocation scope |
 
 ## 8. 测试完整性矩阵（#1061）
 
@@ -149,7 +149,7 @@ L0 复核同时通过 Provider `--no-default-features` / `--all-features` check�
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-20 | #1061 完成 #852 的 L0-L4 测试完整性复核：新增四 decoder 共享 stream contract，覆盖顺序、单终结、终结后结束、取消和 consumer drop；补 crate-root PL 契约与 Guard 收紧；L5 明确不适用 | [#1061](https://github.com/rushsinging/aemeath/issues/1061) |
-| 2026-07-19 | Provider Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderBinding` / `ProviderFactory` / `ProviderPort` 与 PL；`provider::composition` 构造面独占于 Composition Root（引擎构造白名单锁定）；Runtime 退出具体 client/pool、wire DTO 收窄到 driver adapter、构造点集中到 Composition Root；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）确认为私有 decoder seam 非 legacy；跨调用 retry/fallback 与错误分类收口；resolver `build_window` 接线仍延期，不冒充完成 | 治理记录 |
+| 2026-07-19 | Provider Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderBinding` / `ProviderFactory` / `LlmInvokePort` 与 PL；`provider::composition` 构造面独占于 Composition Root（引擎构造白名单锁定）；Runtime 退出具体 client/pool、wire DTO 收窄到 driver adapter、构造点集中到 Composition Root；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）确认为私有 decoder seam 非 legacy；跨调用 retry/fallback 与错误分类收口；resolver `build_window` 接线仍延期，不冒充完成 | 治理记录 |
 | 2026-07-16 | #1033 交付 crate-private `HttpAttemptExecutor`：单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic；Anthropic/OpenAI-compatible/Ollama 全量迁入；跨调用 retry/fallback 仍是 P6/P7 迁移债，不冒充 Runtime 已完整拥有该所有权 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-16 | 文档审查：明确后续承接边界——pull-based `InvocationStream`（P4）由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接；跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-12 | 初稿：锁定 Provider ACL、调用尝试边界、reasoning/usage 所有权与无共享可变状态原则 | #788 |

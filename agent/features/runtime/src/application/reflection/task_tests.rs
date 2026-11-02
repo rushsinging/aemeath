@@ -321,7 +321,7 @@ async fn a_run_without_changes_logs_no_applied_line() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_run_whose_provider_failed_logs_no_applied_line() {
     let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
-        Err(ReflectionError::LlmCall)
+        Err(ReflectionError::LlmCall("scripted failure".to_string()))
     });
     let _guard = crate::test_log::begin();
 

@@ -145,6 +145,37 @@ fn small_policy() -> MemoryPolicy {
     }
 }
 
+/// #2146：ScoringPort 实现权归 systemone crate；存根替身经其脚本端口。
+fn stub_scoring(
+    outcome: Result<usize, systemone::UnavailableKind>,
+) -> std::sync::Arc<dyn systemone::ScoringPort> {
+    systemone::test_support::scripted_scoring(move |_state, questions| {
+        let criterion_count = match &questions[0] {
+            systemone::ScoringQuestion::Choice { criteria, .. } => criteria.len(),
+            _ => panic!("重排应使用 Choice 题型"),
+        };
+        let preferred =
+            outcome.map_err(|kind| systemone::ScoringUnavailable::new(kind, "stub 故障"))?;
+        let probabilities: Vec<(String, f64)> = (0..criterion_count)
+            .map(|index| {
+                let probability = if index == preferred {
+                    0.9
+                } else {
+                    0.1 / (criterion_count.saturating_sub(1).max(1)) as f64
+                };
+                (index.to_string(), probability)
+            })
+            .collect();
+        Ok(vec![systemone::ScoringAnswer::choice(
+            preferred.to_string(),
+            probabilities,
+            0.9,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("答案构造")])
+    })
+}
+
 #[tokio::test]
 async fn commit_error_keeps_old_committed_state() {
     let old = entry(MemoryLayer::Project, "old");
@@ -1034,47 +1065,6 @@ async fn open_with_clock_logs_enter_and_failure_exit_without_memory_content() {
 
 // --- System One 重排（RERANK）------------------------------------------------
 
-use async_trait::async_trait as rerank_async_trait;
-
-/// 固定应答的评分桩：`preferred` 序号的候选给 0.9，其余平分 0.1。
-struct StubScoringPort {
-    outcome: Result<usize, systemone::UnavailableKind>,
-}
-
-#[rerank_async_trait]
-impl systemone::ScoringPort for StubScoringPort {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        let criterion_count = match &questions[0] {
-            systemone::ScoringQuestion::Choice { criteria, .. } => criteria.len(),
-            _ => panic!("重排应使用 Choice 题型"),
-        };
-        let preferred = self
-            .outcome
-            .map_err(|kind| systemone::ScoringUnavailable::new(kind, "stub 故障"))?;
-        let probabilities: Vec<(String, f64)> = (0..criterion_count)
-            .map(|index| {
-                let probability = if index == preferred {
-                    0.9
-                } else {
-                    0.1 / (criterion_count.saturating_sub(1).max(1)) as f64
-                };
-                (index.to_string(), probability)
-            })
-            .collect();
-        Ok(vec![systemone::ScoringAnswer::choice(
-            preferred.to_string(),
-            probabilities,
-            0.9,
-            systemone::CalibrationLevel::Raw,
-        )
-        .expect("答案构造")])
-    }
-}
-
 fn rerank_service(
     entries: Vec<MemoryEntry>,
     scorer: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
@@ -1114,7 +1104,7 @@ async fn search_with_scorer_reranks_top_candidates() {
             entry(MemoryLayer::Project, "rust ownership basics"),
             entry(MemoryLayer::Project, "python memory safety notes"),
         ],
-        Some(std::sync::Arc::new(StubScoringPort { outcome: Ok(2) })),
+        Some(stub_scoring(Ok(2))),
     )
     .await;
 
@@ -1146,9 +1136,8 @@ async fn search_with_failing_scorer_falls_back_to_lexical_order() {
         entry(MemoryLayer::Project, "rust ownership memory safety guide"),
         entry(MemoryLayer::Project, "python memory safety notes"),
     ];
-    let scorer: std::sync::Arc<dyn systemone::ScoringPort> = std::sync::Arc::new(StubScoringPort {
-        outcome: Err(systemone::UnavailableKind::Timeout),
-    });
+    let scorer: std::sync::Arc<dyn systemone::ScoringPort> =
+        stub_scoring(Err(systemone::UnavailableKind::Timeout));
     let failing = rerank_service(entries.clone(), Some(scorer)).await;
     let plain = rerank_service(entries, None).await;
 
@@ -1176,8 +1165,7 @@ async fn search_recall_expansion_lets_rerank_promote_beyond_limit() {
         entry(MemoryLayer::Project, "rust ownership memory safety guide"),
         entry(MemoryLayer::Project, "python memory safety notes"),
     ];
-    let scorer: std::sync::Arc<dyn systemone::ScoringPort> =
-        std::sync::Arc::new(StubScoringPort { outcome: Ok(1) });
+    let scorer: std::sync::Arc<dyn systemone::ScoringPort> = stub_scoring(Ok(1));
     let scored = rerank_service(entries.clone(), Some(scorer)).await;
     let plain = rerank_service(entries, None).await;
 

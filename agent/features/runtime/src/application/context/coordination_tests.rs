@@ -2,15 +2,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
-    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
-    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextPortError,
-    ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause, InteractionRequestId,
-    Language, RunStepReceiptData, SessionAppendReceiptData, SessionId, SessionRevision,
-    SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
+    CompactOutcome, ContextRequestData, DecisionReason, FinalizeCause, InteractionRequestId,
+    Language, RunStepReceiptData, SessionId, SessionRevision, ToolOutcomeKindData,
 };
-use async_trait::async_trait;
 use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
-use context::{ContextAppendPort, ContextCompactPort, ContextWindowPort};
 use sdk::{RunId, RunStepId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -18,130 +13,6 @@ use share::message::{ContentBlock, Message, Role};
 use share::reasoning::ReasoningLevel;
 
 use super::{apply_automatic_compact_outcome, ContextCoordinator};
-
-#[derive(Default)]
-struct RecordingPort {
-    calls: Mutex<Vec<&'static str>>,
-    appends: Mutex<Vec<ContextAppendData>>,
-    accepted_inputs: Mutex<Vec<AcceptedInputAppendData>>,
-    compact_requests: Mutex<Vec<CompactRequestData>>,
-}
-
-#[async_trait]
-#[async_trait]
-impl ContextWindowPort for RecordingPort {
-    async fn build_window(
-        &self,
-        request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
-        self.calls.lock().unwrap().push("build_window");
-        Ok(ContextWindowData {
-            backing_revision: SessionRevision::new(1),
-            system_blocks: vec![SystemBlock {
-                kind: "system_prompt".to_string(),
-                content: "system".to_string(),
-                cacheable: true,
-                cache_break: true,
-            }],
-            messages: request.pending_messages.clone().into(),
-            tool_schemas: request.tool_schemas.clone(),
-            token_estimation: TokenBudget {
-                system_tokens: 2,
-                tool_schema_tokens: 3,
-                message_tokens: 5,
-                total_tokens: 10,
-            },
-            compaction_decision: CompactionDecisionData {
-                needed: false,
-                urgency: Urgency::None,
-                decision_token_count: 0,
-                threshold: 1,
-                context_size: 200_000,
-                effective_window: 180_000,
-                reason: DecisionReason::HeuristicFallback,
-            },
-        })
-    }
-}
-#[async_trait]
-impl ContextCompactPort for RecordingPort {
-    async fn needs_compaction(
-        &self,
-        _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
-        self.calls.lock().unwrap().push("needs_compaction");
-        Ok(CompactionDecisionData {
-            needed: true,
-            urgency: Urgency::Must,
-            decision_token_count: 100,
-            threshold: 90,
-            context_size: 200_000,
-            effective_window: 180_000,
-            reason: DecisionReason::ActualProviderUsage,
-        })
-    }
-
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        self.calls.lock().unwrap().push("compact");
-        self.compact_requests.lock().unwrap().push(request.clone());
-        Ok(CompactOutcome::Committed(CompactResult {
-            summary: "summary".to_string(),
-            recent_messages: request.source.pending_messages.clone(),
-            source_revision: SessionRevision::new(1),
-            quality: CompactSummaryQuality::LocalOnly,
-            metrics: Box::default(),
-        }))
-    }
-}
-// 与原 ContextPort 默认实现等价的 no-op reminder 面。
-impl context::ReminderControlPort for RecordingPort {}
-
-#[async_trait]
-impl ContextAppendPort for RecordingPort {
-    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
-        self.calls.lock().unwrap().push("clear_session");
-        assert!(!session_id.as_str().is_empty());
-        Ok(())
-    }
-
-    async fn current_revision(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<SessionRevision>, ContextPortError> {
-        self.calls.lock().unwrap().push("current_revision");
-        assert!(!session_id.as_str().is_empty());
-        Ok(Some(SessionRevision::new(7)))
-    }
-
-    async fn append_accepted_input(
-        &self,
-        append: &AcceptedInputAppendData,
-    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
-        self.calls.lock().unwrap().push("append_accepted_input");
-        self.accepted_inputs.lock().unwrap().push(append.clone());
-        Ok(SessionAppendReceiptData {
-            run_id: append.run_id.clone(),
-            step_id: append.step_id.clone(),
-            committed_revision: SessionRevision::new(2),
-        })
-    }
-
-    async fn append_and_persist(
-        &self,
-        append: &ContextAppendData,
-    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
-        self.calls.lock().unwrap().push("append_and_persist");
-        self.appends.lock().unwrap().push(append.clone());
-        Ok(SessionAppendReceiptData {
-            run_id: append.run_id.clone(),
-            step_id: append.step_id.clone(),
-            committed_revision: SessionRevision::new(2),
-        })
-    }
-}
 
 fn request() -> ContextRequestData {
     ContextRequestData {
@@ -170,7 +41,7 @@ fn request() -> ContextRequestData {
 async fn coordinator_exposes_current_revision_for_step_cas_baseline() {
     // Step 收口前刷新 CAS 基准，避免窗口快照 revision 落后于本 step
     // 自身 accepted-input / 工具回执推进后被误判成并发冲突。
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
 
     let revision = coordinator
@@ -179,12 +50,12 @@ async fn coordinator_exposes_current_revision_for_step_cas_baseline() {
         .unwrap();
 
     assert_eq!(revision, Some(SessionRevision::new(7)));
-    assert!(port.calls.lock().unwrap().contains(&"current_revision"));
+    assert!(port.calls().contains(&"current_revision"));
 }
 
 #[tokio::test]
 async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
@@ -202,10 +73,10 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
         .unwrap();
 
     assert_eq!(
-        *port.calls.lock().unwrap(),
+        port.calls(),
         vec!["build_window", "needs_compaction", "compact"]
     );
-    let compact_requests = port.compact_requests.lock().unwrap();
+    let compact_requests = port.compact_requests();
     assert_eq!(compact_requests.len(), 1);
     assert_eq!(compact_requests[0].source_revision, SessionRevision::new(1));
     assert_eq!(compact_requests[0].source.request_id, frozen.request_id);
@@ -214,7 +85,7 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
 
 #[tokio::test]
 async fn coordinator_returns_complete_window_and_decision_fields() {
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port));
     let frozen = request();
 
@@ -236,7 +107,7 @@ async fn coordinator_returns_complete_window_and_decision_fields() {
 
 #[tokio::test]
 async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("accepted")];
@@ -246,7 +117,7 @@ async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
         .await
         .unwrap();
 
-    let accepted = port.accepted_inputs.lock().unwrap();
+    let accepted = port.accepted_inputs();
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].run_id, frozen.run_id);
     assert_eq!(
@@ -257,7 +128,7 @@ async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
 
 #[tokio::test]
 async fn finalized_step_appends_once_with_original_message_order() {
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![
@@ -286,16 +157,14 @@ async fn finalized_step_appends_once_with_original_message_order() {
         .await
         .unwrap();
 
-    let appends = port.appends.lock().unwrap();
+    let appends = port.append_and_persist_inputs();
     assert_eq!(appends.len(), 1);
     assert_eq!(
         serde_json::to_value(&appends[0].messages).unwrap(),
         serde_json::to_value(&messages).unwrap()
     );
     assert_eq!(
-        port.calls
-            .lock()
-            .unwrap()
+        port.calls()
             .iter()
             .filter(|call| **call == "append_and_persist")
             .count(),
@@ -305,7 +174,7 @@ async fn finalized_step_appends_once_with_original_message_order() {
 
 #[tokio::test]
 async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("finalized")];
@@ -346,7 +215,7 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
         .await
         .unwrap();
 
-    let appends = port.appends.lock().unwrap();
+    let appends = port.append_and_persist_inputs();
     let append = &appends[0];
     assert_eq!(append.session_id, frozen.session_id);
     assert_eq!(append.run_id, frozen.run_id);
@@ -410,7 +279,7 @@ fn automatic_compact_skipped_preserves_usage_and_window() {
 /// 带 chunk 计数/Finalizing）。
 #[tokio::test]
 async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks() {
-    let port = Arc::new(RecordingPort::default());
+    let port = Arc::new(context::test_support::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
@@ -436,7 +305,7 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
         .await
         .unwrap();
 
-    let requests = port.compact_requests.lock().unwrap();
+    let requests = port.compact_requests();
     assert_eq!(requests.len(), 1);
     let progress = requests[0]
         .progress
@@ -480,5 +349,90 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
             ),
         ],
         "domain 进度必须原样映射到 SDK 视图（#1500）"
+    );
+}
+
+// ─── #2142：compact 请求携带 LLM 绑定（resolver 装配时） ───
+
+use crate::application::client::compact_model::compact_model_tests as compact_support;
+
+fn resolver() -> std::sync::Arc<crate::application::client::CompactModelResolver> {
+    let snapshot = compact_support::snapshot_with(None);
+    let slot = compact_support::bound_slot(&snapshot);
+    let (resolver, _builds, _reader) = compact_support::resolver(snapshot, slot);
+    std::sync::Arc::new(resolver)
+}
+
+fn noop_progress() -> std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView> {
+    std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {})
+}
+
+#[tokio::test]
+async fn automatic_compact_carries_llm_binding_when_resolver_bound() {
+    let port = Arc::new(context::test_support::StubContextService::new());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()))
+        .with_compact_resolver(Some(resolver()));
+
+    coordinator
+        .compact(
+            &request(),
+            SessionRevision::new(1),
+            noop_progress(),
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let compact_requests = port.compact_requests();
+    assert_eq!(compact_requests.len(), 1);
+    let llm = compact_requests[0]
+        .llm
+        .as_ref()
+        .expect("装配 resolver 后自动压缩请求必须携带 LLM 绑定");
+    // 未配置 compact_model → 跟随会话模型（fake 会话模型 = session-model）。
+    assert_eq!(llm.model.model, "session-model");
+}
+
+#[tokio::test]
+async fn manual_compact_carries_llm_binding_when_resolver_bound() {
+    let port = Arc::new(context::test_support::StubContextService::new());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()))
+        .with_compact_resolver(Some(resolver()));
+
+    coordinator
+        .manual_compact(&request(), noop_progress(), None)
+        .await
+        .unwrap();
+
+    let compact_requests = port.compact_requests();
+    assert_eq!(compact_requests.len(), 1);
+    assert!(
+        compact_requests[0].llm.is_some(),
+        "手动压缩与自动压缩共用同一 resolver 单一入口"
+    );
+}
+
+#[tokio::test]
+async fn compact_stays_local_when_resolver_absent() {
+    let port = Arc::new(context::test_support::StubContextService::new());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
+
+    coordinator
+        .compact(
+            &request(),
+            SessionRevision::new(1),
+            noop_progress(),
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let compact_requests = port.compact_requests();
+    assert_eq!(compact_requests.len(), 1);
+    assert!(
+        compact_requests[0].llm.is_none(),
+        "未装配 resolver（isolated/测试装配）时必须保持本地压缩"
     );
 }

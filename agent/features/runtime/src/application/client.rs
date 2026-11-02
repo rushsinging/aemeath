@@ -1,6 +1,6 @@
 mod accessors;
 mod bootstrap;
-mod compact_model;
+pub(crate) mod compact_model;
 mod from_args;
 mod mapping;
 pub mod resume_helper;
@@ -19,7 +19,7 @@ mod trait_session;
 
 pub(crate) use accessors::SessionModelState;
 pub(crate) use accessors::{RuntimeContextAssemblyError, SessionInputHandle, SessionRuntime};
-pub use compact_model::{CompactModelOrigin, CompactModelResolver, SessionModelSlotData};
+pub use compact_model::{CompactModelResolver, SessionModelSlotData};
 pub(crate) use mapping::{
     display_history_index_to_sdk, map_finalize_cause_to_sdk, message_to_sdk, skill_snapshot_to_sdk,
     workspace_context_to_sdk,

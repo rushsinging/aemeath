@@ -51,14 +51,41 @@ pub(crate) fn apply_automatic_compact_outcome<T>(
 #[derive(Clone)]
 pub(crate) struct ContextCoordinator {
     ports: context::ContextPorts,
+    /// compact 模型解析器（#2142）：`None` 时 compact 请求 `llm: None` 走本地压缩。
+    compact: Option<std::sync::Arc<crate::application::client::CompactModelResolver>>,
 }
 
 impl ContextCoordinator {
     pub(crate) fn new(ports: context::ContextPorts) -> Self {
-        Self { ports }
+        Self {
+            ports,
+            compact: None,
+        }
+    }
+
+    /// 绑定 compact 模型解析器（#2142）：manual 与自动压缩共用同一 resolver
+    /// 单一入口（模型/窗口/预算按轮解析，失败回退本地并保留 warn 日志）。
+    pub(crate) fn with_compact_resolver(
+        mut self,
+        resolver: Option<std::sync::Arc<crate::application::client::CompactModelResolver>>,
+    ) -> Self {
+        self.compact = resolver;
+        self
+    }
+
+    /// 本轮 compact 的 LLM 绑定（`None` = 本地压缩）。
+    fn compact_llm(&self) -> Option<context::CompactLlmBinding> {
+        self.compact
+            .as_ref()
+            .and_then(|resolver| resolver.to_llm_binding())
     }
 
     /// Reminder 事件触发转发（#252：后台进程完成 → OnEvent source 重建）。
+    /// Runtime 推送一条提醒事实（#2146 数据化接口，经 Context port 转发）。
+    pub(crate) fn push_reminder_fact(&self, run_id: &sdk::RunId, fact: context::ReminderFactData) {
+        self.ports.reminders.push_reminder_fact(run_id, fact);
+    }
+
     pub(crate) fn reminder_handle_event(
         &self,
         run_id: &sdk::RunId,
@@ -117,13 +144,11 @@ impl ContextCoordinator {
         task_snapshot: Option<task::CompactTaskSnapshotData>,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
-            Some(std::sync::Arc::new(
-                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
-            ));
+            Some(crate::application::loop_engine::compaction::compact_progress_adapter(progress));
         self.ports
             .compact
             .compact(&CompactRequestData {
-                llm: None,
+                llm: self.compact_llm(),
                 run_id: request.run_id.clone(),
                 source_revision: SessionRevision::new(0),
                 source: request.clone(),
@@ -144,13 +169,11 @@ impl ContextCoordinator {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
-            Some(std::sync::Arc::new(
-                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
-            ));
+            Some(crate::application::loop_engine::compaction::compact_progress_adapter(progress));
         self.ports
             .compact
             .compact(&CompactRequestData {
-                llm: None,
+                llm: self.compact_llm(),
                 run_id: request.run_id.clone(),
                 source_revision,
                 source: request.clone(),

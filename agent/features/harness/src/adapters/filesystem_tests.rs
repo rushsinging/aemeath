@@ -20,6 +20,81 @@ fn registry_under(root: &std::path::Path, names: &[&str]) -> FilesystemComponent
     FilesystemComponentRegistry::new(component_paths)
 }
 
+fn builtin_registry_under(root: &std::path::Path) -> FilesystemComponentRegistry {
+    let guardrails = ComponentId {
+        kind: ComponentKind::Guardrails,
+        name: ComponentName::new("default"),
+    };
+    let tool_guidance = ComponentId {
+        kind: ComponentKind::ToolGuidance,
+        name: ComponentName::new("default"),
+    };
+    let mut component_paths = HashMap::new();
+    component_paths.insert(guardrails.clone(), root.join("guardrails.md"));
+    component_paths.insert(tool_guidance.clone(), root.join("tool_guidance.md"));
+    let mut bootstrap_defaults = HashMap::new();
+    bootstrap_defaults.insert(
+        guardrails,
+        ComponentContent {
+            frontmatter: None,
+            body: "# Guardrails".to_string(),
+        },
+    );
+    bootstrap_defaults.insert(
+        tool_guidance,
+        ComponentContent {
+            frontmatter: None,
+            body: "# Tool Guidance".to_string(),
+        },
+    );
+    FilesystemComponentRegistry::with_bootstrap_defaults(component_paths, bootstrap_defaults)
+}
+
+/// dry-run bootstrap：缺失的内建 prose 组件可虚拟列出/读取，写入走内存由
+/// VirtualComponentRegistry 承担，NEVER 触碰磁盘。
+#[test]
+fn bootstrap_defaults_make_missing_builtin_components_visible_without_writing() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let registry = builtin_registry_under(temp_dir.path());
+    let guardrails = ComponentId {
+        kind: ComponentKind::Guardrails,
+        name: ComponentName::new("default"),
+    };
+    let tool_guidance = ComponentId {
+        kind: ComponentKind::ToolGuidance,
+        name: ComponentName::new("default"),
+    };
+
+    assert_eq!(
+        registry.list(),
+        vec![guardrails.clone(), tool_guidance.clone()]
+    );
+    assert_eq!(
+        registry.read(&guardrails).expect("虚拟骨架").body,
+        "# Guardrails"
+    );
+    assert!(
+        !temp_dir.path().join("guardrails.md").exists(),
+        "构造/读取 NEVER 创建文件"
+    );
+}
+
+/// 磁盘已有内容优先于 bootstrap 骨架，NEVER 覆盖用户组件。
+#[test]
+fn bootstrap_defaults_never_override_existing_files() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(temp_dir.path().join("guardrails.md"), "# 用户规则").unwrap();
+    let registry = builtin_registry_under(temp_dir.path());
+    let guardrails = ComponentId {
+        kind: ComponentKind::Guardrails,
+        name: ComponentName::new("default"),
+    };
+    assert_eq!(
+        registry.read(&guardrails).expect("读取用户内容").body,
+        "# 用户规则"
+    );
+}
+
 /// frontmatter + 正文写入后读回等价（round-trip）。
 #[test]
 fn frontmatter_and_body_survive_round_trip() {

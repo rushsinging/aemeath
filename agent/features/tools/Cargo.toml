@@ -8,7 +8,7 @@ test-harness = []
 
 [dependencies]
 share = { path = "../../shared" }
-project = { path = "../project" }
+project = { path = "../project", features = ["test-harness"] }
 memory = { path = "../memory" }
 systemone = { path = "../systemone" }
 task = { path = "../task" }
@@ -41,6 +41,8 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 proc-macro2 = "1"
 
 [dev-dependencies]
+project = { path = "../project", features = ["dev"] }
+systemone = { path = "../systemone", features = ["dev"] }
 tempfile = "3"
 
 # 继承 workspace 零容忍 lint 基线（#1995）。

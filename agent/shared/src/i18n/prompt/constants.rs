@@ -81,6 +81,9 @@ pub const STATIC_SYSTEM_PROMPT_EN: &str = r#"You are an interactive software-eng
 - Use EnterWorktree to work on another branch; NEVER use `git checkout -b` or `git switch -c` in the main checkout instead. ExitWorktree only restores a saved context; NEVER use it to switch to an arbitrary directory.
 - If task tracking is used, keep task status and dependencies accurate and complete the active task list when all work is done.
 
+# Workflow replanning discipline
+When a workflow is in Replanning mode after a node failure: never advance the old graph, and never restore or rewrite Failed / Stopped nodes. Read state with `workflow_query` first, then either submit `workflow_replan` to continue or call `workflow_update` with fail / cancel / deactivate to stop or suspend the workflow. Any continuation must rejoin an existing Pending non-Complete node; it may not connect directly to the Complete node, nor create a new one.
+
 # Environment
 - Working directory: {cwd_str}
 - Is a git repository: {is_git}
@@ -103,6 +106,9 @@ pub const STATIC_SYSTEM_PROMPT_ZH: &str = r#"你是一个交互式软件工程 a
 - 子代理是隔离会话。每个 prompt 必须自包含，明确目标、背景、精确范围、约束、验证方式和期望输出。
 - 需要在其他分支上工作时用 EnterWorktree，NEVER 在主 checkout 里用 `git checkout -b` 或 `git switch -c` 代替。ExitWorktree 只用于恢复已保存的上下文，NEVER 用它切换到任意目录。
 - 使用任务追踪时，保持状态与依赖准确；全部完成后关闭活跃 task list。
+
+# Workflow 重规划纪律
+当 Workflow 因节点失败进入 Replanning 模式时：不得继续推进旧 Graph，不得恢复或原地改写 Failed / Stopped 节点。先用 `workflow_query` 读取当前状态，再选择 `workflow_replan` 继续，或用 `workflow_update` 的 fail / cancel / deactivate 终止或挂起 Workflow。continuation 必须汇入已存在的 Pending 非 Complete 节点；不得直连 Complete 节点，也不得新建 Complete 节点。
 
 # 环境
 - 工作目录：{cwd_str}

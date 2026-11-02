@@ -176,7 +176,7 @@
       "id": "modelInvoke",
       "type": "external",
       "label": "3 · Model Invoke",
-      "sublabel": "ProviderPort · stream",
+      "sublabel": "LlmInvokePort · stream",
       "pos": [1630, 740],
       "size": [210, 76],
       "sources": [{"path": "agent/features/runtime/src/application/model/invocation.rs", "line": 1, "label": "Model invocation"}]

@@ -78,6 +78,7 @@
 | 2026-07-11 | S2 填充 runtime/（7 篇）与 context-management/session.md，规划表改链接 | #761 |
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
+| 2026-10-28 | LLM 调用端口收敛为 Provider 定义的 `LlmInvokePort`（#2146） | #2142 / #2146 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
 | 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：Workflow Graph Definition / Kernel / RuntimeView（RuntimeView 口径已于 2026-10-07 退役）、Config 分层、ConfigSnapshot PL；旧 ReasoningNode / ReasoningPort 仅保留在 workflow 退役历史说明 | #792 |
 | 2026-07-12 | 新增 Storage、Logging、Application Version Control 三个通用域摘要设计 | #793 |

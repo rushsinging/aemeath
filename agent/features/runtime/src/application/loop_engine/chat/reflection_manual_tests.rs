@@ -28,7 +28,7 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
 
 fn fake_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
-        provider: Arc::new(crate::application::reflection::test_support::StaticReflectionProvider),
+        provider: crate::application::reflection::test_support::static_reflection_port(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "manual-test-model".to_string(),
@@ -204,7 +204,7 @@ async fn manual_run_dispatches_detached_and_freezes_the_visible_messages() {
     let history = crate::application::reflection::test_support::noop_reflection_history();
 
     // 统一异步链路（#2002）：Manual 派发即 Detached，快照冻结传递到 detached
-    // 任务（「可见历史进反思」的完整证据由 RecordingReflectionProvider 组覆盖）。
+    // 任务（「可见历史进反思」的完整证据由 recording_port 组覆盖）。
     let outcome = crate::application::loop_engine::chat::reflection::run(
         &adapter,
         crate::application::reflection::ReflectionTaskTrigger::Manual,
@@ -243,24 +243,10 @@ use share::config::domain::snapshot::ConfigSnapshot;
 
 /// 记录反思 prompt 的 Provider：`execute_reflection` 把冻结的会话快照经
 /// `build_prompt` 汇入单条 user prompt，因此 prompt 文本是快照到达执行层的直接证据。
-#[derive(Clone)]
-struct RecordingReflectionProvider {
-    prompts: Arc<Mutex<Vec<String>>>,
-}
-
-#[async_trait::async_trait]
-impl crate::ports::ProviderPort for RecordingReflectionProvider {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-    async fn invoke(
-        &self,
-        request: crate::ports::provider_port::ProviderRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<
-        crate::ports::provider_port::ProviderResponseStream,
-        crate::ports::provider_port::ProviderError,
-    > {
-        self.prompts.lock().unwrap().push(
+fn recording_port(prompts: Arc<Mutex<Vec<String>>>) -> Arc<dyn crate::ports::LlmInvokePort> {
+    // #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本化端口。
+    provider::test_support::scripted_llm(move |request| {
+        prompts.lock().unwrap().push(
             request
                 .messages
                 .iter()
@@ -268,19 +254,17 @@ impl crate::ports::ProviderPort for RecordingReflectionProvider {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-        Ok(
-            crate::application::model::test_support::text_completion_stream(
-                r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
-                1,
-                1,
-            ),
-        )
-    }
+        Ok(provider::test_support::text_stream_with_usage(
+            r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
+            1,
+            1,
+        ))
+    })
 }
 
 fn recording_binding(prompts: Arc<Mutex<Vec<String>>>) -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
-        provider: Arc::new(RecordingReflectionProvider { prompts }),
+        provider: recording_port(prompts),
         model: provider::ModelInfo {
             provider: "manual-reflect-test".to_string(),
             model: "manual-test-model".to_string(),

@@ -9,7 +9,8 @@
    "ProviderResponseStream",
    "ProviderContentData",
    "ResponseStopReason",
-   "TokenUsageData"
+   "TokenUsageData",
+   "LlmTextOutputData"
   ],
   "模型元数据": [
    "ModelInfo"
@@ -18,16 +19,13 @@
    "ProviderError",
    "ProviderErrorKind"
   ],
-  "工厂·客户端": [
+  "调用端口·客户端": [
    "wire_provider_client",
    "wire_test_provider_client",
    "LlmClient",
    "ProviderClientSpecData",
-   "TransportPool"
-  ],
-  "文本端口": [
-   "LlmTextInvokePort",
-   "LlmTextOutputData"
+   "TransportPool",
+   "LlmInvokePort"
   ]
  },
  "nodeGroup": {
@@ -46,8 +44,8 @@
   "LlmClient": "工厂·客户端",
   "ProviderClientSpecData": "工厂·客户端",
   "TransportPool": "工厂·客户端",
-  "LlmTextInvokePort": "文本端口",
-  "LlmTextOutputData": "文本端口"
+  "LlmInvokePort": "调用端口·客户端",
+  "LlmTextOutputData": "输出"
  },
  "symbols": {
   "LlmClient": {
@@ -78,7 +76,7 @@
     "pub fn provider_name(& self) -> & str",
     "pub fn max_reasoning_level(& self) -> crate :: domain :: capability :: ReasoningLevel"
    ],
-   "consumer_count": 2,
+   "consumer_count": 1,
    "consumers": [
     {
      "file": "agent/composition/src/harness.rs",
@@ -101,6 +99,42 @@
        "label": "调用"
       }
      ]
+    }
+   ]
+  },
+  "LlmInvokePort": {
+   "kind": "trait",
+   "duty": "LLM 调用能力端口（#2146 单端口收敛）：流式 invoke_stream 是唯一必须实现的 verb，文本 invoke_text 为端口默认方法（收口）——非流式即流式退化；取消真相源单通道 request.cancellation。消费方：runtime 会话/反思、context 压缩",
+   "deep_path": null,
+   "def": "agent/features/provider/src/published_language.rs",
+   "signature": "pub trait LlmInvokePort: Send + Sync {",
+   "fields": [],
+   "methods": [
+    "fn invoke_stream(& self, model : & ModelInfo, request : & ProviderRequestData) -> Result < ProviderResponseStream , ProviderError >",
+    "fn invoke_text(& self, model : & ModelInfo, request : & ProviderRequestData) -> Result < LlmTextOutputData , ProviderError >"
+   ],
+   "consumer_count": 18,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app_tests.rs",
+     "module": "composition :: app_tests.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 162,
+       "code": "impl provider::LlmInvokePort for ReportedUsageProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      },
+      {
+       "line": 702,
+       "code": "impl provider::LlmInvokePort for DirectLogScriptProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
     },
     {
      "file": "agent/composition/src/provider.rs",
@@ -110,39 +144,34 @@
      ],
      "snippets": [
       {
-       "line": 15,
-       "code": "// ─── New adapter: ProviderPort via LlmClient ────────────────",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 27,
-       "code": "client: Arc<LlmClient>,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 33,
-       "code": "pub fn new(client: Arc<LlmClient>, model: ModelInfo) -> Self {",
+       "line": 90,
+       "code": "let provider: Arc<dyn provider::LlmInvokePort> = client;",
        "kind": "fnty",
        "label": "类型引用"
       }
      ]
-    }
-   ]
-  },
-  "LlmTextInvokePort": {
-   "kind": "trait",
-   "duty": "非流式纯文本调用端口（压缩/评分等无流式诉求的消费方）",
-   "deep_path": null,
-   "def": "agent/features/provider/src/adapters/text_invoke.rs",
-   "signature": "pub trait LlmTextInvokePort: Send + Sync {",
-   "fields": [],
-   "methods": [
-    "fn invoke_text(& self, model : & ModelInfo, request : & ProviderRequestData, cancel : & CancellationToken) -> Result < LlmTextOutputData , crate :: ProviderError >"
-   ],
-   "consumer_count": 4,
-   "consumers": [
+    },
+    {
+     "file": "agent/composition/src/provider_tests.rs",
+     "module": "composition :: provider_tests.rs",
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 47,
+       "code": "fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn provider::LlmInvokePort>, ModelInfo) {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 66,
+       "code": "let port: Arc<dyn provider::LlmInvokePort> = client;",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
     {
      "file": "agent/features/context/src/adapters/compact_summary_tests.rs",
      "module": "context :: adapters/compact_summary_tests.rs",
@@ -153,158 +182,158 @@
      ],
      "snippets": [
       {
-       "line": 36,
-       "code": "impl<F> provider::composition::LlmTextInvokePort for FnInvoker<F>",
+       "line": 46,
+       "code": "impl<F> provider::LlmInvokePort for FnInvoker<F>",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 52,
-       "code": "invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,",
+       "line": 61,
+       "code": "invoker: std::sync::Arc<dyn provider::LlmInvokePort>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 206,
-       "code": "impl provider::composition::LlmTextInvokePort for CountingGenerator {",
+       "line": 215,
+       "code": "impl provider::LlmInvokePort for CountingGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 289,
-       "code": "impl provider::composition::LlmTextInvokePort for BulkyFactsGenerator {",
+       "line": 297,
+       "code": "impl provider::LlmInvokePort for BulkyFactsGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 407,
-       "code": "impl provider::composition::LlmTextInvokePort for CountingGenerator {",
+       "line": 414,
+       "code": "impl provider::LlmInvokePort for CountingGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 811,
-       "code": "impl provider::composition::LlmTextInvokePort for FlakyChunkGenerator {",
+       "line": 817,
+       "code": "impl provider::LlmInvokePort for FlakyChunkGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1418,
-       "code": "impl provider::composition::LlmTextInvokePort for LocalReduceGenerator {",
+       "line": 1423,
+       "code": "impl provider::LlmInvokePort for LocalReduceGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1497,
-       "code": "impl provider::composition::LlmTextInvokePort for ObservingGenerator {",
+       "line": 1501,
+       "code": "impl provider::LlmInvokePort for ObservingGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1591,
-       "code": "impl provider::composition::LlmTextInvokePort for ShrinkingGenerator {",
+       "line": 1594,
+       "code": "impl provider::LlmInvokePort for ShrinkingGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1660,
-       "code": "impl provider::composition::LlmTextInvokePort for MockGenerator {",
+       "line": 1662,
+       "code": "impl provider::LlmInvokePort for MockGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1726,
-       "code": "impl provider::composition::LlmTextInvokePort for CancelledGenerator {",
+       "line": 1727,
+       "code": "impl provider::LlmInvokePort for CancelledGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
        "line": 1764,
-       "code": "impl provider::composition::LlmTextInvokePort for FailingGenerator {",
+       "code": "impl provider::LlmInvokePort for FailingGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1871,
-       "code": "impl provider::composition::LlmTextInvokePort for NeverShrinkingGenerator {",
+       "line": 1870,
+       "code": "impl provider::LlmInvokePort for NeverShrinkingGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 1954,
-       "code": "impl provider::composition::LlmTextInvokePort for EchoGenerator {",
+       "line": 1952,
+       "code": "impl provider::LlmInvokePort for EchoGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2044,
-       "code": "impl provider::composition::LlmTextInvokePort for EchoGenerator {",
+       "line": 2041,
+       "code": "impl provider::LlmInvokePort for EchoGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2108,
-       "code": "impl provider::composition::LlmTextInvokePort for EmptyThenValidGenerator {",
+       "line": 2104,
+       "code": "impl provider::LlmInvokePort for EmptyThenValidGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2181,
-       "code": "impl provider::composition::LlmTextInvokePort for PartiallyEmptyGenerator {",
+       "line": 2176,
+       "code": "impl provider::LlmInvokePort for PartiallyEmptyGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2252,
-       "code": "impl provider::composition::LlmTextInvokePort for SuccessfulMapGenerator {",
+       "line": 2246,
+       "code": "impl provider::LlmInvokePort for SuccessfulMapGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2310,
-       "code": "impl provider::composition::LlmTextInvokePort for EmptyFirstChunkGenerator {",
+       "line": 2303,
+       "code": "impl provider::LlmInvokePort for EmptyFirstChunkGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2378,
-       "code": "impl provider::composition::LlmTextInvokePort for RepairingMapGenerator {",
+       "line": 2370,
+       "code": "impl provider::LlmInvokePort for RepairingMapGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2448,
-       "code": "impl provider::composition::LlmTextInvokePort for MapOnlyGenerator {",
+       "line": 2439,
+       "code": "impl provider::LlmInvokePort for MapOnlyGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2509,
-       "code": "impl provider::composition::LlmTextInvokePort for InvalidRefreshThenUnavailable {",
+       "line": 2499,
+       "code": "impl provider::LlmInvokePort for InvalidRefreshThenUnavailable {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2603,
-       "code": "impl provider::composition::LlmTextInvokePort for RepairingRefreshGenerator {",
+       "line": 2592,
+       "code": "impl provider::LlmInvokePort for RepairingRefreshGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2682,
-       "code": "impl provider::composition::LlmTextInvokePort for CancelDuringRepairGenerator {",
+       "line": 2670,
+       "code": "impl provider::LlmInvokePort for CancelDuringRepairGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2729,
-       "code": "impl provider::composition::LlmTextInvokePort for AlwaysInvalidGenerator {",
+       "line": 2716,
+       "code": "impl provider::LlmInvokePort for AlwaysInvalidGenerator {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 2869,
-       "code": "impl provider::composition::LlmTextInvokePort for FactsWithoutObjective {",
+       "line": 2855,
+       "code": "impl provider::LlmInvokePort for FactsWithoutObjective {",
        "kind": "implty",
        "label": "接口实现"
       }
@@ -318,8 +347,8 @@
      ],
      "snippets": [
       {
-       "line": 515,
-       "code": "pub invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,",
+       "line": 516,
+       "code": "pub invoker: std::sync::Arc<dyn provider::LlmInvokePort>,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -336,36 +365,213 @@
      "snippets": [
       {
        "line": 189,
-       "code": "impl provider::composition::LlmTextInvokePort for FixedTextInvoker {",
+       "code": "impl provider::LlmInvokePort for FixedTextInvoker {",
        "kind": "implty",
        "label": "接口实现"
       },
       {
-       "line": 215,
-       "code": "invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,",
+       "line": 213,
+       "code": "invoker: std::sync::Arc<dyn provider::LlmInvokePort>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 241,
-       "code": "impl provider::composition::LlmTextInvokePort for ProviderFailingInvoker {",
+       "line": 239,
+       "code": "impl provider::LlmInvokePort for ProviderFailingInvoker {",
        "kind": "implty",
        "label": "接口实现"
       }
      ]
     },
     {
-     "file": "agent/features/runtime/src/application/compact_generator.rs",
-     "module": "runtime :: application/compact_generator.rs",
+     "file": "agent/features/runtime/src/application/client/trait_model_tests.rs",
+     "module": "runtime :: application/client/trait_model_tests.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 96,
+       "code": "impl crate::ports::LlmInvokePort for TestPort {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/reflection_manual_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/reflection_manual_tests.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 252,
+       "code": "impl crate::ports::LlmInvokePort for RecordingReflectionProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/reflection_request_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/reflection_request_tests.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 27,
+       "code": "impl LlmInvokePort for RequestParameterRecorder {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/model/test_support.rs",
+     "module": "runtime :: application/model/test_support.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 213,
+       "code": "impl crate::ports::LlmInvokePort for TestProviderPort {",
+       "kind": "implty",
+       "label": "接口实现"
+      },
+      {
+       "line": 349,
+       "code": "impl crate::ports::LlmInvokePort for ScriptedProviderPortAdapter {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/reflection/execution.rs",
+     "module": "runtime :: application/reflection/execution.rs",
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 14,
-       "code": "invoker: Arc<dyn provider::composition::LlmTextInvokePort>,",
+       "line": 66,
+       "code": "pub provider: &'a dyn LlmInvokePort,",
        "kind": "fnty",
        "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/reflection/execution_tests.rs",
+     "module": "runtime :: application/reflection/execution_tests.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 17,
+       "code": "impl LlmInvokePort for StaticProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      },
+      {
+       "line": 208,
+       "code": "impl LlmInvokePort for ScriptedReflectionProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/reflection/task.rs",
+     "module": "runtime :: application/reflection/task.rs",
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 313,
+       "code": "provider: std::sync::Arc<dyn LlmInvokePort>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/reflection/test_support.rs",
+     "module": "runtime :: application/reflection/test_support.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 42,
+       "code": "impl crate::ports::LlmInvokePort for StaticReflectionProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/run/tests/run_factory_support/fakes.rs",
+     "module": "runtime :: application/run/tests/run_factory_support/fakes.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 64,
+       "code": "impl crate::ports::LlmInvokePort for FakeProviderPort {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/ports/provider_factory.rs",
+     "module": "runtime :: ports/provider_factory.rs",
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 3,
+       "code": "//! Composition implements `ProviderFactory` to create `LlmInvokePort` bindings",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/ports/provider_port.rs",
+     "module": "runtime :: ports/provider_port.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 90,
+       "code": "impl LlmInvokePort for FakeProvider {",
+       "kind": "implty",
+       "label": "接口实现"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/bootstrap_dependencies.rs",
+     "module": "runtime :: tests/bootstrap_dependencies.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 13,
+       "code": "impl provider::LlmInvokePort for UnusedPort {",
+       "kind": "implty",
+       "label": "接口实现"
       }
      ]
     }
@@ -375,7 +581,7 @@
    "kind": "struct",
    "duty": "文本调用输出载荷",
    "deep_path": null,
-   "def": "agent/features/provider/src/adapters/text_invoke.rs",
+   "def": "agent/features/provider/src/published_language.rs",
    "signature": "pub struct LlmTextOutputData {",
    "fields": [
     "pub text: String",
@@ -385,7 +591,7 @@
     "pub stream_completed: bool"
    ],
    "methods": [],
-   "consumer_count": 3,
+   "consumer_count": 1,
    "consumers": [
     {
      "file": "agent/features/context/src/adapters/compact_summary.rs",
@@ -396,208 +602,7 @@
      "snippets": [
       {
        "line": 835,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, CompactLlmError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/adapters/compact_summary_tests.rs",
-     "module": "context :: adapters/compact_summary_tests.rs",
-     "forms": [
-      "构造",
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 11,
-       "code": ") -> provider::composition::LlmTextOutputData {",
-       "kind": "ctor",
-       "label": "构造"
-      },
-      {
-       "line": 11,
-       "code": ") -> provider::composition::LlmTextOutputData {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 45,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 212,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 295,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 413,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 817,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1424,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1503,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1597,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1666,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1732,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1770,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1877,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 1960,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2050,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2114,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2187,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2258,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2316,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2384,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2454,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2515,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2609,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2688,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2735,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 2875,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/context/src/integration_tests/canonical_session_repository.rs",
-     "module": "context :: integration_tests/canonical_session_repository.rs",
-     "forms": [
-      "类型引用",
-      "构造",
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 195,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 203,
-       "code": "Ok(provider::composition::LlmTextOutputData {",
-       "kind": "ctor",
-       "label": "构造"
-      },
-      {
-       "line": 247,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "code": ") -> Result<provider::LlmTextOutputData, CompactLlmError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -627,20 +632,35 @@
     "pub fn max_reasoning_level(& self) -> ReasoningLevel",
     "pub fn reasoning_effort_map(& self) -> Vec < (ReasoningLevel , ReasoningLevel) >"
    ],
-   "consumer_count": 27,
+   "consumer_count": 26,
    "consumers": [
     {
      "file": "agent/composition/src/app_tests.rs",
      "module": "composition :: app_tests.rs",
      "forms": [
+      "类型引用",
+      "构造",
+      "类型引用",
       "构造"
      ],
      "snippets": [
+      {
+       "line": 167,
+       "code": "_model: &provider::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
       {
        "line": 243,
        "code": "model: provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
+      },
+      {
+       "line": 705,
+       "code": "_model: &provider::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
       },
       {
        "line": 765,
@@ -676,30 +696,11 @@
      "file": "agent/composition/src/provider.rs",
      "module": "composition :: provider.rs",
      "forms": [
-      "类型引用",
       "构造"
      ],
      "snippets": [
       {
-       "line": 18,
-       "code": "/// with the binding's single `ModelInfo` to expose the `runtime::ports::ProviderPort`",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 28,
-       "code": "model: ModelInfo,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 33,
-       "code": "pub fn new(client: Arc<LlmClient>, model: ModelInfo) -> Self {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 119,
+       "line": 69,
        "code": "// 组合根从 config/spec 投影构造 ModelInfo；supported_reasoning 阶梯",
        "kind": "ctor",
        "label": "构造"
@@ -727,8 +728,14 @@
        "label": "类型引用"
       },
       {
+       "line": 47,
+       "code": "fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn provider::LlmInvokePort>, ModelInfo) {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
        "line": 71,
-       "code": "fn build_port() -> (Arc<dyn ProviderPort>, ModelInfo) {",
+       "code": "fn build_port() -> (Arc<dyn provider::LlmInvokePort>, ModelInfo) {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -744,67 +751,67 @@
      ],
      "snippets": [
       {
-       "line": 42,
+       "line": 52,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 57,
+       "line": 66,
        "code": "model: provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
       },
       {
-       "line": 209,
+       "line": 218,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 292,
+       "line": 300,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 410,
+       "line": 417,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 814,
+       "line": 820,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1421,
+       "line": 1426,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1500,
+       "line": 1504,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1594,
+       "line": 1597,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1663,
+       "line": 1665,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1729,
+       "line": 1730,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
@@ -816,85 +823,85 @@
        "label": "类型引用"
       },
       {
-       "line": 1874,
+       "line": 1873,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1957,
+       "line": 1955,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2047,
+       "line": 2044,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2111,
+       "line": 2107,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2184,
+       "line": 2179,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2255,
+       "line": 2249,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2313,
+       "line": 2306,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2381,
+       "line": 2373,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2451,
+       "line": 2442,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2512,
+       "line": 2502,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2606,
+       "line": 2595,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2685,
+       "line": 2673,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2732,
+       "line": 2719,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2872,
+       "line": 2858,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
@@ -909,7 +916,7 @@
      ],
      "snippets": [
       {
-       "line": 517,
+       "line": 518,
        "code": "pub model: provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
@@ -932,13 +939,13 @@
        "label": "类型引用"
       },
       {
-       "line": 219,
+       "line": 217,
        "code": "model: provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
       },
       {
-       "line": 244,
+       "line": 242,
        "code": "_model: &provider::ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
@@ -964,27 +971,19 @@
      "file": "agent/features/runtime/src/application/client/trait_model_tests.rs",
      "module": "runtime :: application/client/trait_model_tests.rs",
      "forms": [
+      "类型引用",
       "构造"
      ],
      "snippets": [
+      {
+       "line": 99,
+       "code": "_model: &crate::ports::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
       {
        "line": 115,
        "code": "let model = provider::ModelInfo {",
-       "kind": "ctor",
-       "label": "构造"
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/compact_generator_tests.rs",
-     "module": "runtime :: application/compact_generator_tests.rs",
-     "forms": [
-      "构造"
-     ],
-     "snippets": [
-      {
-       "line": 58,
-       "code": "model: provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
       }
@@ -1024,6 +1023,8 @@
      "file": "agent/features/runtime/src/application/loop_engine/chat/reflection_manual_tests.rs",
      "module": "runtime :: application/loop_engine/chat/reflection_manual_tests.rs",
      "forms": [
+      "构造",
+      "类型引用",
       "构造"
      ],
      "snippets": [
@@ -1032,6 +1033,12 @@
        "code": "model: provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
+      },
+      {
+       "line": 257,
+       "code": "_model: &crate::ports::provider_port::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
       },
       {
        "line": 284,
@@ -1045,11 +1052,18 @@
      "file": "agent/features/runtime/src/application/loop_engine/chat/reflection_request_tests.rs",
      "module": "runtime :: application/loop_engine/chat/reflection_request_tests.rs",
      "forms": [
+      "类型引用",
       "构造"
      ],
      "snippets": [
       {
-       "line": 49,
+       "line": 30,
+       "code": "_model: &ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 50,
        "code": "model: provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
@@ -1103,6 +1117,12 @@
        "label": "类型引用"
       },
       {
+       "line": 219,
+       "code": "_model: &crate::ports::provider_port::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
        "line": 283,
        "code": "pub(crate) fn test_model_info() -> provider::ModelInfo {",
        "kind": "ctor",
@@ -1115,7 +1135,13 @@
        "label": "类型引用"
       },
       {
-       "line": 373,
+       "line": 352,
+       "code": "_model: &crate::ports::provider_port::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 372,
        "code": "let model = provider::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
@@ -1171,19 +1197,32 @@
      "file": "agent/features/runtime/src/application/reflection/execution_tests.rs",
      "module": "runtime :: application/reflection/execution_tests.rs",
      "forms": [
+      "类型引用",
       "构造",
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 4,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 18,
+       "code": "// `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 68,
+       "code": "fn model() -> ModelInfo {",
        "kind": "ctor",
        "label": "构造"
       },
       {
-       "line": 4,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 68,
+       "code": "fn model() -> ModelInfo {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 211,
+       "code": "_model: &ModelInfo,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -1208,9 +1247,16 @@
      "file": "agent/features/runtime/src/application/reflection/test_support.rs",
      "module": "runtime :: application/reflection/test_support.rs",
      "forms": [
+      "类型引用",
       "构造"
      ],
      "snippets": [
+      {
+       "line": 47,
+       "code": "_model: &crate::ports::provider_port::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
       {
        "line": 67,
        "code": "model: provider::ModelInfo {",
@@ -1223,9 +1269,16 @@
      "file": "agent/features/runtime/src/application/run/tests/run_factory_support/fakes.rs",
      "module": "runtime :: application/run/tests/run_factory_support/fakes.rs",
      "forms": [
+      "类型引用",
       "构造"
      ],
      "snippets": [
+      {
+       "line": 69,
+       "code": "_model: &crate::ports::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
       {
        "line": 79,
        "code": "model: crate::ports::ModelInfo {",
@@ -1259,14 +1312,34 @@
      "file": "agent/features/runtime/src/ports/provider_port.rs",
      "module": "runtime :: ports/provider_port.rs",
      "forms": [
-      "构造"
+      "类型引用",
+      "构造",
+      "类型引用"
      ],
      "snippets": [
       {
-       "line": 153,
+       "line": 93,
+       "code": "_model: &ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 113,
        "code": "model: crate::ports::ModelInfo {",
        "kind": "ctor",
        "label": "构造"
+      },
+      {
+       "line": 181,
+       "code": "fn model() -> ModelInfo {",
+       "kind": "ctor",
+       "label": "构造"
+      },
+      {
+       "line": 181,
+       "code": "fn model() -> ModelInfo {",
+       "kind": "fnty",
+       "label": "类型引用"
       }
      ]
     },
@@ -1274,9 +1347,16 @@
      "file": "agent/features/runtime/tests/bootstrap_dependencies.rs",
      "module": "runtime :: tests/bootstrap_dependencies.rs",
      "forms": [
+      "类型引用",
       "构造"
      ],
      "snippets": [
+      {
+       "line": 18,
+       "code": "_model: &provider::ModelInfo,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
       {
        "line": 29,
        "code": "model: provider::ModelInfo {",
@@ -1333,19 +1413,19 @@
      ],
      "snippets": [
       {
-       "line": 105,
+       "line": 55,
        "code": "let config = ProviderClientSpecData {",
        "kind": "ctor",
        "label": "构造"
       },
       {
-       "line": 182,
+       "line": 135,
        "code": "fn probe_config_from_request(request: &ProviderProbeRequest) -> ProviderClientSpecData {",
        "kind": "ctor",
        "label": "构造"
       },
       {
-       "line": 182,
+       "line": 135,
        "code": "fn probe_config_from_request(request: &ProviderProbeRequest) -> ProviderClientSpecData {",
        "kind": "fnty",
        "label": "类型引用"
@@ -1360,7 +1440,7 @@
      ],
      "snippets": [
       {
-       "line": 50,
+       "line": 49,
        "code": "ProviderClientSpecData {",
        "kind": "ctor",
        "label": "构造"
@@ -1385,8 +1465,23 @@
     "ToolCallArgumentsUnparseable { index: usize, id: String, name: String, raw_arguments: String, diagnostic: String }"
    ],
    "methods": [],
-   "consumer_count": 4,
+   "consumer_count": 5,
    "consumers": [
+    {
+     "file": "agent/features/context/src/adapters/compact_summary_tests.rs",
+     "module": "context :: adapters/compact_summary_tests.rs",
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 11,
+       "code": "provider::ProviderContentData::Text(text.to_string()),",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
     {
      "file": "agent/features/runtime/src/application/loop_engine/chat/stream_handler.rs",
      "module": "runtime :: application/loop_engine/chat/stream_handler.rs",
@@ -1522,7 +1617,7 @@
     "pub fn is_context_exceeded(& self) -> bool",
     "fn fmt(& self, f : & mut std :: fmt :: Formatter < '_ >) -> std :: fmt :: Result"
    ],
-   "consumer_count": 30,
+   "consumer_count": 29,
    "consumers": [
     {
      "file": "agent/composition/src/app_tests.rs",
@@ -1567,31 +1662,17 @@
      "file": "agent/composition/src/provider.rs",
      "module": "composition :: provider.rs",
      "forms": [
-      "类型引用",
-      "调用",
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 51,
-       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
        "line": 54,
-       "code": "return Err(ProviderError::cancelled());",
-       "kind": "call",
-       "label": "调用"
-      },
-      {
-       "line": 104,
        "code": "fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 198,
+       "line": 151,
        "code": "fn map_probe_error(error: ProviderError) -> ProviderProbeError {",
        "kind": "fnty",
        "label": "类型引用"
@@ -1621,7 +1702,7 @@
      ],
      "snippets": [
       {
-       "line": 876,
+       "line": 877,
        "code": "provider::ProviderError::cancelled(),",
        "kind": "call",
        "label": "调用"
@@ -1644,74 +1725,74 @@
      ],
      "snippets": [
       {
-       "line": 38,
+       "line": 48,
        "code": "F: Fn(&provider::ProviderRequestData) -> Result<String, provider::ProviderError> + Send + Sync,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 45,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 54,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 212,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 220,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 295,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 302,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 413,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 419,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 817,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 822,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 824,
+       "line": 829,
        "code": "return Err(provider::ProviderError::fatal(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 1424,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1428,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1503,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1506,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1597,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1599,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1666,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1667,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
        "line": 1732,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -1722,104 +1803,104 @@
        "label": "调用"
       },
       {
-       "line": 1770,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1769,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1771,
+       "line": 1770,
        "code": "Err(provider::ProviderError::fatal(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 1877,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1875,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1960,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 1957,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2050,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2046,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2114,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2109,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2187,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2181,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2258,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2251,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2316,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2308,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2384,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2375,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2454,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2444,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2515,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2504,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2523,
+       "line": 2512,
        "code": "return Err(provider::ProviderError::fatal(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 2609,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2597,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2688,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2675,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2735,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2721,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2875,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 2860,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -1851,25 +1932,25 @@
      ],
      "snippets": [
       {
-       "line": 195,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 194,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 201,
+       "line": 200,
        "code": "return Err(provider::ProviderError::cancelled());",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 247,
-       "code": ") -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {",
+       "line": 244,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 250,
+       "line": 247,
        "code": "Err(provider::ProviderError::fatal(",
        "kind": "call",
        "label": "调用"
@@ -1921,21 +2002,6 @@
      ]
     },
     {
-     "file": "agent/features/runtime/src/application/compact_generator_tests.rs",
-     "module": "runtime :: application/compact_generator_tests.rs",
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 55,
-       "code": ") -> Result<ProviderBindingData, provider::ProviderError> {",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
      "file": "agent/features/runtime/src/application/loop_engine/chat/reflection_manual_tests.rs",
      "module": "runtime :: application/loop_engine/chat/reflection_manual_tests.rs",
      "forms": [
@@ -1958,8 +2024,8 @@
      ],
      "snippets": [
       {
-       "line": 17,
-       "code": "ProviderBindingData, ProviderError, ProviderPort, ProviderRequestData, ProviderResponseStream,",
+       "line": 32,
+       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -2212,31 +2278,31 @@
        "label": "类型引用"
       },
       {
-       "line": 392,
+       "line": 393,
        "code": "Apply: FnMut(ProviderResponseChunk) -> Result<Option<T>, ProviderError>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 436,
+       "line": 437,
        "code": "error: &ProviderError,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 461,
+       "line": 462,
        "code": "ProviderError::fatal(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 462,
+       "line": 463,
        "code": "ProviderErrorKind::Protocol,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 468,
+       "line": 469,
        "code": "ProviderError::retryable(",
        "kind": "call",
        "label": "调用"
@@ -2327,8 +2393,14 @@
      ],
      "snippets": [
       {
-       "line": 4,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 25,
+       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 213,
+       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
@@ -2390,91 +2462,91 @@
      ],
      "snippets": [
       {
-       "line": 115,
+       "line": 116,
        "code": ") -> Result<crate::ports::ProviderBindingData, crate::ports::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 135,
+       "line": 136,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 143,
+       "line": 144,
        "code": "Err(ProviderError::fatal(ProviderErrorKind::Network, \"captured\"))",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 763,
+       "line": 764,
        "code": "let (runner, _guard) = test_runner(ProviderError::cancelled());",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 831,
+       "line": 832,
        "code": "let (runner, _guard) = test_runner(ProviderError::retryable(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 932,
+       "line": 933,
        "code": "let (runner, _guard) = test_runner(ProviderError::fatal(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 971,
+       "line": 972,
        "code": "test_runner(ProviderError::fatal(ProviderErrorKind::Network, \"stop\"));",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 1496,
+       "line": 1497,
        "code": "let (runner, _guard) = test_runner(ProviderError::retryable(",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 1497,
+       "line": 1498,
        "code": "ProviderErrorKind::Network,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1717,
+       "line": 1718,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1723,
+       "line": 1724,
        "code": "Err(ProviderError::cancelled())",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 1751,
+       "line": 1752,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1753,
+       "line": 1754,
        "code": "Err(ProviderError::fatal(ProviderErrorKind::Network, \"recorded\"))",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 1753,
+       "line": 1754,
        "code": "Err(ProviderError::fatal(ProviderErrorKind::Network, \"recorded\"))",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1774,
+       "line": 1775,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -2518,7 +2590,7 @@
      ],
      "snippets": [
       {
-       "line": 85,
+       "line": 88,
        "code": "/// Returns `ProviderError` if the spec is invalid (unknown driver, invalid",
        "kind": "fnty",
        "label": "类型引用"
@@ -2536,55 +2608,49 @@
      ],
      "snippets": [
       {
-       "line": 21,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 31,
+       "code": "ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderResponseStream,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 119,
-       "code": "pub fn error_stream(error: ProviderError) -> ProviderResponseStream {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 136,
+       "line": 95,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 138,
+       "line": 98,
        "code": "return Err(ProviderError::cancelled());",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 138,
+       "line": 98,
        "code": "return Err(ProviderError::cancelled());",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 208,
+       "line": 170,
        "code": "let stream = FakeProvider::error_stream(ProviderError::cancelled());",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 295,
+       "line": 261,
        "code": "accepts_provider_chunk(ProviderResponseChunk::Error(ProviderError::cancelled()));",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 301,
+       "line": 267,
        "code": "let context = ProviderError::fatal(ProviderErrorKind::ContextTooLong, \"too long\");",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 302,
+       "line": 268,
        "code": "let rate = ProviderError::retryable(ProviderErrorKind::RateLimited, \"429\");",
        "kind": "call",
        "label": "调用"
@@ -2653,55 +2719,55 @@
      ],
      "snippets": [
       {
-       "line": 200,
+       "line": 153,
        "code": "ProviderErrorKind::Cancelled => ProviderProbeErrorKind::Cancelled,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 201,
+       "line": 154,
        "code": "ProviderErrorKind::Timeout => ProviderProbeErrorKind::Timeout,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 202,
+       "line": 155,
        "code": "ProviderErrorKind::Authentication | ProviderErrorKind::PermissionDenied => {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 205,
+       "line": 158,
        "code": "ProviderErrorKind::ModelUnavailable",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 206,
+       "line": 159,
        "code": "| ProviderErrorKind::ContextTooLong",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 207,
+       "line": 160,
        "code": "| ProviderErrorKind::InvalidRequest => ProviderProbeErrorKind::Model,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 208,
+       "line": 161,
        "code": "ProviderErrorKind::Protocol | ProviderErrorKind::StreamTruncated => {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 211,
+       "line": 164,
        "code": "ProviderErrorKind::Network | ProviderErrorKind::UpstreamUnavailable => {",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 214,
+       "line": 167,
        "code": "ProviderErrorKind::RateLimited | ProviderErrorKind::Configuration => {",
        "kind": "ref",
        "label": "路径引用"
@@ -2767,19 +2833,19 @@
      ],
      "snippets": [
       {
-       "line": 825,
+       "line": 830,
        "code": "provider::ProviderErrorKind::UpstreamUnavailable,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 1772,
+       "line": 1771,
        "code": "provider::ProviderErrorKind::UpstreamUnavailable,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 2524,
+       "line": 2513,
        "code": "provider::ProviderErrorKind::UpstreamUnavailable,",
        "kind": "ref",
        "label": "路径引用"
@@ -2794,7 +2860,7 @@
      ],
      "snippets": [
       {
-       "line": 251,
+       "line": 248,
        "code": "provider::ProviderErrorKind::UpstreamUnavailable,",
        "kind": "ref",
        "label": "路径引用"
@@ -2890,13 +2956,13 @@
        "label": "路径引用"
       },
       {
-       "line": 462,
+       "line": 463,
        "code": "ProviderErrorKind::Protocol,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 469,
+       "line": 470,
        "code": "ProviderErrorKind::StreamTruncated,",
        "kind": "ref",
        "label": "路径引用"
@@ -2975,37 +3041,37 @@
      ],
      "snippets": [
       {
-       "line": 143,
+       "line": 144,
        "code": "Err(ProviderError::fatal(ProviderErrorKind::Network, \"captured\"))",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 832,
+       "line": 833,
        "code": "ProviderErrorKind::Network,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 933,
+       "line": 934,
        "code": "ProviderErrorKind::Network,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 971,
+       "line": 972,
        "code": "test_runner(ProviderError::fatal(ProviderErrorKind::Network, \"stop\"));",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 1497,
+       "line": 1498,
        "code": "ProviderErrorKind::Network,",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 1753,
+       "line": 1754,
        "code": "Err(ProviderError::fatal(ProviderErrorKind::Network, \"recorded\"))",
        "kind": "ref",
        "label": "路径引用"
@@ -3020,13 +3086,13 @@
      ],
      "snippets": [
       {
-       "line": 301,
+       "line": 267,
        "code": "let context = ProviderError::fatal(ProviderErrorKind::ContextTooLong, \"too long\");",
        "kind": "ref",
        "label": "路径引用"
       },
       {
-       "line": 302,
+       "line": 268,
        "code": "let rate = ProviderError::retryable(ProviderErrorKind::RateLimited, \"429\");",
        "kind": "ref",
        "label": "路径引用"
@@ -3079,14 +3145,14 @@
      ],
      "snippets": [
       {
-       "line": 167,
-       "code": "_request: provider::ProviderRequestData,",
+       "line": 168,
+       "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 705,
-       "code": "_request: provider::ProviderRequestData,",
+       "line": 706,
+       "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3108,21 +3174,6 @@
      ]
     },
     {
-     "file": "agent/composition/src/provider.rs",
-     "module": "composition :: provider.rs",
-     "forms": [
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 49,
-       "code": "request: ProviderRequestData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      }
-     ]
-    },
-    {
      "file": "agent/composition/src/provider_tests.rs",
      "module": "composition :: provider_tests.rs",
      "forms": [
@@ -3131,7 +3182,7 @@
      "snippets": [
       {
        "line": 89,
-       "code": "let request = ProviderRequestData::new(model.model, vec![], 8192, ReasoningLevel::Off);",
+       "code": "let request = ProviderRequestData::new(model.model.clone(), vec![], 8192, ReasoningLevel::Off);",
        "kind": "call",
        "label": "调用"
       }
@@ -3146,13 +3197,13 @@
      ],
      "snippets": [
       {
-       "line": 1519,
+       "line": 1520,
        "code": ") -> provider::ProviderRequestData {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1520,
+       "line": 1521,
        "code": "provider::ProviderRequestData::new(",
        "kind": "call",
        "label": "调用"
@@ -3167,67 +3218,67 @@
      ],
      "snippets": [
       {
-       "line": 38,
+       "line": 48,
        "code": "F: Fn(&provider::ProviderRequestData) -> Result<String, provider::ProviderError> + Send + Sync,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 43,
+       "line": 53,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 210,
+       "line": 219,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 293,
+       "line": 301,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 411,
+       "line": 418,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 815,
+       "line": 821,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1422,
+       "line": 1427,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1501,
+       "line": 1505,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1595,
+       "line": 1598,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1664,
+       "line": 1666,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1730,
+       "line": 1731,
        "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -3239,85 +3290,85 @@
        "label": "类型引用"
       },
       {
-       "line": 1875,
+       "line": 1874,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1958,
+       "line": 1956,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2048,
+       "line": 2045,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2112,
+       "line": 2108,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2185,
+       "line": 2180,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2256,
+       "line": 2250,
        "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2314,
+       "line": 2307,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2382,
+       "line": 2374,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2452,
+       "line": 2443,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2513,
+       "line": 2503,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2607,
+       "line": 2596,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2686,
+       "line": 2674,
        "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2733,
+       "line": 2720,
        "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 2873,
+       "line": 2859,
        "code": "request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -3338,10 +3389,25 @@
        "label": "类型引用"
       },
       {
-       "line": 245,
+       "line": 243,
        "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/compact_model_tests.rs",
+     "module": "runtime :: application/client/compact_model_tests.rs",
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 386,
+       "code": "&provider::ProviderRequestData::new(",
+       "kind": "call",
+       "label": "调用"
       }
      ]
     },
@@ -3353,8 +3419,8 @@
      ],
      "snippets": [
       {
-       "line": 87,
-       "code": "CancellationSignal, ProviderError, ProviderErrorKind, ProviderRequestData,",
+       "line": 100,
+       "code": "_request: &ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3368,8 +3434,8 @@
      ],
      "snippets": [
       {
-       "line": 257,
-       "code": "request: crate::ports::provider_port::ProviderRequestData,",
+       "line": 258,
+       "code": "request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3383,8 +3449,8 @@
      ],
      "snippets": [
       {
-       "line": 17,
-       "code": "ProviderBindingData, ProviderError, ProviderPort, ProviderRequestData, ProviderResponseStream,",
+       "line": 31,
+       "code": "request: &ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3566,20 +3632,20 @@
        "label": "类型引用"
       },
       {
-       "line": 162,
+       "line": 163,
        "code": "&'a crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 219,
-       "code": "request: crate::ports::provider_port::ProviderRequestData,",
+       "line": 220,
+       "code": "request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 352,
-       "code": "request: crate::ports::provider_port::ProviderRequestData,",
+       "line": 353,
+       "code": "request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3608,8 +3674,14 @@
      ],
      "snippets": [
       {
-       "line": 4,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 24,
+       "code": "_request: &ProviderRequestData,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 212,
+       "code": "request: &ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3623,8 +3695,8 @@
      ],
      "snippets": [
       {
-       "line": 47,
-       "code": "_request: crate::ports::provider_port::ProviderRequestData,",
+       "line": 48,
+       "code": "_request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3638,25 +3710,25 @@
      ],
      "snippets": [
       {
-       "line": 134,
+       "line": 135,
        "code": "request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1716,
+       "line": 1717,
        "code": "request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1750,
+       "line": 1751,
        "code": "_request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1773,
+       "line": 1774,
        "code": "_request: &crate::ports::provider_port::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -3671,8 +3743,8 @@
      ],
      "snippets": [
       {
-       "line": 69,
-       "code": "_request: crate::ports::ProviderRequestData,",
+       "line": 70,
+       "code": "_request: &crate::ports::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3687,19 +3759,13 @@
      ],
      "snippets": [
       {
-       "line": 21,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 94,
+       "code": "request: &ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 134,
-       "code": "_request: ProviderRequestData,",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 225,
+       "line": 198,
        "code": "let request = ProviderRequestData::new(",
        "kind": "call",
        "label": "调用"
@@ -3714,8 +3780,8 @@
      ],
      "snippets": [
       {
-       "line": 18,
-       "code": "_request: provider::ProviderRequestData,",
+       "line": 19,
+       "code": "_request: &provider::ProviderRequestData,",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -3756,7 +3822,7 @@
    "methods": [
     "pub fn is_terminal(& self) -> bool"
    ],
-   "consumer_count": 10,
+   "consumer_count": 11,
    "consumers": [
     {
      "file": "agent/composition/src/app_tests.rs",
@@ -3815,6 +3881,34 @@
       {
        "line": 750,
        "code": "chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/context/src/adapters/compact_summary_tests.rs",
+     "module": "context :: adapters/compact_summary_tests.rs",
+     "forms": [
+      "类型引用",
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 8,
+       "code": "let mut chunks: Vec<provider::ProviderResponseChunk> = Vec::new();",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 10,
+       "code": "chunks.push(provider::ProviderResponseChunk::Content(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 22,
+       "code": "chunks.push(provider::ProviderResponseChunk::Stop(stop));",
        "kind": "call",
        "label": "调用"
       }
@@ -4007,13 +4101,13 @@
      ],
      "snippets": [
       {
-       "line": 391,
+       "line": 392,
        "code": "S: Stream<Item = ProviderResponseChunk> + Unpin,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 403,
+       "line": 404,
        "code": "let _ = apply(ProviderResponseChunk::Error(error.clone()));",
        "kind": "call",
        "label": "调用"
@@ -4069,19 +4163,19 @@
      ],
      "snippets": [
       {
-       "line": 100,
-       "code": "pub fn stream_from(chunks: Vec<ProviderResponseChunk>) -> ProviderResponseStream {",
+       "line": 31,
+       "code": "ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderResponseStream,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 294,
+       "line": 260,
        "code": "fn accepts_provider_chunk(_: provider::ProviderResponseChunk) {}",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 295,
+       "line": 261,
        "code": "accepts_provider_chunk(ProviderResponseChunk::Error(ProviderError::cancelled()));",
        "kind": "call",
        "label": "调用"
@@ -4092,13 +4186,13 @@
   },
   "ProviderResponseStream": {
    "kind": "type",
-   "duty": "流式通道类型别名（pull-based 有序流），runtime ProviderPort::invoke 的返回形态",
+   "duty": "流式通道类型别名（pull-based 有序流），runtime LlmInvokePort::invoke_stream 的返回形态",
    "deep_path": null,
    "def": "agent/features/provider/src/published_language.rs",
    "signature": "pub type ProviderResponseStream =",
    "fields": [],
    "methods": [],
-   "consumer_count": 18,
+   "consumer_count": 19,
    "consumers": [
     {
      "file": "agent/composition/src/app_tests.rs",
@@ -4122,15 +4216,192 @@
      ]
     },
     {
-     "file": "agent/composition/src/provider.rs",
-     "module": "composition :: provider.rs",
+     "file": "agent/features/context/src/adapters/compact_summary_tests.rs",
+     "module": "context :: adapters/compact_summary_tests.rs",
      "forms": [
       "类型引用"
      ],
      "snippets": [
       {
-       "line": 51,
-       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
+       "line": 7,
+       "code": "fn text_stream(text: &str, reason: Option<&str>) -> provider::ProviderResponseStream {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 32,
+       "code": ") -> provider::ProviderResponseStream {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 54,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 220,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 302,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 419,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 822,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1428,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1506,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1599,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1667,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1732,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1769,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1875,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1957,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2046,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2109,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2181,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2251,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2308,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2375,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2444,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2504,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2597,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2675,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2721,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 2860,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/context/src/integration_tests/canonical_session_repository.rs",
+     "module": "context :: integration_tests/canonical_session_repository.rs",
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 194,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 244,
+       "code": ") -> Result<provider::ProviderResponseStream, provider::ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -4144,8 +4415,8 @@
      ],
      "snippets": [
       {
-       "line": 88,
-       "code": "ProviderResponseStream, ReasoningLevel,",
+       "line": 101,
+       "code": ") -> std::result::Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -4174,8 +4445,8 @@
      ],
      "snippets": [
       {
-       "line": 17,
-       "code": "ProviderBindingData, ProviderError, ProviderPort, ProviderRequestData, ProviderResponseStream,",
+       "line": 32,
+       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -4375,8 +4646,14 @@
      ],
      "snippets": [
       {
-       "line": 4,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 25,
+       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 213,
+       "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       }
@@ -4426,25 +4703,25 @@
      ],
      "snippets": [
       {
-       "line": 135,
+       "line": 136,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1717,
+       "line": 1718,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1751,
+       "line": 1752,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 1774,
+       "line": 1775,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -4474,25 +4751,13 @@
      ],
      "snippets": [
       {
-       "line": 21,
-       "code": "ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,",
+       "line": 31,
+       "code": "ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderResponseStream,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 100,
-       "code": "pub fn stream_from(chunks: Vec<ProviderResponseChunk>) -> ProviderResponseStream {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 119,
-       "code": "pub fn error_stream(error: ProviderError) -> ProviderResponseStream {",
-       "kind": "fnty",
-       "label": "类型引用"
-      },
-      {
-       "line": 136,
+       "line": 95,
        "code": ") -> Result<ProviderResponseStream, ProviderError> {",
        "kind": "fnty",
        "label": "类型引用"
@@ -4531,7 +4796,7 @@
     "Other { String }"
    ],
    "methods": [],
-   "consumer_count": 8,
+   "consumer_count": 9,
    "consumers": [
     {
      "file": "agent/composition/src/app_tests.rs",
@@ -4563,6 +4828,52 @@
        "code": "provider::ResponseStopReason::EndTurn,",
        "kind": "ref",
        "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/context/src/adapters/compact_summary_tests.rs",
+     "module": "context :: adapters/compact_summary_tests.rs",
+     "forms": [
+      "路径引用",
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 15,
+       "code": "Some(\"tool_use\") => provider::ResponseStopReason::ToolUse,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 16,
+       "code": "Some(\"max_output_tokens\") => provider::ResponseStopReason::MaxOutputTokens,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 17,
+       "code": "Some(\"content_filtered\") => provider::ResponseStopReason::ContentFiltered,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 18,
+       "code": "Some(\"stop_sequence\") => provider::ResponseStopReason::StopSequence,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 19,
+       "code": "None => provider::ResponseStopReason::EndTurn,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 20,
+       "code": "Some(other) => provider::ResponseStopReason::Other(other.to_string()),",
+       "kind": "call",
+       "label": "调用"
       }
      ]
     },
@@ -4695,7 +5006,7 @@
      ],
      "snippets": [
       {
-       "line": 566,
+       "line": 567,
        "code": "stop_reason: provider::ResponseStopReason::EndTurn,",
        "kind": "ref",
        "label": "路径引用"
@@ -4859,7 +5170,7 @@
      ],
      "snippets": [
       {
-       "line": 487,
+       "line": 488,
        "code": "usage: crate::ports::TokenUsageData,",
        "kind": "fnty",
        "label": "类型引用"
@@ -5007,7 +5318,7 @@
      ],
      "snippets": [
       {
-       "line": 567,
+       "line": 568,
        "code": "usage: crate::ports::TokenUsageData::default(),",
        "kind": "call",
        "label": "调用"
@@ -5043,19 +5354,19 @@
      ],
      "snippets": [
       {
-       "line": 73,
+       "line": 23,
        "code": "pool: Arc<provider::composition::TransportPool>,",
        "kind": "fnty",
        "label": "类型引用"
       },
       {
-       "line": 79,
+       "line": 29,
        "code": "pool: Arc::new(provider::composition::TransportPool::new()),",
        "kind": "call",
        "label": "调用"
       },
       {
-       "line": 79,
+       "line": 29,
        "code": "pool: Arc::new(provider::composition::TransportPool::new()),",
        "kind": "fnty",
        "label": "类型引用"
@@ -5070,7 +5381,7 @@
      ],
      "snippets": [
       {
-       "line": 64,
+       "line": 63,
        "code": "&TransportPool::new(),",
        "kind": "call",
        "label": "调用"
@@ -5097,7 +5408,7 @@
      ],
      "snippets": [
       {
-       "line": 135,
+       "line": 85,
        "code": "provider::composition::wire_provider_client(config, model, self.pool.as_ref())?;",
        "kind": "call",
        "label": "调用"
@@ -5112,7 +5423,7 @@
      ],
      "snippets": [
       {
-       "line": 49,
+       "line": 48,
        "code": "let (client, _) = wire_provider_client(",
        "kind": "call",
        "label": "调用"
@@ -5139,7 +5450,7 @@
      ],
      "snippets": [
       {
-       "line": 174,
+       "line": 127,
        "code": "provider::composition::wire_test_provider_client(config, request.timeout)",
        "kind": "call",
        "label": "调用"
@@ -5155,9 +5466,9 @@
    "path": [
     "runtime phases.rs:294 run_model_invocation_phase —— run 循环进入模型阶段（套 run deadline）",
     "runtime model/invocation.rs:177 orchestrate_model_invocation → :190 invoke_model_impl 进入 attempt/retry 循环",
-    "runtime model/invocation.rs:253 从 binding.provider 取 Arc<dyn ProviderPort>；:269 构造 ProviderRequestData（model+messages+max_tokens+reasoning）",
-    "runtime ports/provider_port.rs:70 ProviderPort::invoke 契约：Result<ProviderResponseStream, ProviderError>",
-    "composition provider.rs:46 impl ProviderPort for ProviderAdapter；:57 取消 fast-path 后转发 client.invoke_stream",
+    "runtime model/invocation.rs:253 从 binding.provider 取 Arc<dyn LlmInvokePort>；:269 构造 ProviderRequestData（model+messages+max_tokens+reasoning）",
+    "provider published_language.rs LlmInvokePort::invoke_stream 契约：Result<ProviderResponseStream, ProviderError>；invoke_text 为端口默认方法（collect_text 收口）",
+    "composition provider.rs build 直接交出 Arc<LlmClient>（impl LlmInvokePort，转发 invoke_stream —— #2146 删除 ProviderAdapter 包装层）",
     "provider adapters/client.rs:480 LlmClient::invoke_stream —— :495 resolve_reasoning clamp、:523 select! 取消竞速、:513 转 invocation_stream",
     "provider adapters/client.rs:107 build_provider_and_scope —— 按 ProtocolFamily 选 driver（AnthropicMessages:128 / OllamaNative:137 / …）"
    ]
@@ -5199,28 +5510,20 @@
     "runtime adapters/sdk_event_mapper.rs:400 → sdk ChatEvent::ApiError（用户可见文案终点）"
    ]
   },
-  "工厂·客户端": {
-   "chain": "装配链（wire 工厂 → 传输池复用；旁路 connect 探测入口）",
+  "调用端口·客户端": {
+   "chain": "调用链与装配链（LlmInvokePort 能力契约 → LlmClient 唯一实现 → wire 工厂 + transport 池复用）",
    "path": [
+    "provider published_language.rs trait LlmInvokePort —— invoke_stream(model,&request) → Result<ProviderResponseStream>（唯一必须实现的 verb）；invoke_text 为默认方法：collect_text 逐帧收口（Stop→Ok、Error→Err）",
+    "provider adapters/text_invoke.rs impl LlmInvokePort for LlmClient —— 转发固有 invoke_stream（reasoning clamp / scope 构造 / 取消竞速在 client 内）",
+    "provider lib.rs 根导出 LlmInvokePort / LlmTextOutputData；composition 面导出 wire_provider_client / LlmClient / TransportPool",
     "composition provider.rs:122-137 组合根调 wire_provider_client（config + 占位 ModelInfo → 修正版）",
     "provider adapters/client.rs:197 wire_provider_client 装配主链路 client",
     "provider adapters/client.rs:337 from_config_with_pool —— :343 transport_key_for（driver/api_style/base_url/api_key/UA/timeout 入 key，model 不入）；:344 pool.acquire",
     "provider adapters/pool.rs:38 TransportPool::acquire —— :40-44 读锁 fast path 复用；:47-53 写锁 double-check 防并发重复建池",
     "provider adapters/transport.rs:35 ProviderTransport{id, http} —— :41 build_http_client_for_endpoint；回收靠 Arc 最后引用 drop（pool.rs:65 distinct_transport_count 断言模型切换不建第二 transport）",
     "旁路探测：config core/form/provider_connect.rs:593 begin_probe → connect/service.rs:439 run_probe → ProviderProbePort（config ports.rs:188）",
-    "旁路探测：composition app.rs:480 装配 ProviderProbeAdapter（provider.rs:168）→ probe.rs:27 wire_test_provider_client（:31 独立 transport 不走 pool）"
-   ]
-  },
-  "文本端口": {
-   "chain": "文本调用链（LlmTextInvokePort：流式收口为单次文本；当前生产压缩走本地）",
-   "path": [
-    "provider adapters/text_invoke.rs:28 trait LlmTextInvokePort —— invoke_text(model,&request,cancel) → Result<LlmTextOutputData>",
-    "provider adapters/text_invoke.rs:38 impl for LlmClient —— :48 调 invoke_stream，:53-72 逐帧收口（Stop→Ok、Error→Err）",
-    "provider lib.rs:59 composition 面导出 LlmTextInvokePort/LlmTextOutputData",
-    "context domain.rs:513 CompactLlmBinding —— :515 invoker: Arc<dyn LlmTextInvokePort>；canonical_session.rs:281 分派 LLM 压缩路径",
-    "context adapters/compact_summary.rs:831 llm_generate —— :836-844 binding.invoker.invoke_text 并校验非空文本",
-    "runtime application/compact_generator.rs:12 CompactLlmBindingFactory —— :44-50 构造 CompactLlmBinding 注入 context",
-    "生产装配事实：runtime context/coordination.rs:125/:152 的 CompactRequestData 当前写死 llm: None（走本地压缩），CompactLlmBindingFactory 无生产调用点 —— LLM 压缩链路已备未接"
+    "旁路探测：composition app.rs:480 装配 ProviderProbeAdapter（provider.rs:168）→ probe.rs:27 wire_test_provider_client（:31 独立 transport 不走 pool）",
+    "消费面（#2146 单端口）：runtime 会话/反思 invoke_stream（流式）；context 压缩 invoke_text（默认收口）——CompactLlmBinding.invoker 即 binding.provider"
    ]
   }
  }

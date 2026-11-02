@@ -145,7 +145,7 @@ src/
 
 Port 表达能力边界上一段有业务目的的对话，所有权分两类：隔离易变外部 detail 的**出站 port**由消费策略拥有；供其他能力调用的**入站 façade / OHS**由供应能力拥有并发布稳定 Published Language。出现下列信号时 **SHOULD** 评估对应边界，但信号本身 **NEVER** 自动要求增加抽象。
 
-这两类所有权对应两种性质不同、**NEVER** 混用判据的 seam：**技术外部 seam**（网络、文件系统、进程、时钟、第三方 SDK / 协议等易变技术细节）**MUST** 按下方"出站 port 的候选证据"评估，由消费该技术细节的能力策略拥有 port；**BC boundary seam**（两个 Bounded Context 之间的业务关系）**NEVER** 套用技术证据，而是由 [Context Map](03-context-map.md) 登记的供应方拥有入站 OHS / façade 并发布稳定语言，判据见下方"入站 façade / OHS 的候选证据"。当供应方 BC 恰好需要吸收易变外部技术差异时（例如 Provider 需要吸收各家 LLM API 差异），该技术细节仍由**消费方**定义并拥有隔离它的出站 port（如 Runtime-owned `ProviderPort`，签名以 [Runtime 端口与适配器](../02-modules/runtime/06-ports-and-adapters.md) 为真相源），供应方只负责实现——技术外部 seam 与 BC boundary seam 可在同一条边上共存，但所有权判据 **NEVER** 混用。Storage 同时示范两条不同边：其具体存储技术（driver，如 sled / 文件系统）是 Storage **私有**的技术外部 seam，由 Storage 自己定义并拥有一个私有 backend SPI 隔离，driver 只在 Storage 内部实现该私有 SPI；Storage 对外发布给其他数据 BC 的 `AtomicBlob` / `Dataset` OHS 则是 BC boundary seam 的入站服务，由消费方 integration adapter **调用**，**NEVER** 是由 driver 实现的 SPI——两条边所有权方向相反，**NEVER** 混同。
+这两类所有权对应两种性质不同、**NEVER** 混用判据的 seam：**技术外部 seam**（网络、文件系统、进程、时钟、第三方 SDK / 协议等易变技术细节）**MUST** 按下方"出站 port 的候选证据"评估，由消费该技术细节的能力策略拥有 port；**BC boundary seam**（两个 Bounded Context 之间的业务关系）**NEVER** 套用技术证据，而是由 [Context Map](03-context-map.md) 登记的供应方拥有入站 OHS / façade 并发布稳定语言，判据见下方"入站 façade / OHS 的候选证据"。当供应方 BC 恰好需要吸收易变外部技术差异时（例如 Provider 需要吸收各家 LLM API 差异），该技术细节仍由**消费方**定义并拥有隔离它的出站 port（如 Provider-defined `LlmInvokePort`，签名以 [Runtime 端口与适配器](../02-modules/runtime/06-ports-and-adapters.md) 为真相源），供应方只负责实现——技术外部 seam 与 BC boundary seam 可在同一条边上共存，但所有权判据 **NEVER** 混用。Storage 同时示范两条不同边：其具体存储技术（driver，如 sled / 文件系统）是 Storage **私有**的技术外部 seam，由 Storage 自己定义并拥有一个私有 backend SPI 隔离，driver 只在 Storage 内部实现该私有 SPI；Storage 对外发布给其他数据 BC 的 `AtomicBlob` / `Dataset` OHS 则是 BC boundary seam 的入站服务，由消费方 integration adapter **调用**，**NEVER** 是由 driver 实现的 SPI——两条边所有权方向相反，**NEVER** 混同。
 
 出站 port 的候选证据：
 
@@ -255,7 +255,7 @@ src/
 │   ├── capability.rs           # driver + model 能力解析
 │   ├── invoke.rs               # 单次调用与统一流语义
 │   └── error.rs                # wire / HTTP 错误 → ProviderErrorKind
-├── ports.rs                   # 对外 port（Runtime-owned ProviderPort 实现签名）
+├── ports.rs                   # 对外 port（Provider-defined `LlmInvokePort` 实现签名）
 └── adapters/
     ├── transport.rs            # endpoint / auth / HTTP transport
     ├── anthropic.rs            # 单文件起步
@@ -295,7 +295,7 @@ src/
 │   │   └── window.rs
 │   └── interaction.rs              #   用户交互
 ├── ports/                          # 出站 port 定义
-│   ├── provider.rs                 #   ProviderPort 签名
+│   ├── provider.rs                 #   LlmInvokePort 签名
 │   └── event_sink.rs               #   事件 sink
 └── adapters/                       # 技术实现、外部 detail
     └── event_projection.rs         #   DomainEvent → 投影

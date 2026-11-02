@@ -1,0 +1,547 @@
+[
+  {
+    "case_id": "01a182e6-0323-7f1c-96d6-1295a8529d76",
+    "items": [
+      {
+        "question": "issue #2142 的根因是什么？",
+        "gold": "#2115 做依赖反转时把 context 内部的 CompactGenerator 换成 CompactLlmBinding 按轮注入，删除了旧的 ProviderCompactGenerator 装配，但未在 composition 重建新工厂装配点，也未把 binding 注入两处 CompactRequestData，导致 coordination 两处写死 llm: None。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "root_cause"
+      },
+      {
+        "question": "用户提议 provider 持有 client 池子后，评估认为真正缺的是什么？",
+        "gold": "缺的不是池子——TransportPool 已做连接级 lazy 复用、resolver 已做 binding 缓存；缺的是 LlmClient 被 ProviderAdapter 包死交不出来（build 产物只交出 ProviderPort，交不出裸 LlmClient 句柄）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "root_cause"
+      },
+      {
+        "question": "为什么不能按用户最初设想直接传一个固定 LlmClient 给 compact？",
+        "gold": "LlmClient 构造期冻结单一 transport 与模型身份，而 compact 目标模型有两个运行时可变轴：context.compact_model 热配置可指向另一 provider，未配置时跟随 /model 切换；固定 client 会与按轮解析的模型 transport 失配。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "tradeoff"
+      },
+      {
+        "question": "被否决的「方案B止血」是什么、否决原因？",
+        "gold": "方案B是 composition 另 wire 一个 LlmClient 当 invoker 传给 factory；否决原因是固定 invoker 与按轮模型 transport 失配（跨 driver compact_model 会走错通道），且 invoker 的 spec 语义模糊。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "tradeoff"
+      },
+      {
+        "question": "用户最终拍板的方案D是什么？",
+        "gold": "ProviderBindingData 一次 build 交出双句柄：同一 Arc<LlmClient> 同时成为 provider（会话流式）与 text_invoker（compact 文本调用），invoker 与 model 恒同源 wire，零 adapter。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "LlmInvokePort 单端口的最终形态？",
+        "gold": "provider crate 唯一定义：流式 invoke_stream 是唯一必须实现的 verb；invoke_text 为端口默认方法（collect_text 单一收口实现点）；非流式即流式收口，不再作为独立 trait。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "LLM 调用的取消真相源约定？",
+        "gold": "单通道：唯一真相源是 request.cancellation（ProviderRequestData 内嵌 token），端口不再有独立的取消参数或第二取消通道。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "constraint"
+      },
+      {
+        "question": "用户规定的 LlmInvokePort 实现权约束？",
+        "gold": "除 provider 外任何 crate（含测试 fake）都不得实现该 trait；测试需要可控行为时经 provider::test_support 的脚本化端口构造。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "constraint"
+      },
+      {
+        "question": "用户对 trait 分文件与守卫豁免的规则？",
+        "gold": "trait 分两类分文件放：依赖注入类集中 ports 面、内部类留 domain；守卫对注入类豁免（实现方为登记宿主即合法），能力端口类严格执行实现权白名单。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "constraint"
+      },
+      {
+        "question": "用户对 PL trait 治理的总要求？",
+        "gold": "本期把所有 PL trait 都过一遍（全仓 97 个 pub trait 逐个判族处置），并推广到全仓规则。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "objective"
+      },
+      {
+        "question": "能力端口处置的验收目标？",
+        "gold": "能力端口实现权由编译器（Sealed trait）强制归属定义 crate，违规实现编译期拒绝，不再依赖字符串守卫；守卫作双保险。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "objective"
+      },
+      {
+        "question": "UnsupportedLlmInvokePort 的最终处置？",
+        "gold": "确认为死代码（单端口收敛后零调用）后删除：占位 struct/函数、dev feature、runtime/composition 的 dev-dep 声明、白名单两项一并清理。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "state"
+      },
+      {
+        "question": "全仓 pub trait 盘点结果？",
+        "gold": "97 个 pub trait：42 internal、31 capability（pure+fake-leak+comp-bridge 细分）、16 injected-host 等，33 个在根导出面登记。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "state"
+      },
+      {
+        "question": "PR #2147 的状态？",
+        "gold": "已合入 main（merge commit 730dc06cb），含 sealed 试点与批量 11 个能力端口密封、环境依赖测试顺手修复。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "state"
+      },
+      {
+        "question": "sealed trait 的原理与解锁位置？",
+        "gold": "原理：pub trait 绑定私有模块中的 Sealed 超 trait，外部不可命名该 trait 路径，无法写出合法 impl（编译期 E0277）；获准实现的解锁 impl 集中在 trait 定义文件内（pub(crate) mod sealed + pub trait）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "批量 seal 了哪批能力端口？",
+        "gold": "storage AtomicDatasetPort；tools CommandCatalogPort/CommandRouterPort/Guidance/SkillLoadPort；harness ComponentRegistry/RsiTask；config GlobalConfigConnectStore/ProjectConfigParticipant；task TaskAccess/TaskRestoreAccess。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "环境依赖测试缺陷的处置方式？",
+        "gold": "不开 issue，顺手修：session_prompt_includes_discipline_last 注入 GuidanceFixture 隔离，不读真实工作区 AGENTS.md（与同文件既有模式一致）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "Tool 的密封方式？",
+        "gold": "唯一实现是泛型 TypedToolAdapter<T>（工具源实现 TypedTool 经 adapter 注册），对泛型类型一行解锁 Sealed，实现权仍归 tools crate。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "AgentDispatch 为什么修正为注入类？",
+        "gold": "其实现方是 runtime 的 CliAgentRunner，用 impl AgentRunner for 的别名形态（pub use AgentDispatch as AgentRunner），躲过了按简名扫描的文本检测；实为宿主接口，登记豁免不 seal。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "root_cause"
+      },
+      {
+        "question": "provider test_support 的脚本化端口是否做取消前置检查？",
+        "gold": "不做：回放器只回放脚本，取消语义由脚本自行表达；生产 LlmClient 才承担 fast-path（强加拦截会掩盖脚本意图，reflection 取消用例实证）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "early",
+        "kind": "decision"
+      },
+      {
+        "question": "测试 fake 实现 LlmInvokePort 的禁令内容？",
+        "gold": "除 provider 外任何 crate 的测试 fake 不得实现该 trait，统一改用 provider::test_support 的脚本化端口（scripted_llm/scripted_llm_async 等）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "constraint"
+      },
+      {
+        "question": "impl_registry 守卫的「登记即锁」语义？",
+        "gold": "未登记的 trait 不校验（存量渐进登记），一旦登记即锁定：sealed 类编译器+守卫双卡；其余类按 owner+composition+allowed_impl_crates 白名单，新增未登记实现即违规。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "constraint"
+      },
+      {
+        "question": "新增 PL trait 的登记要求？",
+        "gold": "新增 PL trait MUST 登记到 impl_registry；能力端口同时必须加 Sealed（sealed 由编译器强制）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "constraint"
+      },
+      {
+        "question": "fake-pending 批次的清零目标？",
+        "gold": "17 个 capability(fake-leak) trait / 66 处消费方 fake 全部收敛到定义方 test_support，然后逐个 trait 转 sealed，fake-pending 归零。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "objective"
+      },
+      {
+        "question": "各定义方 test_support 的构建要求？",
+        "gold": "每个定义方 crate 新增 test_support 模块（dev feature 门控、生产不编译），提供可编排替身与便捷构造，替代各消费方本地 fake。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "objective"
+      },
+      {
+        "question": "为什么不在 context 造一个「大而全」的万能 context 替身？",
+        "gold": "context 四端口方法面大且各测试行为定制差异大，万能替身会语义污染；改采两件套——recording_context_over/recording_context_shared（装饰器，记录持久化调用）+ StubContextService（独立响应，成功/恒错/读路失败可配）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "tradeoff"
+      },
+      {
+        "question": "为什么否决用 pattern_exclusion 做 impl 位置校验？",
+        "gold": "pattern_exclusion 会剥离 cfg(test) 区域——恰好把要约束的测试 fake 排除了；且它是子串匹配，无法表达 impl 位置语义。故给守卫引擎新增 impl_registry 断言。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "tradeoff"
+      },
+      {
+        "question": "MemoryOpener / TaskPersist 为何最初被误登为 fake-pending？",
+        "gold": "登记表生成时按「有 test_impl 即 fake-pending」的粗分类放入，但二者实际有跨 crate 生产实现（context/runtime 是宿主），应归注入宿主；后修正为 injected-host。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "root_cause"
+      },
+      {
+        "question": "ProviderFactory 的判族结论？",
+        "gold": "生产实现是 composition 的 DefaultProviderFactory（以 ProviderFactoryTrait 别名 impl 形态存在）→ comp-bridge；不可 seal（composition 无法命名定义方 Sealed），测试 fake 已清零。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "MemoryPort 的收敛方式？",
+        "gold": "memory test_support 提供 InjectionOnlyMemory：retrieve_for_inject 返回固定结果并记录 query，其余写通道 panic 防误用；MemoryPort 转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "AtomicBlobPort 的收敛方式？",
+        "gold": "storage test_support 提供 InMemoryBlobPort：内存 map + 读世代语义 + 可注入写失败 + reads/writes/quarantines/delete_options 记录 + promote 可配置；转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "Workspace 三兄弟（Reader/Control/Writer）的收敛方式？",
+        "gold": "project test_support 提供 FakeWorkspace（路径解析/越界校验/可变 current/enter_calls 记录）与 FixedWorkspaceWriter；三 trait 均转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "Policy 的收敛方式？",
+        "gold": "policy test_support 提供 scripted_policy（脚本 evaluate + 固定 mode）与 allow_all_standard；Policy 转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "SkillCatalogPort 的收敛方式？",
+        "gold": "tools test_support 提供 FixedSkillCatalog（固定集）与 MutableSkillCatalog（共享 Mutex 可变集）；转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "SessionManagementPort 的收敛方式？",
+        "gold": "context test_support 提供 ScriptedSessionManagement（load 闭包 + update 记录 + 其余通道 Err）；转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "ToolExecutionPort 的收敛方式？",
+        "gold": "tools test_support 提供 scripted_tool_execution（同步脚本）与 scripted_tool_execution_async（HRTB 借用 context，sleep/取消交互）；转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "ScoringPort 的收敛方式？",
+        "gold": "systemone test_support 提供 scripted_scoring（脚本闭包）与 unavailable_scoring（恒不可用）；转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "context 四端口（Window/Compact/Append/ReminderControl）的收敛方式？",
+        "gold": "context test_support 两件套：recording_context_over/recording_context_shared 装饰器（记录 RecordedContextCall）与 StubContextService（成功固定响应/恒错/read_only_failing/set_compact_outcome）；四 trait 转 sealed。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "decision"
+      },
+      {
+        "question": "36 处非 provider 实现的收敛结果？",
+        "gold": "全部迁移到 provider::test_support 后为 0 处，编译器与 rg 双重验证无外部实现。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "state"
+      },
+      {
+        "question": "守卫登记表的条目与分类（fake-pending 清零前）？",
+        "gold": "55 条：sealed 27、injected-host 17、comp-bridge 9、fake-pending 2；后续修正为 sealed 28、injected-host 18、comp-bridge 9、fake-pending 0。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "state"
+      },
+      {
+        "question": "PL trait 治理的终态构成？",
+        "gold": "97 pub trait = 42 internal（不动）+ 28 sealed（编译器强制）+ 18 injected-host + 9 comp-bridge（登记白名单）+ 0 fake-pending。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "mid",
+        "kind": "state"
+      },
+      {
+        "question": "push_reminder_fact 接口的形态约束？",
+        "gold": "接口只接受 ReminderFactData 数据类型，无 trait 多态；ReminderSource trait 形态退役删除。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "constraint"
+      },
+      {
+        "question": "管线对非白名单 kind 的处理？",
+        "gold": "create_reminder_pipeline 注册本 Run 允许的 kind 白名单；push_fact 时非白名单 kind 拒收（warn 丢弃）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "constraint"
+      },
+      {
+        "question": "用户对 issue 与合入的要求？",
+        "gold": "别开多余 issue（问题在本 PR 内顺手解决）；PR #2149 不合入，等用户确认。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "constraint"
+      },
+      {
+        "question": "注入/桥接余项处置的三档标准？",
+        "gold": "每项逐个判定：seal（实现在定义方）/ 保持注入（宿主语义正当，登记留白名单）/ 桥接重构（挪 composition）；落地后更新 impl_registry。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "objective"
+      },
+      {
+        "question": "用户拍板可做的工作范围（A1/B/C）？",
+        "gold": "A1 CompactProgressFn 密封；B 其余 injected-host 挂各 crate 的 PL 整理 issue；C comp-bridge 过一遍挂 composition 的 PL issue；ReminderSource 按「数据类+接口」方向改造。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "objective"
+      },
+      {
+        "question": "为什么否决把 ReminderSource 四个实现整体迁到 context？",
+        "gold": "四个 source 是跨域数据聚合器（依赖 task::TaskAccess、runtime 内部 BackgroundProcessSupervisor、memory/systemone 端口），整体迁 context 会造成 context 反向依赖多域且够不到 runtime 内部状态。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "tradeoff"
+      },
+      {
+        "question": "为什么否决保留 ReminderSource trait 的 pull 模型？",
+        "gold": "用户拍板数据化：数据在 runtime、管线在 context 的缝应经数据推送而非 trait 多态；渲染模板已内置 context（render_invocation_reminder_body），trait 的 render/build 是纯转发冗余。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "tradeoff"
+      },
+      {
+        "question": "ReminderSource 是干什么的（结构角色）？",
+        "gold": "它是「运行时事实 → 模型可见提醒」管线的数据源扩展点：提供 kind 身份、policy（刷新时机/注入位置/优先级/compact 处置）、build 快照、render 正文、confirm_injected 消费回执。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "root_cause"
+      },
+      {
+        "question": "push 模型下 confirm_injected 的消费语义如何等价保障？",
+        "gold": "推送即交出事实，队列的快照滞留/重注入机制保障未注入的下一轮补注（#252 语义等价）；runtime 侧在 fact 构建时即标记已通知（peek 后 mark_notified）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "root_cause"
+      },
+      {
+        "question": "ReminderFactData 的字段构成？",
+        "gold": "kind（ReminderKind）+ policy（ReminderPolicy）+ enqueue（ReminderEnqueue：Snapshot 快照替换 / Event 事件累积）+ data（InvocationReminderData 的 JSON 载荷）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "decision"
+      },
+      {
+        "question": "管线的 push 与 trigger 如何分离？",
+        "gold": "push_fact 只更新缓存并按 OnEvent 型立即入队；时机方法（run_started/handle_event/task_mutated/user_message_received/step_advanced）按缓存 fact 的 policy.refresh 匹配入队；OnStepInterval 倍数由管线判定。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "decision"
+      },
+      {
+        "question": "提醒正文渲染归属？",
+        "gold": "归 context 内置：render_invocation_reminder_body 按 kind 反序列化 InvocationReminderData 渲染，不再 per-source render。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "decision"
+      },
+      {
+        "question": "CompactProgressFn 密封的实现方式？",
+        "gold": "context 的 blanket impl<F: Fn> 加 Sealed blanket 解锁；runtime 的 CompactProgressAdapter 显式 impl 删除，改为 compact_progress_adapter 闭包工厂（6 阶段 + work 映射保真）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "decision"
+      },
+      {
+        "question": "runtime 侧 TaskProgress / MemoryRecall / 后台完成事实的推送点？",
+        "gold": "TaskProgress 在 step 边界推送最新 fact（管线按 OnStepInterval 倍数入队）；MemoryRecall 在 turn 边界 refresh 后 push fact 再触发 user_message_received；后台完成在 Reminder 路由先 push fact（peek 即标记）再 handle_event。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "decision"
+      },
+      {
+        "question": "用户询问的符号比例统计（修正后）？",
+        "gold": "55 条登记：sealed 27（49%）、injected-host 17（30%）、comp-bridge 9（16%）、fake-pending 2（3%）；修正 MemoryOpener/TaskPersist 后为 sealed 28 / injected-host 19 / comp-bridge 9 / fake-pending 0。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "state"
+      },
+      {
+        "question": "B 轨道（injected-host 归位）的执行结果？",
+        "gold": "6 个既有 issue 已评论任务块：tools #1864（7 项）、hook #1873（3 项，交叉 #1739）、config #1866（2 项）、memory #1872（3 项）、task #1869（1 项）、总 issue #1729（ReminderSource 终态与 WorkflowToolBackend 说明）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "state"
+      },
+      {
+        "question": "C 轨道（comp-bridge 归位）的执行结果？",
+        "gold": "composition 的 PL issue #1875 已评论 9 项桥接逐一审查清单，重点标注 ProviderFactory 是否应反转（runtime 定义 composition 实现）。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "state"
+      },
+      {
+        "question": "runtime 四个 reminder source 的改造结果？",
+        "gold": "trait impl 全部删除，struct 保留数据能力并改为 fact 构建方法（task_progress_fact / run_start_fact 系列 / background_process_fact / memory_recall_fact），返回 ReminderFactData。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "state"
+      },
+      {
+        "question": "impl_registry 守卫的反向验证结果？",
+        "gold": "临时探针在 runtime 写 impl AtomicDatasetPort（sealed 类）被守卫精确拦截，报文含 trait/owner/type 与违规 crate 信息。",
+        "answer": null,
+        "correct": null,
+        "evidence": null,
+        "epoch": "recent",
+        "kind": "state"
+      }
+    ]
+  }
+]

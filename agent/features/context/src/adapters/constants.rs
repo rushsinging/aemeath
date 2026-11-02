@@ -33,6 +33,9 @@ pub(crate) const MAX_REDUCE_REFRESH_ROUNDS: usize = 3;
 /// 单个 typed compact 阶段格式无效时，最多额外请求一次 LLM 修复结构。
 pub(crate) const MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS: usize = 1;
 
+/// Compact 单次 LLM 调用的 retryable 重试上限（限流/上游抖动）。
+pub(crate) const COMPACT_PROVIDER_RETRY_LIMIT: u32 = 2;
+
 /// previous_summary 允许嵌入的最大字符数（domain 单一真相，见 token_budget）。
 pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize =
     crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP;

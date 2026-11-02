@@ -10,24 +10,7 @@ use crate::SkillQueryFactory;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
-use tools::published::skill::{
-    SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind,
-};
-
-struct FakeCatalog;
-impl SkillCatalogPort for FakeCatalog {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        vec![SkillDescriptor::new(
-            "release",
-            "create a release",
-            SkillSource::file(SkillSourceKind::ProjectAgents, "/fake/release/SKILL.md"),
-            Vec::new(),
-            Some("release".into()),
-            Vec::new(),
-            Some("[version]".into()),
-        )]
-    }
-}
+use tools::published::skill::{SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
 
 struct FixedQueryFactory;
 impl SkillQueryFactory for FixedQueryFactory {
@@ -64,7 +47,17 @@ fn base_request() -> ContextRequestData {
 async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
     let port = crate::wire_isolated_context_with_skill(
         "isolated-session",
-        Arc::new(FakeCatalog),
+        Arc::new(tools::test_support::FixedSkillCatalog(vec![
+            SkillDescriptor::new(
+                "release",
+                "create a release",
+                SkillSource::file(SkillSourceKind::ProjectAgents, "/fake/release/SKILL.md"),
+                Vec::new(),
+                Some("release".into()),
+                Vec::new(),
+                Some("[version]".into()),
+            ),
+        ])),
         Arc::new(FixedQueryFactory),
     );
     let window = port.window.build_window(&base_request()).await.unwrap();

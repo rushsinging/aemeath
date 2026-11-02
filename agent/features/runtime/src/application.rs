@@ -5,7 +5,6 @@
 pub(crate) mod activity;
 pub(crate) mod background_process;
 pub(crate) mod client;
-pub(crate) mod compact_generator;
 pub(crate) mod constants;
 pub(crate) mod context;
 pub(crate) mod hook;

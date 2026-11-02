@@ -9,7 +9,7 @@ use crate::domain::{
 
 /// Storage-owned OHS for crash-consistent, complete-generation datasets.
 #[async_trait]
-pub trait AtomicDatasetPort: Send + Sync {
+pub trait AtomicDatasetPort: crate::sealed::Sealed + Send + Sync {
     /// Recovers any pending transaction, then discovers the current generation.
     async fn read_manifest(
         &self,

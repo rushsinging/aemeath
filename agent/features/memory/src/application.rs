@@ -412,6 +412,7 @@ impl ReflectionWorkflow {
                 None
             },
             stale_swept: Some(stale_swept),
+            error_detail: None,
         };
         history
             .upsert(&record)
@@ -456,15 +457,19 @@ impl ReflectionWorkflow {
         identity: &ReflectionExecutionIdentity,
         category: ReflectionErrorCategory,
         duration_ms: u64,
+        error_detail: Option<String>,
     ) -> Result<(), ReflectionWorkflowError> {
         history
-            .upsert(&ReflectionRecord::failed(
-                identity.id.clone(),
-                identity.timestamp,
-                identity.trigger,
-                category,
-                duration_ms,
-            ))
+            .upsert(
+                &ReflectionRecord::failed(
+                    identity.id.clone(),
+                    identity.timestamp,
+                    identity.trigger,
+                    category,
+                    duration_ms,
+                )
+                .with_error_detail(error_detail),
+            )
             .await
             .map_err(|_| ReflectionWorkflowError::HistoryWrite)
     }

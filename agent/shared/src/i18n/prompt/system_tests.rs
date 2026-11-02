@@ -107,6 +107,24 @@ fn static_system_prompt_core_contract_item_count_is_sixteen() {
 }
 
 #[test]
+fn static_system_prompt_locks_workflow_replanning_discipline() {
+    let en = static_system_prompt("en");
+    assert!(en.contains("# Workflow replanning discipline"));
+    assert!(en.contains("never advance the old graph"));
+    assert!(en.contains("never restore or rewrite Failed / Stopped nodes"));
+    assert!(en.contains("workflow_query"));
+    assert!(en.contains("workflow_replan"));
+    assert!(en.contains("may not connect directly to the Complete node"));
+
+    let zh = static_system_prompt("zh");
+    assert!(zh.contains("# Workflow 重规划纪律"));
+    assert!(zh.contains("不得继续推进旧 Graph"));
+    assert!(zh.contains("不得恢复或原地改写 Failed / Stopped 节点"));
+    assert!(zh.contains("workflow_replan"));
+    assert!(zh.contains("不得直连 Complete 节点"));
+}
+
+#[test]
 fn static_system_prompt_locks_design_full_picture_before_details() {
     let en = static_system_prompt("en");
     assert!(en.contains("first present the full picture"));

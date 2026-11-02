@@ -113,7 +113,7 @@ pub struct SessionStreamEntry {
     pub updated_at_secs: u64,
 }
 
-/// 单个数据源块：一组 run 引用（session 边界优先切块）。
+/// 单个数据源块：一组同 session 的 run 引用（session 是硬边界）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceBlockPlan {
     pub runs: Vec<RunRef>,
@@ -133,7 +133,7 @@ pub struct StreamPlanParams {
     pub initial_window_days: u64,
     /// 每周期步长上限：最多处理的 run 数。
     pub max_runs_per_cycle: usize,
-    /// 每块 run 数上限（块边界优先 session 边界）。
+    /// 每块 run 数上限（session 为硬边界，块 NEVER 跨 session）。
     pub block_run_limit: usize,
     /// 组件树指纹（记录用）。
     pub component_tree_fingerprint: String,
@@ -141,7 +141,7 @@ pub struct StreamPlanParams {
 
 /// 规划证据流（纯函数）：
 /// 候选 session（升序）→ 每 session 展开 run（装配层给 session→runs 映射，
-/// 过滤已处理）→ run 级步长截断 → session 边界优先切块。
+/// 过滤已处理）→ run 级步长截断 → session 硬边界 + 块上限切块。
 pub fn plan_evidence_stream(
     entries: Vec<SessionStreamEntry>,
     state: &EvidenceStreamState,
@@ -198,9 +198,9 @@ pub fn plan_evidence_stream(
         }
     }
 
-    // run 级步长 + session 边界优先切块：pending_runs 按 session 连续
-    // （外层 session 内层 run），贪心切块——块满即切，天然不在 session
-    // 中间开新块；单 session 超块上限才被切（session_complete=false）。
+    // run 级步长 + session 硬边界切块：总 run 数先按周期上限截断；
+    // chunk 内 NEVER 混合 session。session 结束即使块未满也立刻 flush；
+    // 单 session 超过 block_run_limit 才在 session 内继续切。
     let truncated: Vec<RunRef> = pending_runs
         .into_iter()
         .take(params.max_runs_per_cycle)
@@ -209,7 +209,10 @@ pub fn plan_evidence_stream(
     let mut blocks = Vec::new();
     let mut current: Vec<RunRef> = Vec::new();
     for run_ref in truncated {
-        if current.len() >= params.block_run_limit && !current.is_empty() {
+        let crosses_session = current
+            .last()
+            .is_some_and(|existing| existing.session_key != run_ref.session_key);
+        if !current.is_empty() && (crosses_session || current.len() >= params.block_run_limit) {
             blocks.push(EvidenceBlockPlan {
                 runs: std::mem::take(&mut current),
             });

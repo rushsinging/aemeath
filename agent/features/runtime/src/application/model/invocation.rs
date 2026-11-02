@@ -279,8 +279,9 @@ async fn invoke_model_impl(
                 request.system.len(),
                 request.tools.len(),
             );
+            // 取消真相源单通道（#2146）：request.cancellation = stream_cancel。
             let stream = provider
-                .invoke(request, &stream_cancel)
+                .invoke_stream(&binding.model, &request)
                 .await
                 .map_err(|error| (error, false))?;
             coordinator

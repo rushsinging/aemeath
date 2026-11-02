@@ -270,3 +270,6 @@ fn embedded_asset_contract(error: crate::domain::ModelManifestError) -> Embedded
 #[cfg(test)]
 #[path = "embedded_tests.rs"]
 mod tests;
+
+// #2146 密封解锁。
+impl crate::sealed::Sealed for EmbeddedScoringAdapter {}

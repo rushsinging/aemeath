@@ -24,7 +24,10 @@ fn agent_for_test_persist_uses_context_workspace_backing() {
     backing
         .views()
         .control()
-        .change_directory(temp.path().to_path_buf())
+        .change_directory(
+            temp.path().to_path_buf(),
+            share::tools_vocab::AuthorizationContext::STANDARD,
+        )
         .expect("mutate shared workspace backing");
     assert_eq!(
         agent.workspace_persist.snapshot(),

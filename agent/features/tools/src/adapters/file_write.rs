@@ -66,10 +66,10 @@ impl TypedTool for FileWriteTool {
         };
         let requested_path = args.file_path.as_str();
         let content = args.content.as_str();
-        let path = match ctx.workspace_read().resolve_file_path_authorized(
-            std::path::Path::new(requested_path),
-            ctx.authorization().allow_outside_workspace,
-        ) {
+        let path = match ctx
+            .workspace_read()
+            .resolve_file_path(std::path::Path::new(requested_path), ctx.authorization())
+        {
             Ok(path) => path,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };

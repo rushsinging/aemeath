@@ -4,7 +4,7 @@ use super::execution::{
     execute_reflection, CompleteReflectionResult, ReflectionExecutionResultType,
     ReflectionInvocation,
 };
-use crate::ports::ProviderPort;
+use crate::ports::LlmInvokePort;
 use memory::api::reflection::{
     ReflectionErrorCategory, ReflectionExecutionIdentity, ReflectionTrigger, ReflectionWorkflow,
 };
@@ -233,7 +233,7 @@ impl ReflectionTaskAdapter {
             timeout,
             #[cfg(test)]
             executor: std::sync::Arc::new(|_request, _cancel| {
-                Box::pin(async { Err(ReflectionError::LlmCall) })
+                Box::pin(async { Err(ReflectionError::LlmCall("scripted failure".to_string())) })
             }),
             pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
             reflection_binding: None,
@@ -310,7 +310,7 @@ impl ReflectionTaskAdapter {
         &self,
         request: ReflectionTaskRequest,
         config: share::config::MemoryConfig,
-        provider: std::sync::Arc<dyn ProviderPort>,
+        provider: std::sync::Arc<dyn LlmInvokePort>,
         model: provider::ModelInfo,
         max_tokens: u32,
         requested_reasoning: share::reasoning::ReasoningLevel,
@@ -537,6 +537,7 @@ impl ReflectionTaskAdapter {
                     &persistence.identity,
                     category,
                     started.elapsed().as_millis() as u64,
+                    None,
                 )
                 .await
                 .is_err()

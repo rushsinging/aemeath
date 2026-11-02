@@ -1,100 +1,27 @@
 use super::*;
-use context::session::{CanonicalSession, SessionMetadata};
-use context::SessionManagementError;
 use share::session_types::ProjectIdentityData;
-use std::sync::Mutex;
+use std::sync::Arc;
 
-#[derive(Default)]
-struct RecordingSessionManagement {
-    updates: Mutex<Vec<(String, Option<String>)>>,
-    stored_model: Mutex<Option<String>>,
+/// #2146：实现权归 context crate。stored_model 决定 load 出的 metadata.model。
+fn model_port(stored: Option<&str>) -> Arc<context::test_support::ScriptedSessionManagement> {
+    let stored = stored.map(str::to_string);
+    Arc::new(context::test_support::ScriptedSessionManagement::new(
+        move |id| {
+            let mut session = context::session::CanonicalSession::fixture(id);
+            session.metadata.model = stored.clone();
+            session
+        },
+    ))
 }
 
-impl RecordingSessionManagement {
-    fn with_stored_model(model: Option<&str>) -> Self {
-        Self {
-            updates: Mutex::new(Vec::new()),
-            stored_model: Mutex::new(model.map(str::to_string)),
-        }
-    }
-
-    fn session_with_model(id: &str, model: Option<String>) -> CanonicalSession {
-        let mut session = CanonicalSession::empty(id.to_string());
-        session.metadata = SessionMetadata {
-            model,
-            ..SessionMetadata::default()
-        };
-        session.revision = 1;
-        session
-    }
-}
-
-#[async_trait::async_trait]
-impl context::SessionManagementPort for RecordingSessionManagement {
-    async fn load_for_project(
-        &self,
-        id: &str,
-        _project: &ProjectIdentityData,
-    ) -> Result<context::session::CanonicalSession, SessionManagementError> {
-        Ok(Self::session_with_model(
-            id,
-            self.stored_model.lock().unwrap().clone(),
-        ))
-    }
-
-    async fn list_for_project(
-        &self,
-        _project: &ProjectIdentityData,
-    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
-        Ok(Vec::new())
-    }
-
-    async fn export_for_project(
-        &self,
-        _id: &str,
-        _project: &ProjectIdentityData,
-    ) -> Result<Vec<u8>, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".into()))
-    }
-
-    async fn import_for_project(
-        &self,
-        _bytes: &[u8],
-        _project: &ProjectIdentityData,
-    ) -> Result<sdk::SessionItemList, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".into()))
-    }
-
-    async fn update_metadata_for_project(
-        &self,
-        id: &str,
-        _project: &ProjectIdentityData,
-        update: context::session::SessionMetadata,
-    ) -> Result<sdk::SessionItemList, SessionManagementError> {
-        self.updates
-            .lock()
-            .unwrap()
-            .push((id.to_string(), update.model.clone()));
-        Ok(sdk::SessionItemList {
-            id: id.to_string(),
-            title: None,
-            project: None,
-            model: update.model,
-            created_at: "2026-01-01T00:00:00Z".into(),
-            updated_at: "2026-01-01T00:00:00Z".into(),
-            message_count: 0,
-            preview: None,
-            summary: String::new(),
-        })
-    }
-
-    async fn delete_for_project(
-        &self,
-        _id: &str,
-        _project: &ProjectIdentityData,
-    ) -> Result<(), SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".into()))
-    }
+/// updates 投影为 (id, model) 元组（与原断言口径一致）。
+fn recorded_models(
+    port: &context::test_support::ScriptedSessionManagement,
+) -> Vec<(String, Option<String>)> {
+    port.updates()
+        .into_iter()
+        .map(|m| ("session-1".to_string(), m.model))
+        .collect()
 }
 
 #[test]
@@ -107,13 +34,13 @@ fn session_model_key_joins_source_and_model_id() {
 
 #[tokio::test]
 async fn persist_session_model_writes_metadata_model() {
-    let port = RecordingSessionManagement::default();
+    let port = model_port(None);
     let project = ProjectIdentityData {
         initial_cwd: "/tmp/proj".into(),
         git_common_dir: None,
     };
-    persist_session_model(&port, "session-1", &project, "Zhipu Coding Plan/glm-5.3").await;
-    let updates = port.updates.lock().unwrap().clone();
+    persist_session_model(&*port, "session-1", &project, "Zhipu Coding Plan/glm-5.3").await;
+    let updates = recorded_models(&port);
     assert_eq!(
         updates,
         vec![(
@@ -125,38 +52,38 @@ async fn persist_session_model_writes_metadata_model() {
 
 #[tokio::test]
 async fn persist_session_model_skips_blank_model() {
-    let port = RecordingSessionManagement::default();
+    let port = model_port(None);
     let project = ProjectIdentityData {
         initial_cwd: "/tmp/proj".into(),
         git_common_dir: None,
     };
-    persist_session_model(&port, "session-1", &project, "  ").await;
-    assert!(port.updates.lock().unwrap().is_empty());
+    persist_session_model(&*port, "session-1", &project, "  ").await;
+    assert!(port.updates().is_empty());
 }
 
 #[tokio::test]
 async fn persist_session_model_skips_when_metadata_model_unchanged() {
-    let port = RecordingSessionManagement::with_stored_model(Some("OmniRoute/cursor-auto"));
+    let port = model_port(Some("OmniRoute/cursor-auto"));
     let project = ProjectIdentityData {
         initial_cwd: "/tmp/proj".into(),
         git_common_dir: None,
     };
-    persist_session_model(&port, "session-1", &project, "OmniRoute/cursor-auto").await;
+    persist_session_model(&*port, "session-1", &project, "OmniRoute/cursor-auto").await;
     assert!(
-        port.updates.lock().unwrap().is_empty(),
+        port.updates().is_empty(),
         "same model must not bump session generation"
     );
 }
 
 #[tokio::test]
 async fn persist_session_model_writes_when_metadata_model_differs() {
-    let port = RecordingSessionManagement::with_stored_model(Some("OmniRoute/old"));
+    let port = model_port(Some("OmniRoute/old"));
     let project = ProjectIdentityData {
         initial_cwd: "/tmp/proj".into(),
         git_common_dir: None,
     };
-    persist_session_model(&port, "session-1", &project, "OmniRoute/cursor-auto").await;
-    let updates = port.updates.lock().unwrap().clone();
+    persist_session_model(&*port, "session-1", &project, "OmniRoute/cursor-auto").await;
+    let updates = recorded_models(&port);
     assert_eq!(
         updates,
         vec![(

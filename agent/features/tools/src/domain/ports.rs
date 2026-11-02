@@ -82,7 +82,7 @@ pub trait ToolCatalogPort: Send + Sync {
 ///
 /// Policy、Hook、人工审批、timeout 和跨 Tool 并发不得下沉进此端口。
 #[async_trait]
-pub trait ToolExecutionPort: Send + Sync {
+pub trait ToolExecutionPort: crate::sealed::Sealed + Send + Sync {
     /// 执行一次 Tool 调用。
     ///
     /// `context` 是本次调用唯一的活能力来源；其 scope 必须与 invocation

@@ -120,6 +120,15 @@ pub fn wire_memory_event_store(
 }
 
 mod constants;
+
+/// 实现密封基建（#2146 实现权治理）：crate 内共享 Sealed 标记。
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+/// 测试实现面（#2146 实现权治理）：MemoryPort 实现权归本 crate。
+#[cfg(any(test, feature = "dev"))]
+pub mod test_support;
 pub(crate) use constants::LOG_TARGET;
 
 mod adapters;

@@ -15,7 +15,7 @@ use super::task_persist::TaskPersist;
 pub struct SessionRestoreTicket(PreparedTaskRestoreData);
 
 /// 会话恢复协议参与方契约（Runtime Session 切换协议消费面）。
-pub trait TaskRestoreAccess: Send + Sync {
+pub trait TaskRestoreAccess: crate::sealed::Sealed + Send + Sync {
     /// 校验候选快照并预备恢复，不触碰活聚合；`None` 表示清空语义
     /// （等价 `TaskSnapshotData::empty()`）。
     fn prepare_session_restore(
@@ -54,3 +54,6 @@ impl TaskRestoreAccess for TaskRestoreAccessAdapter {
         self.persist.commit_restore(ticket.0);
     }
 }
+
+// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
+impl crate::sealed::Sealed for TaskRestoreAccessAdapter {}

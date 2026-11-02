@@ -10,7 +10,7 @@ use crate::domain::component::ComponentId;
 use crate::domain::errors::HarnessError;
 
 /// 组件树注册表端口。
-pub trait ComponentRegistry: Send {
+pub trait ComponentRegistry: crate::sealed::Sealed + Send {
     /// 枚举全部可编辑组件（稳定排序）。
     fn list(&self) -> Vec<ComponentId>;
 

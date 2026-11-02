@@ -1365,3 +1365,6 @@ fn matches_filters(
 fn count_layer(entries: &[MemoryEntry], layer: MemoryLayer) -> usize {
     entries.iter().filter(|entry| entry.layer == layer).count()
 }
+
+// #2146 密封解锁：实现权归属声明（crate 内）。
+impl crate::sealed::Sealed for InMemoryMemory {}

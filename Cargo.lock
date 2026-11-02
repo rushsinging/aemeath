@@ -582,6 +582,7 @@ dependencies = [
  "provider",
  "runtime",
  "sdk",
+ "serde",
  "serde_json",
  "share",
  "storage",
@@ -3733,6 +3734,7 @@ dependencies = [
  "tools",
  "utils",
  "uuid",
+ "workflow",
 ]
 
 [[package]]
@@ -5759,7 +5761,9 @@ dependencies = [
  "serde",
  "serde_json",
  "share",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

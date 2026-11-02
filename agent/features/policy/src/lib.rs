@@ -11,6 +11,15 @@
 //! `allow_all()` 工厂返回 `Arc<dyn Policy>`——策略实现不单独占导出类，
 //! mode 注入经 `Fn() -> PolicyModeData` 闭包（无需 trait）。
 
+/// 实现密封基建（#2146 实现权治理）。
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+/// 测试实现面（跨 crate 测试经 dev feature）。
+#[cfg(any(test, feature = "dev"))]
+pub mod test_support;
+
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod constants;
 pub(crate) use constants::LOG_TARGET;

@@ -419,10 +419,13 @@ fn test_shell_with_catalog(
                 Arc::new(task::TaskStore::new()),
                 hooks,
                 Arc::new(crate::ports::UnavailableUsageSink),
-            None,
-            None,
-            None,
-            ),        ),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ),
     }
 }
 
@@ -528,10 +531,13 @@ fn test_shell_with_task_store(
                 task_store,
                 hooks,
                 Arc::new(crate::ports::UnavailableUsageSink),
-            None,
-            None,
-            None,
-            ),        ),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ),
     }
 }
 

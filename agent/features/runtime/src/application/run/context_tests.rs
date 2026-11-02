@@ -10,7 +10,7 @@ use crate::application::run::context::{
 };
 use crate::application::run::creation::RunInstance;
 use crate::application::run::run_factory_support::{
-    doubles::{FakeContextPort, RecordingEventSink},
+    doubles::{fake_context_service, RecordingEventSink},
     SessionRunFixture,
 };
 use crate::ports::ContextPorts;
@@ -33,7 +33,7 @@ fn runtime_context_production_model_has_no_flat_run_context_bindings() {
 
 #[test]
 fn main_runtime_context_preserves_injected_port_identity() {
-    let context_port: ContextPorts = ContextPorts::from_service(Arc::new(FakeContextPort));
+    let context_port: ContextPorts = ContextPorts::from_service(fake_context_service());
     let fixture = SessionRunFixture::builder()
         .with_context_port(context_port)
         .build();
@@ -825,21 +825,11 @@ fn factory_assembled_context_event_sink_is_real_not_noop() {
 fn scoring_slots_preserve_independent_identity_per_accessor() {
     use std::sync::Arc;
 
-    struct NoopScoring;
-
-    #[async_trait::async_trait]
-    impl systemone::ScoringPort for NoopScoring {
-        async fn answer(
-            &self,
-            _state: &systemone::ScoringState,
-            _questions: &[systemone::ScoringQuestion],
-        ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-            Ok(Vec::new())
-        }
-    }
-
-    let recall_port: Arc<dyn systemone::ScoringPort> = Arc::new(NoopScoring);
-    let skill_match_port: Arc<dyn systemone::ScoringPort> = Arc::new(NoopScoring);
+    // #2146：ScoringPort 实现权归 systemone crate。
+    let noop_scoring =
+        || systemone::test_support::scripted_scoring(|_state, _questions| Ok(Vec::new()));
+    let recall_port: Arc<dyn systemone::ScoringPort> = noop_scoring();
+    let skill_match_port: Arc<dyn systemone::ScoringPort> = noop_scoring();
     let fixture = SessionRunFixture::builder()
         .with_scoring_slots(Some(recall_port.clone()), Some(skill_match_port.clone()))
         .build();

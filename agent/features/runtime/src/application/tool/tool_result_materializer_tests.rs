@@ -95,6 +95,10 @@ async fn oversized_unicode_output_writes_full_bytes_and_formats_character_previe
     assert!(output.text().contains("戊"));
     assert!(output.text().contains("2 chars omitted"));
     assert!(output.text().contains("tool-result://session/tool"));
+    // 占位符 MUST 明示「这是预览、盘上完整未截断」，避免读方误判落盘也被裁。
+    assert!(output.text().contains("Preview only"));
+    assert!(output.text().contains("COMPLETE and NOT truncated"));
+    assert!(output.text().contains("omitted from THIS PREVIEW ONLY"));
     assert_eq!(
         blobs.writes.lock().unwrap().as_slice(),
         &[(
@@ -122,6 +126,8 @@ async fn oversized_output_when_blob_write_fails_keeps_bounded_projection() {
     assert!(output.text().contains("2 chars omitted"));
     assert!(!output.text().contains("甲乙丙丁戊"));
     assert!(output.warning().is_some());
+    // 落盘失败必须明说全文不可得，不得让读方以为另有完整副本。
+    assert!(output.text().contains("could NOT be persisted"));
 }
 
 #[tokio::test]

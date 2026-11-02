@@ -7,6 +7,9 @@ edition.workspace = true
 default = []
 # 仅供 Storage crash harness 编译故障点；默认生产构建不包含 env/abort 路径。
 test-fault-injection = []
+# 测试实现面（InMemoryBlobPort 等）。Consumers add `storage` to
+# `[dev-dependencies]` with `features = ["dev"]`. Never enabled in production.
+dev = []
 
 [dependencies]
 tokio = { workspace = true }

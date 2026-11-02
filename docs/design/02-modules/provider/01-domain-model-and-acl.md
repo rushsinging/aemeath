@@ -7,7 +7,7 @@
 
 ## 1. 边界语言
 
-`ProviderPort` 定义在 Agent Runtime 一侧，因此调用请求、delta 与错误首先服务 Runtime 的 `Model Invocation` 语义。Provider adapter 实现该语言，不把供应商协议类型提升为领域模型。
+`LlmInvokePort` 定义在 Agent Runtime 一侧，因此调用请求、delta 与错误首先服务 Runtime 的 `Model Invocation` 语义。Provider adapter 实现该语言，不把供应商协议类型提升为领域模型。
 
 ```rust
 struct InvocationRequest {
@@ -120,7 +120,7 @@ Effective Reasoning = greatest supported level <= Requested Reasoning
 
 ```text
 Runtime frozen ReasoningLevel
-  → ProviderPort.resolve_invocation_options
+  → ModelInfo.resolve_reasoning（现存 clamp 入口，#2032）
   → ResolvedInvocationOptions.effective_reasoning
        ├─ ContextRequest.effective_reasoning → PromptRequest.effective_reasoning
        └─ InvocationRequest.options.effective_reasoning → InvocationScope
@@ -367,6 +367,6 @@ struct CapabilityFingerprint(u64); // 仅用于同一进程内的 capability 变
 |---|---|---|
 | 2026-07-12 | 初稿：调用边界语言、模型能力、三层 clamp、双向 ACL、usage 与错误分类 | #788 |
 | 2026-07-14 | 在 Context build 前解析并冻结 model capability；InvocationRequest 直接复用 ContextWindow 的唯一 Tool schema 集 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-19 | #907 完成 Adapter 收口：Runtime 只经 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 PL 消费 Provider；具体构造独占 Composition Root（`provider::composition`）；P1/P5/P12 关闭；旧 legacy sink/gateway/pool/setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam；#905 已关闭 P6/P7/P9；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
+| 2026-07-19 | #907 完成 Adapter 收口：Runtime 只经 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 PL 消费 Provider；具体构造独占 Composition Root（`provider::composition`）；P1/P5/P12 关闭；旧 legacy sink/gateway/pool/setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam；#905 已关闭 P6/P7/P9；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
 | 2026-07-17 | #921 收缩范围：resolver 领域模型已完成迁移但未接生产链路；Config `max_reasoning` 退役后 §3 clamp 链移除 user-maximum；Runtime 尚未调用 resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
 | 2026-07-22 | #1393 `ReasoningLevel` 扩展为七档 canonical（`Off / Minimal / Low / Medium / High / Xhigh / Max`）；明确 budget 与 effort 正交、禁止 token 阈值推导 effort；OpenAI `Off` wire 为 `"none"` 但禁止省略字段；每 driver 显式 `supported` 集合声明 | [#1393](https://github.com/rushsinging/aemeath/issues/1393) |

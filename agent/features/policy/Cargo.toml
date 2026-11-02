@@ -3,6 +3,9 @@ name = "policy"
 version.workspace = true
 edition.workspace = true
 
+[features]
+dev = []
+
 [dependencies]
 # 决策 BC 只依赖共享内核：执行词汇与 id 均来自 share（跨 BC 领域词汇下沉）。
 share = { path = "../../shared" }

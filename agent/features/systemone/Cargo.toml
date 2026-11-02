@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [features]
+# 测试实现面（scripted_scoring 等）。
+dev = []
 # Jev HTTP 评分 adapter / wire 类型 / `wire_http_scoring_port` 的编译开关：
 # 仅测试、eval 对分与回归基准使用（设计 §4.3 HTTP adapter 退役边界）。
 # `HttpArtifactFetcher` 下载能力不受此 feature 影响，reqwest 始终是必选依赖。

@@ -304,7 +304,8 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
     ) -> Result<crate::application::loop_engine::ManualCompactionOutcome, LoopEngineError> {
         let coordinator = crate::application::context::coordination::ContextCoordinator::new(
             self.runtime_context.context().clone(),
-        );
+        )
+        .with_compact_resolver(self.runtime_context.compact_model_resolver());
         let task_snapshot =
             crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
                 self.runtime_context.task().as_ref(),

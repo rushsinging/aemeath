@@ -121,6 +121,50 @@ where
         // Main 与 Derived 统一在此推进 step 计数（历史实现 Derived 在
         // invoke 前递增、Main 不递增导致 OnStepInterval 在 Main 从不触发）。
         let step_ordinal = execution.advance_step_ordinal();
+        // #2146 数据化：step 边界推送任务进度事实（数据在 Runtime），
+        // 管线下一次 step_advanced 按 OnStepInterval 倍数入队。
+        let task_progress_source =
+            crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
+                self.context_request.runtime_context.task(),
+                share::config::TaskListConfig::default().max_lines,
+            );
+        match task_progress_source.fact() {
+            Some(fact) => self
+                .context_request
+                .runtime_context
+                .context()
+                .reminders
+                .push_reminder_fact(&self.run_id, fact),
+            // 无任务 = 无内容：显式失效，避免 Rebuild 时重注入陈旧进度。
+            None => self
+                .context_request
+                .runtime_context
+                .context()
+                .reminders
+                .remove_reminder_fact(&context::ReminderKind::task_progress()),
+        }
+        // Workflow 状态事实（#2088）：每 step 重新取快照（数据化后数据面
+        // 由 Runtime 负责新鲜度），状态未变由 SkipIfUnchanged 去重。
+        if let Some(probe) = self.context_request.runtime_context.workflow_probe() {
+            let workflow_source =
+                crate::application::loop_engine::chat::reminder_sources::WorkflowStateReminderSource::new(
+                    probe,
+                );
+            match workflow_source.fact() {
+                Some(fact) => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .push_reminder_fact(&self.run_id, fact),
+                None => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .remove_reminder_fact(&context::ReminderKind::workflow_state()),
+            }
+        }
         self.context_request
             .runtime_context
             .context()
@@ -148,6 +192,21 @@ where
                 .filter(|text| !text.trim().is_empty());
             if let Some(text) = latest_user_text {
                 recall_source.refresh(&text).await;
+            }
+            match recall_source.fact() {
+                Some(fact) => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .push_reminder_fact(&self.run_id, fact),
+                // 召回为空/评分未通过：显式失效，不得保留上一轮快照。
+                None => self
+                    .context_request
+                    .runtime_context
+                    .context()
+                    .reminders
+                    .remove_reminder_fact(&context::ReminderKind::memory_recall()),
             }
             self.context_request
                 .runtime_context

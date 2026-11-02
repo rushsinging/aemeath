@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use share::config::domain::snapshot::ConfigSnapshot;
 
 use crate::application::client::SessionModelState;
+use crate::application::constants::COMPACT_UNKNOWN_MODEL_WINDOW;
 use crate::ports::{ProviderBindingData, ProviderFactory};
 
 /// 会话当前模型的共享槽。
@@ -215,8 +216,95 @@ impl CompactModelResolver {
         .map_err(CompactModelResolveError::Selection)?;
         Ok(Arc::new(binding))
     }
+
+    /// 解析当前 compact 目标并投影为 context 请求可携带的
+    /// [`context::CompactLlmBinding`]（#2142：compact 模型绑定唯一投影点）。
+    ///
+    /// `None` = 本次走本地压缩（模型解析失败，保留 warn 日志）。
+    pub fn to_llm_binding(&self) -> Option<context::CompactLlmBinding> {
+        match self.resolve() {
+            Ok(target) => {
+                let snapshot = self.config.committed_snapshot();
+                Some(project_to_llm_binding(
+                    &target,
+                    snapshot.context_compact_reasoning(),
+                    snapshot.context_compact_max_output_tokens(),
+                    snapshot.context_compact_concurrency(),
+                ))
+            }
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] 无法解析 compact 模型，本次走本地压缩：{error}"
+                );
+                None
+            }
+        }
+    }
+
+    /// 评测/诊断（#2133 P2 多模型矩阵）：按显式 selection 解析一次绑定。
+    /// 不读 `context.compact_model`、不写缓存；失败返回 Err（评测 MUST 显式失败，
+    /// 不静默降级）。
+    pub fn resolve_explicit_binding(
+        &self,
+        selection: &str,
+    ) -> Result<context::CompactLlmBinding, CompactModelResolveError> {
+        let snapshot = self.config.committed_snapshot();
+        let binding = self.build_configured_binding(&snapshot, selection)?;
+        let target = CompactModelTarget::new(binding, CompactModelOrigin::Configured);
+        Ok(project_to_llm_binding(
+            &target,
+            snapshot.context_compact_reasoning(),
+            snapshot.context_compact_max_output_tokens(),
+            snapshot.context_compact_concurrency(),
+        ))
+    }
+}
+
+/// `CompactModelTarget` → `CompactLlmBinding` 唯一投影（与生产同构造）。
+/// `reasoning` 来自 `context.compact_reasoning`（默认 Max）；
+/// `compact_output_budget` 来自 `context.compact_max_output_tokens`（默认 64K）。
+fn project_to_llm_binding(
+    target: &CompactModelTarget,
+    reasoning: share::reasoning::ReasoningLevel,
+    compact_output_budget: u32,
+    max_concurrency: usize,
+) -> context::CompactLlmBinding {
+    let binding = target.binding();
+    let window = target.context_window().or_else(|| {
+        if matches!(target.origin(), CompactModelOrigin::Configured) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "[compact] compact 模型未声明输入窗口，改用保守窗口 {COMPACT_UNKNOWN_MODEL_WINDOW}"
+            );
+            Some(COMPACT_UNKNOWN_MODEL_WINDOW)
+        } else {
+            None
+        }
+    });
+    // 压缩耗时与模型强相关：解析结果（含来源与窗口）落日志，否则慢的时候
+    // 无法判断用的是配置模型还是会话模型（#2132）。
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[compact] 目标模型解析：{}/{} origin={:?} compact_window={window:?} max_output={} reasoning={:?} concurrency={max_concurrency}",
+        binding.model.provider,
+        binding.model.model,
+        target.origin(),
+        compact_output_budget.min(binding.max_tokens.max(1)),
+        reasoning,
+    );
+    context::CompactLlmBinding {
+        invoker: std::sync::Arc::clone(&binding.provider),
+        model: binding.model.clone(),
+        // 预算来自 context.compact_max_output_tokens（默认 64K），仍受模型
+        // max_tokens 上限约束（模型配置 20000 时实际生效 20000）。
+        max_output_tokens: compact_output_budget.min(binding.max_tokens.max(1)),
+        compact_context_window: window,
+        reasoning,
+        max_concurrency,
+    }
 }
 
 #[cfg(test)]
 #[path = "compact_model_tests.rs"]
-mod compact_model_tests;
+pub(crate) mod compact_model_tests;

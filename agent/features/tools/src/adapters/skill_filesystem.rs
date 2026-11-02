@@ -570,3 +570,6 @@ Use this skill whenever you need to create a git commit.
 - If the working tree contains unrelated user changes, report them and commit only the intended paths.
 "#
 }
+
+// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
+impl crate::sealed::Sealed for FilesystemSkillAdapter {}

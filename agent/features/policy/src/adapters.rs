@@ -31,6 +31,9 @@ where
 pub(crate) struct StandardPolicy;
 
 #[cfg(test)]
+impl crate::sealed::Sealed for StandardPolicy {}
+
+#[cfg(test)]
 impl Policy for StandardPolicy {
     fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
         evaluate(PolicyModeData::Standard, request)
@@ -87,3 +90,7 @@ where
 pub fn allow_all() -> std::sync::Arc<dyn crate::domain::Policy> {
     std::sync::Arc::new(AllowAllPolicy)
 }
+
+// #2146 密封解锁（含泛型生产实现）。
+impl<ModeFn> crate::sealed::Sealed for ConfiguredPolicy<ModeFn> {}
+impl crate::sealed::Sealed for AllowAllPolicy {}

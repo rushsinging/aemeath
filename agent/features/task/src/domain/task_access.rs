@@ -15,7 +15,7 @@ use crate::domain::{
 /// tag 增删、全局 batch 列表、blocked/cycle 探测与全局 stats 属于 Task-internal
 /// 能力，未发布到本 port；crate 内消费者经 [`crate::TaskStore`] 的
 /// `pub(crate)` 固有方法访问。
-pub trait TaskAccess: Send + Sync {
+pub trait TaskAccess: crate::sealed::Sealed + Send + Sync {
     fn revision(&self) -> TaskRevisionData;
 
     /// Atomically clears the complete aggregate. A non-empty clear emits one

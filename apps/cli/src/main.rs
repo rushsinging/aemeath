@@ -52,6 +52,9 @@ async fn main() {
             args.startup_connect = true;
             chat::run_chat(args).await;
         }
+        Some(Commands::Cleanup { dry_run, yes }) => {
+            subcommand::cleanup_command::run_cleanup_command(dry_run, yes).await;
+        }
         Some(Commands::Update { check }) => {
             let args = Args::from(cli.run_args);
             let user_agent = composition::app::configured_user_agent(args.into())
@@ -75,14 +78,14 @@ async fn main() {
         Some(Commands::Rsi { command }) => match command {
             args::RsiCommands::Run {
                 dry_run,
-                max_sessions,
+                max_runs,
                 window_days,
                 json,
             } => {
                 subcommand::rsi_command::run_rsi_run_command(
                     subcommand::rsi_command::RsiRunOptions {
                         dry_run,
-                        max_sessions,
+                        max_runs,
                         window_days,
                         json,
                     },
@@ -101,6 +104,9 @@ async fn main() {
         },
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());
+        }
+        Some(Commands::Eval { command }) => {
+            subcommand::eval::run(command).await;
         }
         None => {
             // 无子命令 — 默认调用 run，使用顶层参数

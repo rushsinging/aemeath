@@ -13,6 +13,15 @@
 //! `ProjectIdentityData`/`WorkspaceId`/`WorktreeKind` 定义于 `share::session_types`，
 //! 消费方直连 share（本 crate 零转发）。
 
+/// 实现密封基建（#2146 实现权治理）。
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+/// 测试实现面（跨 crate 测试经 dev feature）。
+#[cfg(any(test, feature = "dev", feature = "test-harness"))]
+pub mod test_support;
+
 mod adapters;
 mod constants;
 pub(crate) use constants::LOG_TARGET;

@@ -132,6 +132,36 @@ fn blocks_prefer_session_boundaries() {
     assert!(blocks[1].runs.iter().all(|r| r.session_key == "s2.dataset"));
 }
 
+/// session 边界是硬边界：即使 block_run_limit 未满，也 NEVER 把两个
+/// session 的 run 混入同一 chunk。
+#[test]
+fn chunk_never_crosses_session_even_under_limit() {
+    let entries = vec![entry("s1.dataset", 100), entry("s2.dataset", 200)];
+    let session_runs = BTreeMap::from([
+        ("s1.dataset".to_string(), vec!["a1".to_string()]),
+        ("s2.dataset".to_string(), vec!["b1".to_string()]),
+    ]);
+    let blocks = plan_evidence_stream(entries, &Default::default(), &session_runs, &params());
+    assert_eq!(
+        blocks,
+        vec![
+            crate::domain::stream::EvidenceBlockPlan {
+                runs: vec![crate::domain::stream::RunRef {
+                    session_key: "s1.dataset".to_string(),
+                    run_id: "a1".to_string(),
+                }],
+            },
+            crate::domain::stream::EvidenceBlockPlan {
+                runs: vec![crate::domain::stream::RunRef {
+                    session_key: "s2.dataset".to_string(),
+                    run_id: "b1".to_string(),
+                }],
+            },
+        ],
+        "不满 block_run_limit 也 MUST 在 session 边界切块"
+    );
+}
+
 /// 单 session 超块上限：切块（session_complete=false 语义由装配层记录）。
 #[test]
 fn oversized_session_split_across_blocks() {

@@ -353,6 +353,17 @@ pub struct RuntimeServices {
     pub scoring_for_skill_match: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
     /// 权限/风险预筛（#1836）：policy Allow 后的单向加严评审器。
     pub policy_triage: Option<std::sync::Arc<crate::application::tool::PolicyTriage>>,
+    /// compact 模型解析器（#2142）：session 级共享，主 Run 的 manual/自动
+    /// 压缩经它按轮解析 LLM 绑定；`None` = 未装配（isolated/测试装配），
+    /// compact 请求 `llm: None` 走本地压缩。
+    pub(crate) compact_model_resolver:
+        Option<std::sync::Arc<crate::application::client::CompactModelResolver>>,
+    /// Workflow 状态查询端口（#2088）：六工具开关开启时为 Some，供
+    /// reminder source 读取 Active Workflow 的 id 与模式；关闭为 None。
+    pub workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
+    /// Workflow Session reset 端口（#2089）：`/clear` 时清空本 Session 的
+    /// Workflow 可见性（索引 + 内存表；实体保留）。关闭为 None。
+    pub workflow_reset: Option<Arc<dyn workflow::WorkflowSessionReset>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -448,6 +459,9 @@ pub struct RuntimeContext {
     scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
     /// 权限/风险预筛（#1836，session 级，来自 RuntimeServices）。
     policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
+    /// compact 模型解析器（#2142，session 级，来自 RuntimeServices）：
+    /// 主 Run compact 的 LLM 绑定唯一解析入口。
+    compact_model_resolver: Option<Arc<crate::application::client::CompactModelResolver>>,
     /// per-message 记忆召回 source 槽：run_launch 装配 pipeline 时一次性写入
     ///（recall 依赖 per-Run memory binding，Run 启动前不可得）。
     memory_recall: Arc<
@@ -457,6 +471,9 @@ pub struct RuntimeContext {
             >,
         >,
     >,
+    /// Workflow 状态查询端口（#2088）：开关开启且装配后可用，供 reminder
+    /// source 读取 Active Workflow 的 id 与模式；关闭时为 None（不注入）。
+    workflow_probe: Option<Arc<dyn workflow::WorkflowStateProbe>>,
 }
 
 /// Token that gates [`RuntimeContext::new`] — only [`RuntimeContextFactory`]
@@ -508,7 +525,9 @@ impl RuntimeContext {
             scoring_for_recall: services.scoring_for_recall.clone(),
             scoring_for_skill_match: services.scoring_for_skill_match.clone(),
             policy_triage: services.policy_triage.clone(),
+            compact_model_resolver: services.compact_model_resolver.clone(),
             memory_recall: Arc::new(std::sync::OnceLock::new()),
+            workflow_probe: services.workflow_probe.clone(),
         }
     }
 
@@ -560,6 +579,14 @@ impl RuntimeContext {
         self.policy_triage.clone()
     }
 
+    /// compact 模型解析器（#2142）：主 Run compact 携带；isolated/子代理装配
+    /// 为 `None`（走本地压缩）。`Arc` clone。
+    pub(crate) fn compact_model_resolver(
+        &self,
+    ) -> Option<Arc<crate::application::client::CompactModelResolver>> {
+        self.compact_model_resolver.clone()
+    }
+
     /// per-message 记忆召回 source 槽（run_launch 一次性装配）。
     pub(crate) fn memory_recall_slot(
         &self,
@@ -571,6 +598,11 @@ impl RuntimeContext {
         >,
     > {
         self.memory_recall.clone()
+    }
+
+    /// Workflow 状态查询端口（#2088；未装配为 None）。
+    pub(crate) fn workflow_probe(&self) -> Option<Arc<dyn workflow::WorkflowStateProbe>> {
+        self.workflow_probe.clone()
     }
 
     /// 已装配的记忆召回 source（未装配为 None）。

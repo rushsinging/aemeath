@@ -1,81 +1,20 @@
-use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
 use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
-use crate::ports::{
-    Policy, PolicyDecisionData, PolicyRequestData, ProviderBindingData, ProviderBuildSpecData,
-    ProviderError, ProviderFactory, ProviderPort,
-};
+use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderError, ProviderFactory};
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
-use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
-use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
 use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 
-pub(crate) struct FakeContextPort;
-
-#[async_trait::async_trait]
-#[async_trait]
-impl crate::ports::ContextWindowPort for FakeContextPort {
-    async fn build_window(
-        &self,
-        _request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-}
-#[async_trait]
-impl crate::ports::ContextCompactPort for FakeContextPort {
-    async fn needs_compaction(
-        &self,
-        _request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-
-    async fn compact(
-        &self,
-        _request: &crate::ports::CompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-}
-#[async_trait]
-impl crate::ports::ContextAppendPort for FakeContextPort {
-    async fn clear_session(
-        &self,
-        _session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
-        Ok(())
-    }
-
-    async fn append_and_persist(
-        &self,
-        _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage("fake".into()))
-    }
-}
-
-pub(crate) struct FakeProviderPort;
-
-#[async_trait::async_trait]
-impl ProviderPort for FakeProviderPort {
-    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
-
-    async fn invoke(
-        &self,
-        _request: crate::ports::ProviderRequestData,
-        _cancellation: &dyn crate::ports::CancellationSignal,
-    ) -> Result<crate::ports::ProviderResponseStream, ProviderError> {
-        Err(ProviderError::cancelled())
-    }
+/// 恒取消的测试调用端口（#2146：实现归 provider test_support）。
+pub(crate) fn fake_provider_port() -> Arc<dyn crate::ports::LlmInvokePort> {
+    provider::test_support::scripted_llm(|_request| Err(ProviderError::cancelled()))
 }
 
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
-        provider: Arc::new(FakeProviderPort),
+        provider: fake_provider_port(),
         model: crate::ports::ModelInfo {
             provider: "test-provider".into(),
             model: "test-model".into(),
@@ -97,7 +36,7 @@ pub(crate) struct FakeProviderFactory;
 impl ProviderFactory for FakeProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
-            provider: Arc::new(FakeProviderPort),
+            provider: fake_provider_port(),
             model: crate::ports::ModelInfo {
                 provider: spec.source_key.clone(),
                 model: spec.model.clone(),
@@ -132,29 +71,9 @@ impl ToolCatalogPort for FakeToolCatalog {
     }
 }
 
-pub(crate) struct FakeToolExecution;
-
-#[async_trait::async_trait]
-impl ToolExecutionPort for FakeToolExecution {
-    async fn execute(
-        &self,
-        _invocation: ToolInvocation,
-        _context: &tools::published::execution::ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        ToolExecutionOutcome::success_text("fake")
-    }
-}
-
-pub(crate) struct FakePolicyPort;
-
-impl Policy for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
-        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
-    }
-
-    fn current_mode(&self) -> policy::PolicyModeData {
-        policy::PolicyModeData::Standard
-    }
+/// #2146：Policy 实现权归 policy crate；替身经其 test_support。
+pub(crate) fn fake_policy() -> std::sync::Arc<dyn crate::ports::Policy> {
+    policy::test_support::allow_all_standard()
 }
 
 pub(crate) struct FakeReflectionHistory;
@@ -196,15 +115,6 @@ impl HookDispatcher for FakeHookPort {
         _cancellation: &dyn hook::HookCancellationSignal,
     ) -> HookOutcomeData {
         HookOutcomeData::proceed()
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct FakeSkillCatalog;
-
-impl SkillCatalogPort for FakeSkillCatalog {
-    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
-        Vec::new()
     }
 }
 
@@ -263,4 +173,16 @@ impl ChatEventSink for RecordingEventSink {
     }
 }
 
-impl crate::ports::ReminderControlPort for FakeContextPort {}
+/// #2146：ToolExecutionPort 实现权归 tools crate；替身经其脚本端口。
+pub(crate) fn fake_tool_execution() -> Arc<dyn tools::published::execution::ToolExecutionPort> {
+    tools::test_support::scripted_tool_execution(|_invocation, _context| {
+        tools::published::execution::ToolExecutionOutcome::success_text("fake")
+    })
+}
+
+/// #2146：Context 四端口实现权归 context crate；恒错替身经其 test_support。
+pub(crate) fn fake_context_service() -> std::sync::Arc<context::test_support::StubContextService> {
+    std::sync::Arc::new(context::test_support::StubContextService::unavailable(
+        "fake",
+    ))
+}

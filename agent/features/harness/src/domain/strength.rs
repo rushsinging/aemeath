@@ -171,6 +171,7 @@ impl SignalHistory {
                 summary: String::new(),
                 excerpt: None,
                 occurrences,
+                sources: Vec::new(),
             };
             self.accumulate_one(cycle_id, &signal);
         }
@@ -307,6 +308,7 @@ mod tests {
             summary: "s".to_string(),
             excerpt: None,
             occurrences,
+            sources: Vec::new(),
         }
     }
 
@@ -429,6 +431,8 @@ mod tests {
                 run_ref: "c1".to_string(),
                 signal: SignalKind::RepeatedFailure,
                 excerpt: "e".to_string(),
+                signal_id: String::new(),
+                source: None,
             }],
             1,
         )
@@ -459,6 +463,8 @@ mod tests {
                 run_ref: "c1".to_string(),
                 signal: SignalKind::RepeatedFailure,
                 excerpt: "e".to_string(),
+                signal_id: String::new(),
+                source: None,
             }],
             1,
         )

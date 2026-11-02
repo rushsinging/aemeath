@@ -1154,6 +1154,165 @@ fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigS
     Ok(config::wire_config_override_store(blob))
 }
 
+/// 评测执行结果（#2133）：`metrics` 为 `CompactMetricsData` 的 JSON 投影，
+/// #2136 合入前为 `None`。
+#[derive(Debug, serde::Serialize)]
+pub struct EvalCompactOutcome {
+    pub model: String,
+    pub context_size: usize,
+    pub summary: String,
+    pub recent_message_count: usize,
+    /// `CompactSummaryQuality` 的 Debug 投影：`Llm` 为纯 LLM 路径；
+    /// `LocalFallback`/`PartialMapFallback`/`LocalOnly` 表示发生了降级，
+    /// 评测结果 MUST 标注降级，不得当作纯 LLM 基线。
+    pub quality: String,
+}
+
+/// 评测装配（#2133）：加载配置并构建与生产同源的 compact 模型解析器。
+///
+/// 同时幂等初始化日志（评测进程独立运行，否则降级/调用诊断全部丢失）。
+async fn eval_compact_resolver() -> Result<runtime::CompactModelResolver, String> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let agents_dir = share::config::paths::global_agents_dir();
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store(&agents_dir).map_err(|error| error.to_string())?,
+        config::CliConfigInputData::default(),
+    )
+    .await
+    .map_err(|error| format!("加载配置失败：{error}"))?;
+    let gateways = FeatureGateways::wire_default(configured_policy(&config));
+    let _ = init_logging(
+        &config.reader().committed_snapshot(),
+        sdk::LoggingOutputMode::File,
+        sdk::NativeStderrMode::default(),
+        &agents_dir.join("logs"),
+    );
+    Ok(runtime::CompactModelResolver::new(
+        config.reader(),
+        gateways.provider.clone(),
+        runtime::SessionModelSlotData::new(),
+    ))
+}
+
+/// 评测用通用文本调用（#2133 P3 续接问答）：按显式 selection 完成一次补全。
+/// 结构化任务由调用方在 prompt 内约束输出 JSON；reasoning 固定 Off
+/// （server_effort_map 归并为权威，#2148）。
+/// 一次评测调用的 token 用量（#2133：开思考的成本经统计呈现）。
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct EvalUsageData {
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
+}
+
+/// 一次评测文本调用的结果：正文 + token 用量。
+pub struct EvalCompleteOutcome {
+    pub text: String,
+    pub usage: EvalUsageData,
+}
+
+pub async fn eval_llm_complete(
+    selection: &str,
+    system: &str,
+    user_prompt: &str,
+    max_output_tokens: u32,
+    reasoning: &str,
+) -> Result<EvalCompleteOutcome, String> {
+    let reasoning = share::reasoning::ReasoningLevel::parse(reasoning)
+        .ok_or_else(|| format!("非法 reasoning 档位：{reasoning}"))?;
+    let resolver = eval_compact_resolver().await?;
+    let binding = resolver
+        .resolve_explicit_binding(selection)
+        .map_err(|error| format!("解析模型 {selection} 失败：{error}"))?;
+    let mut request = provider::ProviderRequestData::new(
+        binding.model.model.clone(),
+        vec![share::message::Message::user(user_prompt.to_string())],
+        max_output_tokens,
+        reasoning,
+    );
+    request.system = system.to_string();
+    let output = binding
+        .invoker
+        .invoke_text(&binding.model, &request)
+        .await
+        .map_err(|error| format!("LLM 调用失败：{error}"))?;
+    let usage = output
+        .token_usage
+        .map(|usage| EvalUsageData {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_tokens: usage.reasoning_tokens,
+        })
+        .unwrap_or_default();
+    Ok(EvalCompleteOutcome {
+        text: output.text,
+        usage,
+    })
+}
+
+/// 评测执行入口（#2133）：对一批消息跑一次真实压缩。
+///
+/// - 模型解析与生产同路径（`CompactModelResolver` + `context.compact_model`）；
+/// - 压缩走生产管线 `compact_messages_with_llm`，不用简化替身；
+/// - 未配置 compact 模型时返回 Err（评测不静默降级为本地压缩）；
+/// - 消息以 dataset 原始 JSON 传入，由组合根反序列化（cli 不依赖 context/share）。
+pub async fn run_compact_for_eval(
+    messages_json: Vec<serde_json::Value>,
+    previous_summary: Option<&str>,
+    selection: Option<&str>,
+    reasoning_override: Option<&str>,
+) -> Result<EvalCompactOutcome, String> {
+    let resolver = eval_compact_resolver().await?;
+    let binding = match selection {
+        // P2 多模型矩阵：显式 selection，失败 MUST 报错（不静默降级）。
+        Some(selection) => resolver
+            .resolve_explicit_binding(selection)
+            .map_err(|error| format!("解析模型 {selection} 失败：{error}"))?,
+        None => resolver.to_llm_binding().ok_or_else(|| {
+            "未解析到 compact 模型：请配置 context.compact_model 或传 --model 后重试（评测不静默降级为本地压缩）"
+                .to_string()
+        })?,
+    };
+    // --reasoning 覆盖（默认来自 context.compact_reasoning，未配置=High）。
+    let mut binding = binding;
+    if let Some(raw) = reasoning_override {
+        let reasoning = share::reasoning::ReasoningLevel::parse(raw)
+            .ok_or_else(|| format!("非法 reasoning 档位：{raw}"))?;
+        binding.reasoning = reasoning;
+    }
+    let model = format!("{}/{}", binding.model.provider, binding.model.model);
+    let context_size = binding.model.context_limit.unwrap_or_default();
+
+    let messages: Vec<share::message::Message> = messages_json
+        .iter()
+        .map(|value| serde_json::from_value(value.clone()))
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("消息反序列化失败：{error}"))?;
+
+    let tail = context::compact::CompactTail::from_context(&[], context_size);
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let outcome = context::compact::compact_messages_with_llm(
+        &messages,
+        previous_summary,
+        context_size,
+        Some(&binding),
+        None,
+        None,
+        &cancel,
+        tail,
+    )
+    .await
+    .ok_or_else(|| "压缩返回 None（消息过少或被取消）".to_string())?;
+    Ok(EvalCompactOutcome {
+        model,
+        context_size,
+        summary: outcome.summary,
+        recent_message_count: outcome.recent_messages.len(),
+        quality: format!("{:?}", outcome.quality),
+    })
+}
+
 fn logging_settings_from_snapshot(
     snapshot: &ConfigSnapshot,
     default_logs_dir: &Path,

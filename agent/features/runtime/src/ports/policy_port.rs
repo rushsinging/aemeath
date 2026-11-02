@@ -2,6 +2,3 @@
 //! #918 完成消费切换后评估删除本兼容模块。
 
 pub use policy::Policy;
-
-#[cfg(test)]
-pub use policy::{PolicyDecisionData, PolicyRequestData};
