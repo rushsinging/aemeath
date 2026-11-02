@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use harness::domain::component::{ComponentId, ComponentKind, ComponentName};
+use provider::published_language::ProviderContentData;
 
 fn guardrails_id() -> ComponentId {
     ComponentId {
@@ -140,6 +141,26 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
             .trim(),
         "# B CLAUDE"
     );
+}
+
+#[test]
+fn rsi_output_block_summary_distinguishes_text_and_thinking() {
+    let output = vec![
+        ProviderContentData::Thinking {
+            thinking: "需要压缩项目规则".to_string(),
+            signature: None,
+        },
+        ProviderContentData::Text("最终 JSON".to_string()),
+        ProviderContentData::ToolCall {
+            id: "call_1".to_string(),
+            name: "Bash".to_string(),
+            arguments: serde_json::json!({}),
+        },
+    ];
+    let summary = super::rsi_output_block_summary(&output);
+    assert!(summary.contains("thinking(chars=8)"));
+    assert!(summary.contains("text(chars=7)"));
+    assert!(summary.contains("tool_call(name=Bash, id=call_1)"));
 }
 
 #[test]

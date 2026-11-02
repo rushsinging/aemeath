@@ -113,6 +113,40 @@ struct ProductionRsiLlm {
     model: ModelInfo,
 }
 
+/// RSI provider 输出块的诊断摘要：保留类型、长度与有界预览，完整内容走 trace。
+fn rsi_output_block_summary(output: &[ProviderContentData]) -> String {
+    const PREVIEW_CHARS: usize = 500;
+    output
+        .iter()
+        .enumerate()
+        .map(|(index, block)| {
+            let preview = |text: &str| -> String {
+                let bounded: String = text.chars().take(PREVIEW_CHARS).collect();
+                format!("{bounded:?}")
+            };
+            match block {
+                ProviderContentData::Text(text) => {
+                    format!(
+                        "[{index}] text(chars={}) {}",
+                        text.chars().count(),
+                        preview(text)
+                    )
+                }
+                ProviderContentData::Thinking { thinking, .. } => format!(
+                    "[{index}] thinking(chars={}) {}",
+                    thinking.chars().count(),
+                    preview(thinking)
+                ),
+                ProviderContentData::ToolCall { name, id, .. } => {
+                    format!("[{index}] tool_call(name={name}, id={id})")
+                }
+                other => format!("[{index}] {other:?}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 impl ProductionRsiLlm {
     async fn invoke_text(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
         // 结构化 JSON 输出任务显式低思考档（对齐反思链路教训：高思考
@@ -130,6 +164,11 @@ impl ProductionRsiLlm {
             16384,
             reasoning,
         );
+        log::debug!(target: crate::LOG_TARGET,
+            "RSI LLM request: model={} reasoning={:?} max_tokens=16384 prompt_chars={}",
+            self.model.model, reasoning, prompt.chars().count());
+        log::trace!(target: crate::LOG_TARGET,
+            "RSI LLM request prompt:\n{prompt}");
         let response = self
             .client
             .invoke(&self.model, &request)
@@ -137,6 +176,33 @@ impl ProductionRsiLlm {
             .map_err(|error| {
                 HarnessError::unavailable("harness", format!("RSI 模型调用失败：{error}"))
             })?;
+        let block_summary = rsi_output_block_summary(&response.output);
+        let text_chars = response
+            .output
+            .iter()
+            .filter_map(|block| match block {
+                ProviderContentData::Text(text) => Some(text.chars().count()),
+                _ => None,
+            })
+            .sum::<usize>();
+        if text_chars == 0 {
+            log::warn!(target: crate::LOG_TARGET,
+                "RSI LLM empty text: model={} ok={} stop_reason={:?} effective_reasoning={:?} usage={:?} blocks=[{}] prompt_chars={}",
+                self.model.model, response.ok, response.stop_reason, response.effective_reasoning,
+                response.token_usage, block_summary, prompt.chars().count());
+            for (index, block) in response.output.iter().enumerate() {
+                log::trace!(target: crate::LOG_TARGET,
+                    "RSI LLM empty-response block[{index}]: {block:?}");
+            }
+        } else {
+            log::debug!(target: crate::LOG_TARGET,
+                "RSI LLM response: model={} stop_reason={:?} usage={:?} text_chars={} blocks=[{}]",
+                self.model.model, response.stop_reason, response.token_usage, text_chars, block_summary);
+            for (index, block) in response.output.iter().enumerate() {
+                log::trace!(target: crate::LOG_TARGET,
+                    "RSI LLM response block[{index}]: {block:?}");
+            }
+        }
         let text = response
             .output
             .iter()
