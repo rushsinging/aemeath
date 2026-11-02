@@ -961,3 +961,21 @@ fn test_queued_messages_and_commands_merge_in_arrival_order() {
         "两类占位必须按入队序号合并，否则用户看到的顺序与提交顺序不符"
     );
 }
+
+#[test]
+fn status_view_projects_local_bin_restart_required() {
+    let mut app = test_app();
+
+    assert!(
+        !app.status_view_model().runtime.restart_to_update,
+        "启动默认不得显示 restart to update"
+    );
+
+    app.local_bin_restart_required = true;
+    let view = app.status_view_model();
+    assert!(view.runtime.restart_to_update);
+    assert!(
+        !view.runtime.app_version.is_empty(),
+        "版本段与 restart to update 必须同源展示"
+    );
+}

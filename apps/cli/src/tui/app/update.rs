@@ -271,6 +271,8 @@ impl App {
                     self.view_state.animation.version.wrapping_add(1);
                 self.view_state.spinner.advance();
                 self.view_state.run_activity.advance_frame();
+                // 本地二进制被重建/重装时在状态栏标记 restart to update（内部节流，失败静默）。
+                self.poll_local_bin_update();
                 // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
                 if self
                     .model
@@ -971,6 +973,7 @@ impl App {
             Some(&self.model.session),
             &self.model.diagnostic,
             &self.config_view.permission_mode,
+            self.local_bin_restart_required,
         )
     }
 

@@ -1,6 +1,7 @@
 mod constants;
 pub mod event;
 pub(crate) mod frame_driver;
+pub(crate) mod local_bin_watch;
 mod resize;
 mod run_loop;
 mod runtime;
@@ -143,6 +144,10 @@ pub struct App {
     pub connect_forms: Option<std::sync::Arc<dyn sdk::ConfigFormClient>>,
     /// 启动即打开 Connect 向导（`aemeath connect`：进主 TUI 后自动发送 /connect）。
     pub(crate) startup_connect: bool,
+    /// 本地二进制变化检测（重建/重装后提示重启生效）。
+    pub(crate) local_bin_watch: local_bin_watch::LocalBinWatch,
+    /// 本地二进制已被替换：状态栏展示 `restart to update`，重启后自然消失。
+    pub(crate) local_bin_restart_required: bool,
 }
 
 #[cfg(test)]
@@ -236,6 +241,8 @@ impl App {
             agent_client: None,
             display_history_query: None,
             user_agent: composition::update::default_user_agent(),
+            local_bin_watch: local_bin_watch::LocalBinWatch::from_current_exe(),
+            local_bin_restart_required: false,
         }
     }
 

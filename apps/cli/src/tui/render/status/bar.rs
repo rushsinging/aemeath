@@ -206,6 +206,19 @@ impl StatusBar {
             segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
             segments.push((format!("api {}", vm.api_calls), RuntimeSegmentStyle::Muted));
         }
+        // 当前运行版本常驻末段：窄屏超宽时优先被裁，不挤占 token/context 信息。
+        if !vm.app_version.is_empty() {
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+            segments.push((format!("v{}", vm.app_version), RuntimeSegmentStyle::Muted));
+            // 本地二进制已被替换：只在状态栏标记，不向会话流追加提示。
+            if vm.restart_to_update {
+                segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+                segments.push((
+                    "restart to update".to_string(),
+                    RuntimeSegmentStyle::Status(StatusNoticeViewKind::Warning),
+                ));
+            }
+        }
         segments
     }
 

@@ -42,10 +42,12 @@ fn test_assemble_runtime_view_normal_path_derives_all_fields() {
         &workspace,
         Some(&session),
         "ask",
+        false,
     );
 
     assert_eq!(vm.model.as_deref(), Some("glm-5.1"));
     assert_eq!(vm.session_id.as_deref(), Some("s-1"));
+    assert_eq!(vm.app_version, composition::version());
     assert_eq!(vm.tps, 42.0);
     assert_eq!(vm.context.path_base, "~/repo/cli");
     assert_eq!(vm.context.branch.as_deref(), Some("feature/x"));
@@ -77,6 +79,7 @@ fn test_assemble_runtime_view_boundary_empty_branch_becomes_none() {
         &workspace,
         None,
         "ask",
+        false,
     );
 
     assert!(vm.context.branch.is_none());
@@ -98,6 +101,7 @@ fn test_assemble_runtime_view_error_path_missing_model_and_session() {
         &workspace,
         None,
         "ask",
+        false,
     );
 
     assert!(vm.model.is_none());
