@@ -183,7 +183,3 @@ impl crate::WorkspaceWriter for FixedWorkspaceWriter {
         panic!("not used")
     }
 }
-
-// #2146 密封解锁（测试替身）。
-impl crate::sealed::Sealed for FakeWorkspace {}
-impl crate::sealed::Sealed for FixedWorkspaceWriter {}

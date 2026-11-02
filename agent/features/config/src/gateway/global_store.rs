@@ -53,7 +53,7 @@ pub(crate) enum GlobalConfigStoreError {
 }
 
 #[async_trait::async_trait]
-pub trait GlobalConfigConnectStore: crate::sealed::Sealed + Send + Sync {
+pub trait GlobalConfigConnectStore: Send + Sync {
     async fn load_global_document(
         &self,
     ) -> Result<Option<GlobalConfigDocument>, share::error::DomainError>;
@@ -415,6 +415,3 @@ fn map_io(error: io::Error) -> GlobalConfigStoreError {
 #[cfg(test)]
 #[path = "global_store_tests.rs"]
 mod tests;
-
-// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
-impl crate::sealed::Sealed for FilesystemGlobalConfigConnectStore {}

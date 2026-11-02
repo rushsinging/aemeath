@@ -37,6 +37,3 @@ pub fn allow_all_standard() -> Arc<dyn Policy> {
         PolicyModeData::Standard,
     )
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for ScriptedPolicy {}

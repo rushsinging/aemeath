@@ -233,6 +233,3 @@ async fn temperature_one_keeps_probabilities_but_marks_level() {
         other => panic!("期望 Noul，实际 {other:?}"),
     }
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for StubScoringPort {}

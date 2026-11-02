@@ -514,7 +514,3 @@ impl ContextAppendPort for StubContextService {
 }
 
 impl ReminderControlPort for StubContextService {}
-
-// #2146 密封解锁（测试替身）。
-impl crate::sealed::Sealed for RecordingContext {}
-impl crate::sealed::Sealed for StubContextService {}

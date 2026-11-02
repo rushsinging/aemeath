@@ -132,7 +132,7 @@ pub trait ReadSet: Send + Sync {
     fn record(&self, path: &str);
     fn contains(&self, path: &str) -> bool;
 }
-pub trait Guidance: crate::sealed::Sealed + Send + Sync {
+pub trait Guidance: Send + Sync {
     fn language(&self) -> &str;
 }
 
@@ -382,6 +382,3 @@ impl Guidance for FixedGuidance {
         &self.language
     }
 }
-
-// #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
-impl crate::sealed::Sealed for FixedGuidance {}

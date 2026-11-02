@@ -159,7 +159,6 @@ async fn event_read_ops_per_message_recall_emits_candidates_with_content() {
         events: Arc<dyn crate::ports::MemoryEventAppendPort>,
         recorder: Arc<RecordingEventAppend>,
     }
-    impl crate::sealed::Sealed for PortWithEvents {}
 
     #[async_trait::async_trait]
     impl crate::ports::MemoryPort for PortWithEvents {

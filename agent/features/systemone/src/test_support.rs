@@ -53,6 +53,3 @@ pub fn unavailable_scoring(
         ))
     })
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for ScriptedScoring {}

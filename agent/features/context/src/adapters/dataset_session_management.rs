@@ -220,6 +220,3 @@ impl SessionManagementPort for DatasetSessionManagement {
         Ok(())
     }
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for DatasetSessionManagement {}

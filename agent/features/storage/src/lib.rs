@@ -13,14 +13,6 @@
 //! `QuarantineOutcomeData::AlreadyAbsent` 与 receipt 三字段重复但内嵌收益小于嵌套成本，保留；
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
-/// 实现密封基建（#2146 实现权治理）：crate 内共享一个 Sealed 标记。
-/// `pub(crate)` 模块 + `pub` trait——crate 外不可命名（路径不可达），
-/// 因此「实现权」编译期归属本 crate；seal 的 PL trait 绑定
-/// `crate::sealed::Sealed` 作为超 trait。
-pub(crate) mod sealed {
-    pub trait Sealed {}
-}
-
 /// 测试实现面（#2146：AtomicBlobPort 实现权归本 crate，跨 crate 测试经此）。
 #[cfg(any(test, feature = "dev"))]
 pub mod test_support;

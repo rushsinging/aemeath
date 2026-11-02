@@ -181,10 +181,6 @@ impl SessionManagementPort for ScriptedSessionManagement {
     }
 }
 
-// #2146 密封解锁。
-impl crate::sealed::Sealed for UnavailableSessionManagement {}
-impl crate::sealed::Sealed for ScriptedSessionManagement {}
-
 pub use super::context_test_support::RecordedContextCall;
 pub use super::context_test_support::{
     recording_context_over, recording_context_shared, StubContextService,

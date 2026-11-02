@@ -299,9 +299,6 @@ impl WorkspaceWriter for WorkspaceService {
     }
 }
 
-// #2146 密封解锁（生产实现）。
-impl crate::sealed::Sealed for WorkspaceService {}
-
 #[cfg(test)]
 mod tests {
     use super::*;

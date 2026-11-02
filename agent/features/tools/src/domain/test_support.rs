@@ -151,9 +151,6 @@ impl crate::domain::skill_ports::SkillCatalogPort for FixedSkillCatalog {
     }
 }
 
-// #2146 密封解锁。
-impl crate::sealed::Sealed for FixedSkillCatalog {}
-
 /// 可变描述符集替身（共享 Mutex，模拟轮次间磁盘变化）。
 pub struct MutableSkillCatalog(
     pub std::sync::Arc<std::sync::Mutex<Vec<crate::domain::skill_pl::SkillDescriptor>>>,
@@ -170,7 +167,6 @@ impl crate::domain::skill_ports::SkillCatalogPort for MutableSkillCatalog {
             .clone()
     }
 }
-impl crate::sealed::Sealed for MutableSkillCatalog {}
 
 /// 工具执行替身（#2146：ToolExecutionPort 实现权归 tools crate）：
 /// execute 按脚本返回 outcome（不可 await；需要 sleep/取消交互的测试
@@ -253,18 +249,4 @@ where
     ) -> crate::published::execution::ToolExecutionOutcome {
         (self.script)(invocation, context).await
     }
-}
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for ScriptedToolExecution {}
-impl<F, Fut> crate::sealed::Sealed for AsyncScriptedToolExecution<F>
-where
-    F: for<'a> Fn(
-            crate::published::execution::ToolInvocation,
-            &'a crate::domain::context::ToolExecutionContext,
-        ) -> Fut
-        + Send
-        + Sync,
-    Fut: std::future::Future<Output = crate::published::execution::ToolExecutionOutcome> + Send,
-{
 }
