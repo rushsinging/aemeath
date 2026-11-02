@@ -17,9 +17,6 @@
    "CommitWarningData"
   ],
   "崩溃恢复与隔离": [
-   "CorruptionReason",
-   "QuarantineDisposition",
-   "CorruptTransactionError",
    "QuarantineReason",
    "QuarantineOutcomeData",
    "QuarantineReceiptData"
@@ -50,6 +47,11 @@
    "SafeOpenOptions",
    "SafeStorageFileType",
    "SafeStorageEntryData"
+  ],
+  "错误语义": [
+   "CorruptionReason",
+   "QuarantineDisposition",
+   "CorruptTransactionError"
   ]
  },
  "nodeGroup": {
@@ -67,9 +69,6 @@
   "PromoteOutcomeData": "blob 写入与世代",
   "StorageEntryData": "blob 写入与世代",
   "CommitWarningData": "blob 写入与世代",
-  "CorruptionReason": "崩溃恢复与隔离",
-  "QuarantineDisposition": "崩溃恢复与隔离",
-  "CorruptTransactionError": "崩溃恢复与隔离",
   "QuarantineReason": "崩溃恢复与隔离",
   "QuarantineOutcomeData": "崩溃恢复与隔离",
   "QuarantineReceiptData": "崩溃恢复与隔离",
@@ -93,7 +92,10 @@
   "SafeStorageDir": "安全路径访问",
   "SafeOpenOptions": "安全路径访问",
   "SafeStorageFileType": "安全路径访问",
-  "SafeStorageEntryData": "安全路径访问"
+  "SafeStorageEntryData": "安全路径访问",
+  "CorruptionReason": "错误语义",
+  "QuarantineDisposition": "错误语义",
+  "CorruptTransactionError": "错误语义"
  },
  "symbols": {
   "AtomicBlobPort": {
@@ -5603,9 +5605,7 @@
     "证据：journal 阶段 × 摘要观测（恢复子域内部）",
     "决策：domain 决策表（test-only）vs adapter 内联（A：单点化）",
     "隔离产物：QuarantineReason + QuarantineOutcomeData + QuarantineReceiptData（B：字段零消费）",
-    "损坏终态：CorruptTransactionError + CorruptionReason + QuarantineDisposition",
-    "C 语义折叠：StorageError{kind,message} pub(crate) → impl From → DomainError 三档（InvalidKey→Invalid / UnsupportedDurability→Unavailable / 其余→Storage）",
-    "消费方 ACL：config/memory/audit 按 DomainError.category() 控制流（不再依赖 kind）"
+    "损坏终态：CorruptTransactionError + CorruptionReason + QuarantineDisposition"
    ]
   },
   "dataset 修订与提交": {
@@ -5634,6 +5634,16 @@
     "根 capability：SafeStorageRoot",
     "受限句柄：SafeStorageDir + SafeOpenOptions + SafeStorageFileType",
     "D：消费方自行拼物理路径（runtime 工具结果 blob）→ 改 storage 句柄能力；SafeStorageEntryData 为泄漏补导出"
+   ]
+  },
+  "错误语义": {
+   "chain": "错误语义链（#1865 C：内部事实错误 → 语义折叠 → 消费方三档控制流）",
+   "path": [
+    "内部事实错误：StorageError{kind,message}（6 kind：InvalidKey/Io/PermissionDenied/UnsupportedDurability/ConcurrentWrite/CorruptTransaction）——#1865 C 降 pub(crate)",
+    "载荷词汇（根面公开）：CorruptionReason / QuarantineDisposition / CorruptTransactionError（事务损坏载荷链）",
+    "语义映射：InvalidKey→Invalid / UnsupportedDurability→Unavailable / Io·PermissionDenied·ConcurrentWrite·CorruptTransaction→Storage",
+    "唯一折叠点：impl From<StorageError> for share::error::DomainError（with_source 保留诊断链）",
+    "消费方 ACL：config / memory / audit 按 DomainError.category() 三档做控制流（不再依赖 storage 实现细节 kind）"
    ]
   }
  }
