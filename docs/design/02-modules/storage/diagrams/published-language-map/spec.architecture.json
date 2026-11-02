@@ -1,0 +1,200 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Storage 根面 Published Language 设计图",
+  "subtitle": "终态设计 · 根符号 43 · 功能子域六分（写入/恢复/修订/策略/路径/错误）",
+  "quality_profile": "showcase",
+  "visual_preset": "blueprint",
+  "output": "index.html"
+ },
+ "layout": {
+  "mode": "grid",
+  "origin": [
+   80,
+   120
+  ],
+  "cols": 6,
+  "gapX": 50,
+  "gapY": 70,
+  "cellW": 190,
+  "cellH": 80
+ },
+ "components": [
+  {
+   "id": "store",
+   "type": "database",
+   "label": "storage crate",
+   "sublabel": "原子 blob/dataset 防腐层",
+   "row": 1,
+   "col": 3
+  },
+  {
+   "id": "w1",
+   "type": "backend",
+   "label": "blob 写入与世代",
+   "sublabel": "write_atomic · journal · 世代",
+   "row": 2,
+   "col": 0
+  },
+  {
+   "id": "w2",
+   "type": "security",
+   "label": "崩溃恢复与隔离",
+   "sublabel": "决策表 · quarantine",
+   "row": 2,
+   "col": 1
+  },
+  {
+   "id": "w3",
+   "type": "database",
+   "label": "dataset 修订与提交",
+   "sublabel": "成员 · 摘要 · commit",
+   "row": 2,
+   "col": 2
+  },
+  {
+   "id": "w4",
+   "type": "cloud",
+   "label": "命名空间与耐久",
+   "sublabel": "namespace 策略",
+   "row": 2,
+   "col": 3
+  },
+  {
+   "id": "w5",
+   "type": "security",
+   "label": "安全路径访问",
+   "sublabel": "SafePath capability",
+   "row": 2,
+   "col": 4
+  },
+  {
+   "id": "w6",
+   "type": "security",
+   "label": "错误语义",
+   "sublabel": "kind · 消费方 match",
+   "row": 2,
+   "col": 5
+  },
+  {
+   "id": "composition",
+   "type": "cloud",
+   "label": "composition",
+   "sublabel": "wire 装配 ×4",
+   "row": 0,
+   "col": 1
+  },
+  {
+   "id": "context",
+   "type": "backend",
+   "label": "context",
+   "sublabel": "最大消费方（10 符号）",
+   "row": 0,
+   "col": 3
+  },
+  {
+   "id": "memory",
+   "type": "backend",
+   "label": "memory",
+   "sublabel": "corpus 读写",
+   "row": 0,
+   "col": 5
+  },
+  {
+   "id": "runtime",
+   "type": "frontend",
+   "label": "runtime",
+   "sublabel": "config · audit · 工具结果",
+   "row": 3,
+   "col": 3
+  },
+  {
+   "id": "fs",
+   "type": "external",
+   "label": "文件系统",
+   "sublabel": "cap-std · journal",
+   "row": 3,
+   "col": 5
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "storage 根面 PL（白名单 41 + 2 wire 待登记）",
+   "wraps": [
+    "store",
+    "w1",
+    "w2",
+    "w3",
+    "w4",
+    "w5",
+    "w6"
+   ],
+   "pad": 40
+  }
+ ],
+ "connections": [
+  {
+   "id": "comp-store",
+   "from": "composition",
+   "to": "store",
+   "label": "wire 装配",
+   "variant": "dashed",
+   "labelDy": 20
+  },
+  {
+   "id": "ctx-store",
+   "from": "context",
+   "to": "store",
+   "label": "consume PL"
+  },
+  {
+   "id": "mem-store",
+   "from": "memory",
+   "to": "store",
+   "label": "corpus 读写"
+  },
+  {
+   "id": "rt-store",
+   "from": "runtime",
+   "to": "store",
+   "label": "工具结果/配置/审计",
+   "fromSide": "top",
+   "toSide": "bottom",
+   "labelDy": 20
+  },
+  {
+   "id": "store-fs",
+   "from": "store",
+   "to": "fs",
+   "label": "原子读写 · journal",
+   "variant": "security",
+   "fromSide": "bottom",
+   "toSide": "bottom"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "amber",
+   "title": "#1865 病症标注（设计对照）",
+   "items": [
+    "恢复决策表 domain test-only，adapter 内联重写（blob_filesystem.rs:277-351）——A 项",
+    "摘要算法已单源化（revision_member_digest），仅剩注释清理——A 项收窄",
+    "零消费 ×6：CorruptTransactionError 载荷链 / DatasetReadData / DatasetCommitReceiptData / QuarantineReceiptData——B 项",
+    "StorageError 三消费方 match（config/memory 穷尽，audit 通配）——C 项折叠",
+    "runtime tool_result_blob.rs:45-52 自行拼物理路径——D 项句柄化"
+   ]
+  },
+  {
+   "dot": "slate",
+   "title": "领域结构结论（对账）",
+   "items": [
+    "domain/ 无 DDD 聚合根：全为不可变值对象/表示模型，一致性由 adapter + journal 承担",
+    "实际聚合语义：AtomicBlob / AtomicDataset 两聚合 + SafePath capability",
+    "端口 trait 在 src/ports/（非 domain）",
+    "端口 async fn 内同步 IO（std::fs/cap-std，规避 tokio close 坑）"
+   ]
+  }
+ ]
+}

@@ -40,6 +40,9 @@ pub struct SymbolEntry {
 pub struct ConsumerEntry {
     pub file: String,
     pub module: String,
+    /// 测试路径（`*_tests.rs` / `tests/` / `integration_tests/`）：生产装配看
+    /// `is_test=false` 的条目，测试直调不代表 PL 消费面。
+    pub is_test: bool,
     pub forms: Vec<String>,
     pub snippets: Vec<SnippetEntry>,
 }
@@ -76,19 +79,40 @@ pub fn extract_root_exports(lib_source: &str) -> Result<Vec<String>> {
     Ok(exports.into_iter().collect())
 }
 
-/// 递归收集 items 中（含嵌套 `pub mod`）public `pub use` 的叶子符号名。
+/// 递归收集 items 中的根导出符号：public `pub use` 叶子（含嵌套 `pub mod`）
+/// 与根级 `pub fn`（wire 工厂）及根级 pub 类型/常量定义。
 fn collect_public_use_leaves(items: &[Item], exports: &mut BTreeSet<String>) {
     for item in items {
-        match item {
+        let exported_name = match item {
             Item::Use(use_item) if matches!(use_item.vis, syn::Visibility::Public(_)) => {
                 collect_use_tree_leaves(&use_item.tree, exports);
+                continue;
+            }
+            Item::Fn(item_fn) if matches!(item_fn.vis, syn::Visibility::Public(_)) => {
+                Some(item_fn.sig.ident.to_string())
+            }
+            Item::Struct(item_struct) if matches!(item_struct.vis, syn::Visibility::Public(_)) => {
+                Some(item_struct.ident.to_string())
+            }
+            Item::Enum(item_enum) if matches!(item_enum.vis, syn::Visibility::Public(_)) => {
+                Some(item_enum.ident.to_string())
+            }
+            Item::Trait(item_trait) if matches!(item_trait.vis, syn::Visibility::Public(_)) => {
+                Some(item_trait.ident.to_string())
+            }
+            Item::Type(item_type) if matches!(item_type.vis, syn::Visibility::Public(_)) => {
+                Some(item_type.ident.to_string())
             }
             Item::Mod(module) => {
                 if let Some((_, nested)) = &module.content {
                     collect_public_use_leaves(nested, exports);
                 }
+                continue;
             }
-            _ => {}
+            _ => continue,
+        };
+        if let Some(name) = exported_name {
+            exports.insert(name);
         }
     }
 }
@@ -482,12 +506,24 @@ pub fn scan_source(
                 ConsumerEntry {
                     file: file_rel.to_owned(),
                     module: module_label(file_rel),
+                    is_test: is_test_path(file_rel),
                     forms,
                     snippets,
                 },
             )
         })
         .collect()
+}
+
+/// 测试路径判定：`*_tests.rs`、`tests/` 目录段、`integration_tests/` 目录段。
+fn is_test_path(file_rel: &str) -> bool {
+    let segments: Vec<&str> = file_rel.split('/').collect();
+    let file_name = segments.last().copied().unwrap_or("");
+    file_name.ends_with("_tests.rs")
+        || file_name == "tests.rs"
+        || segments
+            .iter()
+            .any(|segment| matches!(*segment, "tests" | "integration_tests"))
 }
 
 /// 文件所属 crate 标注（`runtime :: application/x.rs` 形式）。

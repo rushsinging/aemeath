@@ -52,6 +52,17 @@ fn root_exports_include_nested_module_reexports() {
     );
 }
 
+/// 根导出面提取：根级 `pub fn`（wire 工厂形态）同样进入采集清单。
+#[test]
+fn root_exports_include_root_level_public_functions() {
+    let lib_with_root_fn = "pub struct Payload;\npub fn wire_file_system_blob(root: &str) -> u32 {\n    1\n}\nfn internal_helper() {}\n";
+    let exports = crate::pl_collect::extract_root_exports(lib_with_root_fn).expect("解析夹具失败");
+    assert_eq!(
+        exports,
+        vec!["Payload".to_owned(), "wire_file_system_blob".to_owned(),]
+    );
+}
+
 /// 定义扫描：kind、定义文件、签名行、字段与方法齐全；非根导出的内部类型不进结果。
 #[test]
 fn definitions_carry_kind_fields_methods() {
@@ -161,6 +172,33 @@ fn scan_source_marks_bare_path_reference() {
         .snippets
         .iter()
         .any(|snippet| snippet.kind == "ref" && snippet.line == 3));
+}
+
+/// 消费者生产/测试标记：`_tests.rs`、`tests/`、`integration_tests/` 路径判为测试。
+#[test]
+fn consumer_entry_marks_test_paths() {
+    let source = "fn build() { let _ = ProviderRequestData::default(); }\n";
+    let mut names = BTreeSet::new();
+    names.insert("ProviderRequestData".to_owned());
+    for (path, expected_test) in [
+        ("agent/features/runtime/src/adapters_tests.rs", true),
+        ("agent/features/runtime/tests/wiring.rs", true),
+        (
+            "agent/features/context/src/integration_tests/session.rs",
+            true,
+        ),
+        ("agent/composition/src/runtime.rs", false),
+        (
+            "agent/features/runtime/src/application/model/invocation.rs",
+            false,
+        ),
+    ] {
+        let consumers = scan_source(source, &names, path);
+        let consumer = consumers
+            .get("ProviderRequestData")
+            .unwrap_or_else(|| panic!("缺消费者: {path}"));
+        assert_eq!(consumer.is_test, expected_test, "路径判定错误: {path}");
+    }
 }
 
 /// 消费点扫描：trait bound 与关联类型位置的类型引用同样命中（fnty）。
