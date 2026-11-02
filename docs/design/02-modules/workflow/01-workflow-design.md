@@ -32,8 +32,16 @@ Runtime 不负责：
 
 - 理解完整 Workflow 业务语义；
 - 判断用户整体目标是否完成；
-- 自动替用户决定 Run 与 Run 之间是否继续；
-- 直接修改 Workflow Definition、Node State 或 Workflow State。
+- 自动替用户决定 Run 与 Run 之间是否继续。
+
+Runtime 原则上不直接修改 Workflow Definition、Node State 或 Workflow State；#2160 Q1
+职责线重写后仅开放两个固定写入口，其余维持禁止：
+
+1. **默认建图**——`workflow.enabled=true` 且符合 D1 条件时，由 Runtime 创建
+   `plan→done` 最小图（§15.2）；
+2. **agent 结论草稿写入**——agent 完成时把结论写入服务节点的草稿位（§15.4）。
+
+节点完成 / 失败 / Replan / 终态提交等业务语义仍只能由 LLM 经六个 Tool 提交。
 
 Runtime 为组织上下文而读取当前 Active Workflow 的 `workflow_id` 与 `ActiveMode`，这是内部
 装配职责，不等于执行 Workflow 语义操作。
@@ -104,6 +112,12 @@ CreateWorkflowSpec
   LLM 必须先显式 `workflow_update(deactivate)`；
 - 创建失败不留下半成品。
 
+**Runtime 默认建图（D1，#2160）**：`workflow.enabled=true` 时，session 开始 / resume /
+clear 后若无 Active Workflow 且无 Inactive 候选，Runtime 经上述固定入口直接创建
+`plan→done` 最小图（root 为 Planner 角色的 WorkNode，唯一后继为 CompleteNode），不经
+LLM 提交。存在 Inactive 候选时不默认建图，进入 Selecting（§2.2）。非对话 Run（sub run、
+后台 wakeup、RSI 等）不触发默认建图。
+
 MVP 不在领域层设置固定节点数、Edge 数或描述长度上限；通用请求体大小、解析、内存与
 系统资源保护仍然生效。
 
@@ -170,11 +184,24 @@ Inactive(pending_mode = None | Replanning)
 
 create / activate 不自动替换当前 Active Workflow。deactivate 不结束当前 Run，也不自动创建
 新 Run。Workflow 不自动进入 Completed 或 Failed：CompleteNode 完成后仍须 LLM 显式
-`workflow_update(complete)`；Replanning 判定无法继续时仍须 LLM 显式
-`workflow_update(fail)`。
+`workflow_update(complete)`（最小图未分裂时例外，见下方 D2 原子收口）；Replanning 判定
+无法继续时仍须 LLM 显式 `workflow_update(fail)`。
 
 `Suspended`、`Sleeping`、`AwaitingUser` 不是 WorkflowStatus 或 ActiveMode，分别属于 Runtime
 Run、Runtime Goal 或后台任务能力。
+
+**Selecting（D1 配套，#2160 Q3）**：全程激活要求任何时刻存在 Active Workflow。无 Active
+且存在 Inactive 候选时，系统进入 **Session 级协调状态** `SessionWorkflowMode = Executing |
+Selecting`（存 session 元数据，不是第六个 WorkflowStatus）：Selecting 下工具分发层只放行
+`workflow_create / workflow_update(activate) / workflow_list / workflow_query`，其余工具一律
+typed error（错误文本带候选列表）。activate / create 成功后回到 Executing。这是与
+Replanning 同构的状态硬约束，不是提示约束。无退出通道：用户说「先不做计划」也只能建
+最小图走 D2 简单出口。sub run 有独立 SessionState，不受该模式约束。
+
+**简单出口（D2，#2160）**：图自创建后未分裂、仍为 `plan→done` 最小结构时，
+`workflow_node_update(complete)` 完成 plan 节点即**原子完成整个 Workflow**（同一领域提交内
+完成 CompleteNode 与 Workflow，无需第二次显式 `workflow_update(complete)`），一问一答场景
+固定开销为一次工具调用。图一旦分裂过，回到常规显式提交流程。
 
 ### 2.3 Session reset（`/clear`）
 
@@ -186,7 +213,10 @@ Run、Runtime Goal 或后台任务能力。
 - 之后 `workflow_list` 返回空，不再显示 `/clear` 之前的 Workflow；
 - Workflow 实体仍然留在磁盘，成为无引用数据，不由 `/clear` 负责擦除；
 - 已失去引用的 Workflow 拒绝任何按 `workflow_id` 的直接查询与操作，返回
-  `WorkflowNotVisible`，不提供隐式复活路径；
+  `WorkflowNotVisible`，不提供隐式复活路径。**例外（#2160 跨 workflow 检索）**：
+  Completed / Cancelled 终态实体放开只读检索——`workflow_list` 可按 status 过滤列出、
+  `workflow_query` 可按 id 读取结论与证据引用（§15.6），供后续 workflow 回查历史；
+  终态不可写、不可复活的状态机约束不变；
 - 落盘内容的物理清理由统一的清理能力负责（见 §2.4），不新增 `workflow_clear` Tool，也不
   把清理做成用户直接操作 Workflow 的语义。
 
@@ -471,6 +501,27 @@ LLM 必须调用 `workflow_query` 按需取得详情。
 专用字段，也不理解 Graph。Workflow、ActiveMode 或 Node Role 在一次 Model Invocation 发出后
 发生变化，只在下一次 Model Invocation / continuation Step 重新组织上下文时生效。
 
+### 4.4 两级上下文（D5，#2160）
+
+全程激活后 Workflow 参与上下文组装，结构自上而下：
+
+```text
+system prompt（冻结，缓存命中）
+├─ node summaries 区：每节点完成时【窗口追加一条】summary 消息，只 append
+├─ 当前节点段：该节点激活后的 main runsteps（编排、回查、Web 结果等）
+└─ 当前输入与 per-turn 变化内容（recall、Reminder，尾部）
+```
+
+- **前缀缓存约束只有一条「稳定在前、变化在尾」**：summaries 区位于 system prompt 之后、
+  所有 per-turn 变化内容之前，只 append，不引入新保障机制；
+- **过程隔离是省 token 的主收益**：sub run 的详细过程全量落盘（§15.5）但永不进入 main
+  窗口；历史节点 main 侧过程消息在窗口中撤离、只留 summary，canonical append-only 不动；
+- **合并最旧摘要只发生在窗口视图**：超阈值时本地结构化拼接（节点 id + 一行结论 +
+  evidence 指针），不走 LLM，与不可变历史不冲突（同 compact 只压窗口的口径）；
+- **区段感知 compact**：compact 仍为单一入口、触发逻辑不变，按区段分流——summaries 区
+  只走本地合并；当前节点段走现有 LLM compact；节点完成时该节点段整体坍缩为一条
+  summary，是天然压缩点。不做分段状态机 / 独立阈值。
+
 ## 5. Workflow Tool 协议
 
 六个 Tool 始终出现在 LLM 的 Tool Schema 中。「始终」仅表示不受 Node Role 裁剪，仍受全局
@@ -644,7 +695,8 @@ Output
 
 其它行为：
 
-- `complete`：提交节点结果、证据引用和出口决定；触发隐式 AND-join 激活判定；
+- `complete`：提交节点结果、证据引用和出口决定；触发隐式 AND-join 激活判定。**最小图
+  例外（D2）**：图未分裂过时，完成 plan 节点即原子完成整个 Workflow（§2.2）；
 - `fail`：提交失败结论和证据引用，不激活后继；整个 Workflow 立即进入 `Active(Replanning)`，
   其他并行 Active Node 在同一领域提交中进入 Stopped；Tool Result 返回 Replanning 模式、
   冻结事实与合法下一步；
@@ -920,6 +972,12 @@ Loop 不是 Runtime 类型，也不是特殊 Node。由于当前 Graph 仅允许
 Runtime facts 以引用形式进入 Node 的 `evidence_refs`；Workflow 只校验引用结构，不校验实体
 是否存在，也不复制事实正文。
 
+**agent 结论草稿管道（D4，#2160）**：§6.3 的「Runtime facts 不自动等于节点结论」在终态
+层面保留，但开放一条草稿自动管道（§15.4）：节点 = 单次 agent 派发；agent 完成时 Runtime
+把结论写入服务节点的草稿位（含 Failed / Cancelled 状态，但不自动 fail 节点）；main 显式
+提交节点 Completed 时可采纳或改写草稿为最终 conclusion；重派为同节点新 attempt，替换
+草稿位，不触发 Replanning。
+
 ## 9. MVP 一致性与并发边界
 
 Workflow MVP 不做版本控制或并发写协调：
@@ -967,7 +1025,12 @@ MVP 范围内**，见 §11。
 ### 11.1 Node Role 与 Tool Policy
 
 MVP 期间 Node Role 只是语义标签，不产生任何 Tool 裁剪；普通 Tool 可见性完全由现有 Run 级
-Profile、Policy、Hook 与用户审批决定；六个 `workflow_*` Tool 始终可见且不参与裁剪。
+Profile、Policy、Hook 与用户审批决定；六个 `workflow_*` 工具始终可见且不参与裁剪。
+
+**#2160 D3 提前落地（覆盖本段 MVP 口径）**：全程激活后 main run 采用**全局固定 Profile**
+（非 Node Role 驱动）：白名单 = 读 / WebSearch / WebFetch / Task / workflow_* / Agent /
+AskUserQuestion，永久禁写、无退出通道，一切写操作经 agent 派发（§15.3）。下表 P1–P7 的
+Role 级精细裁剪仍为暂缓项，D3 不依赖其实现。
 
 | 编号 | 暂缓内容 |
 |---|---|
@@ -1077,8 +1140,111 @@ Goal），最后 P13、P14。
 - 多 Workflow 并行 Active；
 - Provider 感知 Graph 结构或节点语义。
 
-## 14. 修改历史
+## 15. Workflow 底层化（#2160 定稿）
 
+> 2026-11-01 经 B1–B5 五批逐项拍板。核心：「Workflow 是开启后的唯一执行组织形态」，
+> main run 只做编排，一切写操作经 subagent，过程全量落盘、上下文按节点隔离。
+> 本节是 D1–D6 的汇总与唯一登记处；各既有章节的对应修订见 §1.1、§2.1–2.3、§4.4、
+> §5.5、§6.3、§11.1。
+
+### 15.1 决策总表
+
+| # | 决策 | 内容 |
+|---|---|---|
+| D1 | 全程激活 | 无 Inactive 候选 → Runtime 默认建 `plan→done` 最小图；有候选 → Selecting（§2.2） |
+| D2 | 简单出口 | 最小图未分裂时 plan complete 原子收口整个 Workflow，一次调用（§2.2、§5.5） |
+| D3 | main run 永久禁写 | 固定 Profile 白名单，无退出通道（§11.1、§15.3） |
+| D4 | agent 结论管道 | 节点 = 单次 agent 派发；草稿自动写入，Completed 由 main 显式提交（§6.3、§15.4） |
+| D5 | 两级上下文 | summaries 区 + 当前节点段；区段感知 compact（§4.4） |
+| D6 | sub run 落盘与展示 | canonical 全量落盘、挂父 session 子空间、TUI 下钻（§15.5） |
+
+### 15.2 D1 全程激活细则
+
+- 挂点：session 开始 / resume / clear 后判定；非对话 Run（sub run、后台 wakeup、RSI 等）
+  不触发；
+- 无候选时 Runtime 直接建最小图（§1.1 写入口一），root 为 Planner 角色 WorkNode；
+- Selecting 为 Session 级状态硬约束（§2.2），与 Replanning 同构，非提示约束；
+- `workflow.enabled=false` 时行为与底层化之前完全一致。
+
+### 15.3 D3 main run 禁写
+
+- 白名单：读 / WebSearch / WebFetch / Task / workflow_* / Agent / AskUserQuestion
+  （Ask 是交互不是写）；复用 `ToolProfile::derive_restricted` 实现；
+- 设计判断（已拍板）：「需要写时已经是一个复杂工作，值得完整 workflow 做」，不做按
+  任务规模的轻量写豁免——裁量规则会让 LLM 每次判断「这算轻量吗」，行为不可预测；
+- 交互边界：sub 维持禁 `AskUserQuestion`；澄清 = main 派发前问清 + sub 返回澄清需求时
+  main 代问**重派**（无 resume，接受重派成本）；policy 审批透传与 main 等待期交互服务
+  循环搁置（§15.8）。
+
+### 15.4 D4 结论管道与 Q7 workflow adaptor
+
+- **Q7 归属注入不改 Agent 工具**：Agent 工具参数 schema 与调用语义零改动。main run 在
+  workflow 模式下，Agent 派发路径经 **workflow adaptor**：由 adaptor 依据 main 当前服务
+  节点，把 `workflow_id / node_id` 注入 `AgentRunRequest` 的 system prompt 扩展与 sub 元
+  数据。「多 Active 归属谁」由 adaptor 读 workflow 状态判定，不靠 LLM 填参数；开关关闭
+  时 adaptor 不装配；
+- **结论草稿**：agent 完成时 Runtime 经写入口二把结论原文写入节点草稿位（单条当前有
+  效值，无集合），Failed / Cancelled 也记录状态但不自动 fail 节点；
+- **提交权在 main**：main 显式 `workflow_node_update(complete)` 时采纳或改写草稿为最终
+  conclusion；压缩责任在 main 提交时，runtime 搬运路径不做压缩、不做硬截断；
+- **重派 = attempt**：同节点再派一次替换草稿位，旧 attempt 过程留 sub 存档；不触发
+  Replanning（replan 只管「图错了」，不管「同一节点再试一次」）；
+- 与 D6 共用 sub 收尸挂点：flush 落盘 + 写草稿 + 回 tool result，一次实现。
+
+### 15.5 D6 sub run 落盘与展示
+
+- sub run 装配 canonical writer，复用 main 的 append 契约（revision、receipts、终态
+  flush）；独立 session id，元数据带 `parent_run_id` 与 `workflow_id / node_id`（adaptor
+  注入）；
+- 存档挂父 session 子空间（如 `<project>/<parent_session>/subruns/<sub_id>`），**不进
+  session 列表枚举**；父 session 统一清理时级联 GC；
+- sub 不是用户可 resume 的会话，续派（如未来支持）是 runtime 内部按 id 加载；
+- TUI 按 Agent 调用下钻只读查看 sub 完整消息流；main 界面保持只有编排与结论。
+
+### 15.6 跨 workflow 记忆与失真框架
+
+前提（已拍板）：**失真必然，设计目标是丢得可控、可回溯**。摘要只当索引、不当事实源；
+省 token 大头是过程隔离，不是结论压缩。
+
+- **终态可检索**：Completed / Cancelled 实体放开只读检索（§2.3）；`/clear` 无特殊处理；
+- **回查三档粒度**：L0 = `workflow_query`（结论 + 证据引用，百字级）；L1 = 按单条
+  `evidence_ref` 取原文——指针升级为可解析定位（`session_id / run_id / message_id`），
+  从 canonical 存档读取，单条 KB 级；L2 = 节点完整 runsteps / sub run 存档（诊断与深查，
+  依赖 D6）；
+- **行为约束**：默认信摘要，信息不足或冲突时回查；回查是只读、不需要 replan；回查后
+  发现需返工才走图变更；
+- **经验沉淀**：workflow 历史不进 memory（150/200 容量不背此负载）；可复用经验由
+  reflect 按既有门禁提炼，禁止任务流水账进 corpus；
+- **边界**：canonical 被统一清理后原文永久消失，回查返回「原文已清理」，属可接受失真；
+- **不做**：三字段免压缩结构化摘要（提取即失真，伪保真）、近期完成摘要主动注入。
+
+### 15.7 实施分期与验收
+
+P0–P5 对应子 issue #2161–#2166。依赖：全部依赖 P0（设计文档）；P3 另依赖 P2（共用收
+尸挂点）；P4、P5 依赖 P3。验收口径统一为「单测 + 真模型 L4/L5」：
+
+- P4 是 D3 生死验收：禁写形态下复杂编码任务端到端完成；
+- P5 指标：压缩后重问率、重复读取率、摘要回查率、前缀缓存命中率；开/关 workflow 的
+  token 与延迟基线对比。
+
+**分支策略**：全部改动在集成分支 `feat/2160-workflow-foundations`，整体验证通过后合
+main；合入前 main 的 workflow 现状与 `workflow.enabled` 默认行为不变。
+
+**回退策略**：开关只影响新 session / resume 后建图行为；存量实体与存档不动；关闭后
+adaptor 不装配、main 恢复完整工具集。
+
+### 15.8 搁置项（不在任何分期，勿视为遗漏）
+
+- policy 审批透传展开（sub 写操作审批的呈现与路由）；
+- main 等待 Agent 期间的交互服务循环（审批与 sub Ask 的共同前置）；
+- sub 开放 `AskUserQuestion`；sub resume 续派；
+- 近期完成 workflow 摘要主动注入（先观察终态检索是否够用）。
+
+## 16. 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-11-02 | #2160 底层化定稿落地：§1.1 Runtime 写入口、§2.1 默认建图、§2.2 Selecting 与 D2 原子收口、§2.3 终态检索放开、§4.4 两级上下文、§6.3 D4 草稿管道、§11.1 D3 固定 Profile、新增 §15（D1–D6、跨 workflow 失真框架、分期与搁置项） | [#2160](https://github.com/rushsinging/aemeath/issues/2160) / [#2161](https://github.com/rushsinging/aemeath/issues/2161) |
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-10-26 | 设计真相源收敛：六 Tool 协议、五状态生命周期与 ActiveMode、Node 五状态含 Stopped、Replanning continuation、MVP 范围与 POST-MVP 移出清单、A–G 45 场景验收链、不变量与目标护栏 | [#555](https://github.com/rushsinging/aemeath/issues/555) / [#2090](https://github.com/rushsinging/aemeath/issues/2090) |
