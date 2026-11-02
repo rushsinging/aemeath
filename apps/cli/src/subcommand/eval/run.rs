@@ -238,3 +238,7 @@ pub(crate) async fn run(
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod run_tests;
+
+#[cfg(test)]
+#[path = "run_contract_tests.rs"]
+mod run_contract_tests;
