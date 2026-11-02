@@ -1166,6 +1166,9 @@ pub struct EvalCompactOutcome {
     /// `LocalFallback`/`PartialMapFallback`/`LocalOnly` 表示发生了降级，
     /// 评测结果 MUST 标注降级，不得当作纯 LLM 基线。
     pub quality: String,
+    /// 压缩管线指标（#2132 `CompactMetricsData` 的 JSON 投影）：形状、阶段耗时、
+    /// 降级块数。序列化失败时降级为 `None`，不影响压缩结果本身。
+    pub metrics: Option<serde_json::Value>,
 }
 
 /// 评测装配（#2133）：加载配置并构建与生产同源的 compact 模型解析器。
@@ -1304,12 +1307,14 @@ pub async fn run_compact_for_eval(
     )
     .await
     .ok_or_else(|| "压缩返回 None（消息过少或被取消）".to_string())?;
+    let metrics = serde_json::to_value(&outcome.metrics).ok();
     Ok(EvalCompactOutcome {
         model,
         context_size,
         summary: outcome.summary,
         recent_message_count: outcome.recent_messages.len(),
         quality: format!("{:?}", outcome.quality),
+        metrics,
     })
 }
 
