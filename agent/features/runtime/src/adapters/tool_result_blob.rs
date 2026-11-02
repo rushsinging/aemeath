@@ -42,11 +42,16 @@ impl AtomicBlobToolResultStore {
         session: &SafePathSegmentData,
         tool: &SafePathSegmentData,
     ) -> ToolResultBlobRef {
+        // #1865 D：物理布局单点在 storage（StorageKeyData::relative_path），
+        // 本处只组装逻辑 key，不再复制 namespace/segment 顺序知识。
+        let key = StorageKeyData::new(
+            StorageNamespaceData::ToolResult,
+            vec![session.clone(), tool.clone()],
+        )
+        .expect("session/tool 段已在 validate_key 校验");
         ToolResultBlobRef::new(
             self.locator_root
-                .join(StorageNamespaceData::ToolResult.as_str())
-                .join(session.as_str())
-                .join(tool.as_str())
+                .join(key.relative_path())
                 .display()
                 .to_string(),
         )

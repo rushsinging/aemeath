@@ -1,5 +1,6 @@
 #[cfg(any(test, feature = "test-fault-injection"))]
 use super::constants::{FAULT_ABORT_ENV, FAULT_POINT_ENV};
+use super::error_map::{map_durability, map_io, map_lock_io};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -142,11 +143,7 @@ impl FileSystemBlobAdapter {
     }
 
     fn relative_primary(key: &StorageKeyData) -> PathBuf {
-        key.segments()
-            .iter()
-            .fold(PathBuf::from(key.namespace().as_str()), |path, segment| {
-                path.join(segment.as_str())
-            })
+        key.relative_path()
     }
 
     fn prepare_parent(&self, key: &StorageKeyData) -> Result<(Dir, PathBuf), StorageError> {
@@ -790,30 +787,6 @@ fn remove_if_exists(parent: &Dir, path: &Path) -> Result<bool, StorageError> {
         }
     }
 }
-
-fn map_lock_io(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::ConcurrentWrite,
-        format!("Storage key 锁获取失败：{error}"),
-    )
-}
-
-fn map_io(error: std::io::Error) -> StorageError {
-    let kind = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        StorageErrorKind::PermissionDenied
-    } else {
-        StorageErrorKind::Io
-    };
-    StorageError::new(kind, format!("存储 I/O 失败：{error}"))
-}
-
-fn map_durability(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::UnsupportedDurability,
-        format!("当前平台无法兑现持久性要求：{error}"),
-    )
-}
-
 // ---------------------------------------------------------------------------
 // #[cfg(test)] blob RecoveryPending 终态日志 TDD —— 外置到
 // blob_filesystem_tests.rs，通过 `#[path]` 引入。

@@ -1,3 +1,4 @@
+use super::error_map::{map_io, reject_symlink};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -159,28 +160,6 @@ fn reject_regular_file_symlink(dir: &Dir, name: &SafePathSegmentData) -> Result<
         Err(error) => Err(map_io(error)),
     }
 }
-
-fn reject_symlink(dir: &Dir, path: &Path) -> Result<(), StorageError> {
-    match dir.symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(StorageError::new(
-            StorageErrorKind::InvalidKey,
-            "路径目标是符号链接",
-        )),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(map_io(error)),
-    }
-}
-
-fn map_io(error: std::io::Error) -> StorageError {
-    let kind = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        StorageErrorKind::PermissionDenied
-    } else {
-        StorageErrorKind::Io
-    };
-    StorageError::new(kind, "路径安全操作失败")
-}
-
 #[cfg(test)]
 #[path = "safe_storage_root_tests.rs"]
 mod tests;

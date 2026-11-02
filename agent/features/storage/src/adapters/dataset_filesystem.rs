@@ -11,6 +11,7 @@
 #[cfg(any(test, feature = "test-fault-injection"))]
 #[cfg(any(test, feature = "test-fault-injection"))]
 use super::constants::{DATASET_FAULT_ABORT_ENV, DATASET_FAULT_POINT_ENV};
+use super::error_map::{map_io, map_lock_io, reject_symlink};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -111,9 +112,8 @@ impl FileSystemDatasetAdapter {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, StorageError> {
         log::debug!(target: crate::LOG_TARGET, "dataset_adapter init enter");
         let result = (|| {
-            std::fs::create_dir_all(root.as_ref()).map_err(proto::map_io)?;
-            let root =
-                Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(proto::map_io)?;
+            std::fs::create_dir_all(root.as_ref()).map_err(map_io)?;
+            let root = Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(map_io)?;
             Ok::<Self, StorageError>(Self {
                 root,
                 #[cfg(any(test, feature = "test-fault-injection"))]
@@ -170,8 +170,8 @@ impl FileSystemDatasetAdapter {
 
     fn open_dataset_dir(&self, key: &DatasetKeyData) -> Result<Dir, StorageError> {
         let rel = Self::dataset_rel(key);
-        self.root.create_dir_all(&rel).map_err(proto::map_io)?;
-        self.root.open_dir(&rel).map_err(proto::map_io)
+        self.root.create_dir_all(&rel).map_err(map_io)?;
+        self.root.open_dir(&rel).map_err(map_io)
     }
 
     fn open_existing_dataset_dir(&self, key: &DatasetKeyData) -> Result<Option<Dir>, StorageError> {
@@ -185,9 +185,9 @@ impl FileSystemDatasetAdapter {
                 StorageErrorKind::InvalidKey,
                 "数据集路径不是目录",
             )),
-            Ok(_) => self.root.open_dir(&rel).map(Some).map_err(proto::map_io),
+            Ok(_) => self.root.open_dir(&rel).map(Some).map_err(map_io),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(proto::map_io(error)),
+            Err(error) => Err(map_io(error)),
         }
     }
 
@@ -198,10 +198,10 @@ impl FileSystemDatasetAdapter {
         segments: &mut Vec<SafePathSegmentData>,
         result: &mut Vec<DatasetKeyData>,
     ) -> Result<(), StorageError> {
-        for entry in directory.entries().map_err(proto::map_io)? {
-            let entry = entry.map_err(proto::map_io)?;
+        for entry in directory.entries().map_err(map_io)? {
+            let entry = entry.map_err(map_io)?;
             let name = entry.file_name();
-            let metadata = entry.metadata().map_err(proto::map_io)?;
+            let metadata = entry.metadata().map_err(map_io)?;
             if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
                 continue;
             }
@@ -211,7 +211,7 @@ impl FileSystemDatasetAdapter {
             };
             let child = directory
                 .open_dir(Path::new(name.as_str()))
-                .map_err(proto::map_io)?;
+                .map_err(map_io)?;
             segments.push(name);
             if proto::exists(&child, Path::new(PRIMARY_DIR).join(MANIFEST_FILE).as_path())? {
                 result.push(DatasetKeyData::new(namespace, segments.clone())?);
@@ -230,7 +230,7 @@ impl FileSystemDatasetAdapter {
         let namespace_dir = match self.root.open_dir(namespace_path) {
             Ok(directory) => directory,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(proto::map_io(error)),
+            Err(error) => return Err(map_io(error)),
         };
         let mut result = Vec::new();
         self.collect_dataset_keys(&namespace_dir, namespace, &mut Vec::new(), &mut result)?;
@@ -254,11 +254,11 @@ impl FileSystemDatasetAdapter {
         let deleted_quarantine = false;
         if options.include_quarantine() {
             drop(lock);
-            self.root.remove_dir_all(&rel).map_err(proto::map_io)?;
+            self.root.remove_dir_all(&rel).map_err(map_io)?;
         } else {
             for generation in [PRIMARY_DIR, PREVIOUS_DIR] {
                 if proto::exists(&dir, Path::new(generation))? {
-                    dir.remove_dir_all(generation).map_err(proto::map_io)?;
+                    dir.remove_dir_all(generation).map_err(map_io)?;
                 }
             }
             proto::sync_dir(&dir)?;
@@ -271,18 +271,18 @@ impl FileSystemDatasetAdapter {
         ))
     }
     fn lock(&self, dir: &Dir) -> Result<std::fs::File, StorageError> {
-        proto::reject_symlink(dir, Path::new(LOCK_FILE))?;
+        reject_symlink(dir, Path::new(LOCK_FILE))?;
         let mut options = OpenOptions::new();
         options.read(true).write(true).create(true);
         let lock = dir
             .open_with(LOCK_FILE, &options)
-            .map_err(proto::map_io)?
+            .map_err(map_io)?
             .into_std();
         #[cfg(feature = "test-fault-injection")]
         if let Some(marker) = std::env::var_os("AEMEATH_STORAGE_DATASET_LOCK_ATTEMPT") {
-            std::fs::write(marker, b"attempt").map_err(proto::map_io)?;
+            std::fs::write(marker, b"attempt").map_err(map_io)?;
         }
-        lock.lock_exclusive().map_err(proto::map_lock_io)?;
+        lock.lock_exclusive().map_err(map_lock_io)?;
         Ok(lock)
     }
 
@@ -323,11 +323,11 @@ impl FileSystemDatasetAdapter {
         if !proto::exists(dir, &member_store)? {
             return Ok(0);
         }
-        let member_dir = dir.open_dir(&member_store).map_err(proto::map_io)?;
+        let member_dir = dir.open_dir(&member_store).map_err(map_io)?;
         let mut removed_count = 0usize;
-        for entry in member_dir.entries().map_err(proto::map_io)? {
-            let entry = entry.map_err(proto::map_io)?;
-            let file_type = entry.file_type().map_err(proto::map_io)?;
+        for entry in member_dir.entries().map_err(map_io)? {
+            let entry = entry.map_err(map_io)?;
+            let file_type = entry.file_type().map_err(map_io)?;
             // 只回收普通文件；目录与符号链接不是内容寻址存储的合法形态，保持原位
             // 由隔离 / 人工排查处理，绝不递归删除。
             if !file_type.is_file() {
@@ -337,9 +337,7 @@ impl FileSystemDatasetAdapter {
             if referenced_digests.contains(content_digest.as_str()) {
                 continue;
             }
-            member_dir
-                .remove_file(&content_digest)
-                .map_err(proto::map_io)?;
+            member_dir.remove_file(&content_digest).map_err(map_io)?;
             removed_count += 1;
         }
         if removed_count > 0 {
@@ -410,7 +408,7 @@ impl FileSystemDatasetAdapter {
         let stage_members = stage_dir.join(MEMBERS_DIR);
         let member_store = PathBuf::from(MEMBERS_DIR);
 
-        dir.create_dir_all(&member_store).map_err(proto::map_io)?;
+        dir.create_dir_all(&member_store).map_err(map_io)?;
         for member in &journal.成员集合 {
             let stored_content = member_store.join(&member.摘要);
             if proto::exists(dir, &stored_content)? {
@@ -426,7 +424,7 @@ impl FileSystemDatasetAdapter {
                 ));
             }
             dir.rename(&staged_content, dir, &stored_content)
-                .map_err(proto::map_io)?;
+                .map_err(map_io)?;
         }
         proto::sync_subdir(dir, &stage_members)?;
         proto::sync_subdir(dir, &member_store)?;
@@ -659,7 +657,7 @@ impl FileSystemDatasetAdapter {
         let previous_next = PathBuf::from(PREVIOUS_NEXT_DIR);
         let mut removed_next = false;
         if proto::exists(dir, &previous_next)? {
-            dir.remove_dir_all(&previous_next).map_err(proto::map_io)?;
+            dir.remove_dir_all(&previous_next).map_err(map_io)?;
             removed_next = true;
         }
         if removed || removed_next {
@@ -672,8 +670,8 @@ impl FileSystemDatasetAdapter {
     /// 已隔离的 `.corrupt.*` 证据绝不删除。
     fn remove_transients(&self, dir: &Dir) -> Result<bool, StorageError> {
         let mut transient: Vec<OsString> = Vec::new();
-        for entry in dir.entries().map_err(proto::map_io)? {
-            let name = entry.map_err(proto::map_io)?.file_name();
+        for entry in dir.entries().map_err(map_io)? {
+            let name = entry.map_err(map_io)?.file_name();
             let display = name.to_string_lossy();
             if display.contains(".corrupt.") {
                 continue;
@@ -699,9 +697,9 @@ impl FileSystemDatasetAdapter {
         if proto::exists(dir, &next)? {
             let previous = PathBuf::from(PREVIOUS_DIR);
             if proto::exists(dir, &previous)? {
-                dir.remove_dir_all(&previous).map_err(proto::map_io)?;
+                dir.remove_dir_all(&previous).map_err(map_io)?;
             }
-            dir.rename(&next, dir, &previous).map_err(proto::map_io)?;
+            dir.rename(&next, dir, &previous).map_err(map_io)?;
         }
         Ok(())
     }
@@ -969,7 +967,7 @@ impl FileSystemDatasetAdapter {
             .is_some_and(|record| record.成员证据.is_empty() && !record.成员集合.is_empty());
         let mut reused_content = Vec::with_capacity(changes.reused_members().len());
         let member_store = PathBuf::from(MEMBERS_DIR);
-        dir.create_dir_all(&member_store).map_err(proto::map_io)?;
+        dir.create_dir_all(&member_store).map_err(map_io)?;
         for reference in changes.reused_members() {
             if !current_names.contains(reference.name()) || removed_names.contains(reference.name())
             {
@@ -1141,7 +1139,7 @@ impl FileSystemDatasetAdapter {
 
         let mut crossed_commit = false;
         let result = (|| -> Result<(), StorageError> {
-            dir.create_dir_all(&stage_members).map_err(proto::map_io)?;
+            dir.create_dir_all(&stage_members).map_err(map_io)?;
             for member in &new_members {
                 let content_digest = proto::digest_bytes(member.bytes());
                 let stored_content = PathBuf::from(MEMBERS_DIR).join(&content_digest);
@@ -1162,7 +1160,7 @@ impl FileSystemDatasetAdapter {
 
             self.stage_previous_manifest(dir)?;
             if !proto::exists(dir, &primary_dir)? {
-                dir.create_dir_all(&primary_dir).map_err(proto::map_io)?;
+                dir.create_dir_all(&primary_dir).map_err(map_io)?;
             }
             proto::write_journal(dir, &journal)?;
             proto::sync_dir(dir)?;
@@ -1170,14 +1168,14 @@ impl FileSystemDatasetAdapter {
             self.inject_post_prepared_fault(&FaultPoint::AfterPrepared)?;
 
             let member_store = PathBuf::from(MEMBERS_DIR);
-            dir.create_dir_all(&member_store).map_err(proto::map_io)?;
+            dir.create_dir_all(&member_store).map_err(map_io)?;
             for member in &new_members {
                 let content_digest = proto::digest_bytes(member.bytes());
                 let staged_content = stage_members.join(&content_digest);
                 let stored_content = member_store.join(&content_digest);
                 if !proto::exists(dir, &stored_content)? {
                     dir.rename(&staged_content, dir, &stored_content)
-                        .map_err(proto::map_io)?;
+                        .map_err(map_io)?;
                     proto::sync_subdir(dir, &stage_members)?;
                     proto::sync_subdir(dir, &member_store)?;
                 }
@@ -1233,14 +1231,14 @@ impl FileSystemDatasetAdapter {
     fn stage_previous_manifest(&self, dir: &Dir) -> Result<(), StorageError> {
         let previous_next = PathBuf::from(PREVIOUS_NEXT_DIR);
         if proto::exists(dir, &previous_next)? {
-            dir.remove_dir_all(&previous_next).map_err(proto::map_io)?;
+            dir.remove_dir_all(&previous_next).map_err(map_io)?;
             proto::sync_dir(dir)?;
         }
         let primary_manifest = PathBuf::from(PRIMARY_DIR).join(MANIFEST_FILE);
         let Some(bytes) = proto::read_file(dir, &primary_manifest)? else {
             return proto::sync_dir(dir);
         };
-        dir.create_dir_all(&previous_next).map_err(proto::map_io)?;
+        dir.create_dir_all(&previous_next).map_err(map_io)?;
         proto::write_new_file(dir, &previous_next.join(MANIFEST_FILE), &bytes)?;
         proto::sync_subdir(dir, &previous_next)?;
         proto::sync_dir(dir)
@@ -1250,7 +1248,7 @@ impl FileSystemDatasetAdapter {
         for generation in [PRIMARY_DIR, PREVIOUS_DIR] {
             let blobs = PathBuf::from(generation).join(BLOBS_DIR);
             if proto::exists(dir, &blobs)? {
-                dir.remove_dir_all(&blobs).map_err(proto::map_io)?;
+                dir.remove_dir_all(&blobs).map_err(map_io)?;
             }
         }
         Ok(())
@@ -1479,21 +1477,19 @@ impl FileSystemDatasetAdapter {
             }
             // Prepared 之后尚未开始换：primary→swap（如存在）。
             if primary_exists {
-                proto::reject_symlink(dir, &swap)?;
-                dir.rename(&primary_dir, dir, &swap)
-                    .map_err(proto::map_io)?;
+                reject_symlink(dir, &swap)?;
+                dir.rename(&primary_dir, dir, &swap).map_err(map_io)?;
                 proto::sync_dir(dir)?;
             }
             self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPrimaryToSwap)?;
             // previous→primary。
             dir.rename(&previous_dir, dir, &primary_dir)
-                .map_err(proto::map_io)?;
+                .map_err(map_io)?;
             proto::sync_dir(dir)?;
             self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPreviousToPrimary)?;
             // swap→previous（如存在）。
             if proto::exists(dir, &swap)? {
-                dir.rename(&swap, dir, &previous_dir)
-                    .map_err(proto::map_io)?;
+                dir.rename(&swap, dir, &previous_dir).map_err(map_io)?;
                 proto::sync_dir(dir)?;
             }
             return Ok(());
@@ -1502,17 +1498,15 @@ impl FileSystemDatasetAdapter {
         // 有 swap：换已开始。
         if primary_exists {
             // previous→primary 已完成，仅剩 swap→previous。
-            dir.rename(&swap, dir, &previous_dir)
-                .map_err(proto::map_io)?;
+            dir.rename(&swap, dir, &previous_dir).map_err(map_io)?;
             proto::sync_dir(dir)?;
         } else {
             // 仅完成 primary→swap：补做 previous→primary、swap→previous。
             dir.rename(&previous_dir, dir, &primary_dir)
-                .map_err(proto::map_io)?;
+                .map_err(map_io)?;
             proto::sync_dir(dir)?;
             self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPreviousToPrimary)?;
-            dir.rename(&swap, dir, &previous_dir)
-                .map_err(proto::map_io)?;
+            dir.rename(&swap, dir, &previous_dir).map_err(map_io)?;
             proto::sync_dir(dir)?;
         }
         Ok(())
@@ -1543,15 +1537,14 @@ impl FileSystemDatasetAdapter {
                 generation, scope, reason,
             ));
         }
-        proto::reject_symlink(dir, &generation_dir)?;
+        reject_symlink(dir, &generation_dir)?;
         let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())?;
         let target = PathBuf::from(format!(
             "{}.quarantine.{}",
             generation_dir.to_string_lossy(),
             id.as_str()
         ));
-        dir.rename(&generation_dir, dir, &target)
-            .map_err(proto::map_io)?;
+        dir.rename(&generation_dir, dir, &target).map_err(map_io)?;
         proto::sync_dir(dir)?;
         Ok(QuarantineOutcomeData::Moved(QuarantineReceiptData::new(
             id, generation, scope, reason,

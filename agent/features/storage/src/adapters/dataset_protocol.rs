@@ -18,6 +18,7 @@ pub(crate) use super::constants::{
     BLOBS_DIR, CORRUPTION_MARKER, JOURNAL_FILE, LOCK_FILE, MANIFEST_FILE, MEMBERS_DIR,
     PREVIOUS_DIR, PREVIOUS_NEXT_DIR, PRIMARY_DIR,
 };
+use super::error_map::{map_io, map_sync, reject_symlink};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -168,22 +169,6 @@ pub(super) fn validate_journal_structure(journal: &DatasetJournal) -> Result<(),
         previous = Some(member.名称.as_str());
     }
     Ok(())
-}
-
-/// fail-closed：拒绝任何符号链接目标。
-///
-/// `symlink_metadata` 的错误绝不吞掉：仅 `NotFound`（目标尚不存在）视为可继续，
-/// 其余（含权限、I/O）一律上抛，保证中间组件 fail-closed。
-pub(super) fn reject_symlink(dir: &Dir, path: &Path) -> Result<(), StorageError> {
-    match dir.symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(StorageError::new(
-            StorageErrorKind::InvalidKey,
-            "数据集协议目标是符号链接",
-        )),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(map_io(error)),
-    }
 }
 
 /// 目标是否存在（非符号链接才允许）。
@@ -358,27 +343,4 @@ pub(super) fn sync_subdir(dir: &Dir, path: &Path) -> Result<(), StorageError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(map_io(error)),
     }
-}
-
-pub(super) fn map_io(error: std::io::Error) -> StorageError {
-    let kind = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        StorageErrorKind::PermissionDenied
-    } else {
-        StorageErrorKind::Io
-    };
-    StorageError::new(kind, format!("数据集 I/O 失败：{error}"))
-}
-
-pub(super) fn map_lock_io(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::ConcurrentWrite,
-        format!("数据集锁获取失败：{error}"),
-    )
-}
-
-pub(super) fn map_sync(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::UnsupportedDurability,
-        format!("当前平台无法兑现数据集持久性：{error}"),
-    )
 }

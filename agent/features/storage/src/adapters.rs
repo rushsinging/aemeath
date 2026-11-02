@@ -3,6 +3,7 @@ mod blob_protocol;
 mod constants;
 mod dataset_filesystem;
 mod dataset_protocol;
+mod error_map;
 
 mod safe_storage_root;
 

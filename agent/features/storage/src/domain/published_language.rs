@@ -89,6 +89,16 @@ impl StorageKeyData {
     pub fn segments(&self) -> &[SafePathSegmentData] {
         &self.segments
     }
+
+    /// 逻辑 key → 存储根下的相对物理路径（`namespace/seg1/seg2`）。
+    /// #1865 D：物理布局知识的唯一发布点——消费方（如 runtime 工具结果
+    /// locator）NEVER 自行拼接 namespace/segment 顺序。
+    pub fn relative_path(&self) -> std::path::PathBuf {
+        self.segments.iter().fold(
+            std::path::PathBuf::from(self.namespace.as_str()),
+            |path, segment| path.join(segment.as_str()),
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
