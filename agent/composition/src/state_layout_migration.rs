@@ -131,7 +131,7 @@ pub fn ensure_state_layout() {
         Ok(report) => {
             if !report.migrated.is_empty() {
                 log::info!(
-                    target: crate::constants::LOG_TARGET,
+                    target: crate::LOG_TARGET,
                     "[state-layout] 运行时状态迁移完成：migrated={:?} backup={:?}",
                     report.migrated,
                     report.backup
@@ -139,13 +139,13 @@ pub fn ensure_state_layout() {
             }
             for warning in &report.warnings {
                 log::warn!(
-                    target: crate::constants::LOG_TARGET,
+                    target: crate::LOG_TARGET,
                     "[state-layout] {warning}"
                 );
             }
         }
         Err(error) => log::warn!(
-            target: crate::constants::LOG_TARGET,
+            target: crate::LOG_TARGET,
             "[state-layout] 迁移失败，本次继续使用旧 ~/.agents 布局：{error}"
         ),
     }
