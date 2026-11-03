@@ -36,3 +36,10 @@ pub(crate) const HF_CDN_REDIRECT_HOSTS: [&str; 4] = [
     "transfer.xethub.hf.co",
     "cdn-lfs.hf.co",
 ];
+
+/// `~/.aemeath/state/` 下运行时状态迁移完成标记文件名（#2179）。
+pub(crate) const STATE_LAYOUT_MARKER_FILE: &str = ".layout-migration.json";
+
+/// tool_guidance 的内建 bootstrap 骨架内容：目标文件只是该占位时，允许迁移
+/// 用真实源覆盖一次（#2179）。
+pub(crate) const BOOTSTRAP_TOOL_GUIDANCE_BODY: &str = "# Tool Guidance\n";

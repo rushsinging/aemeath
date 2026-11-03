@@ -203,6 +203,8 @@ pub async fn build_system_prompt_parts(
 }
 
 fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
+    // #2179：每层给 [AGENTS.md, CLAUDE.md] 两个候选，由读取侧按顺序取第一个
+    // 可读者——AGENTS 存在即用 AGENTS，仅在其不可读时 fallback 到 CLAUDE。
     let mut dirs = paths::project_instruction_dirs(cwd, depth);
     dirs.reverse();
     dirs.into_iter()

@@ -1189,7 +1189,7 @@ async fn eval_compact_resolver() -> Result<runtime::CompactModelResolver, String
         &config.reader().committed_snapshot(),
         sdk::LoggingOutputMode::File,
         sdk::NativeStderrMode::default(),
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     );
     Ok(runtime::CompactModelResolver::new(
         config.reader(),
@@ -1433,6 +1433,7 @@ fn wire_workspace_with_config(
 }
 
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
+    // #2179：运行时状态迁移统一在 runtime 装配层执行（所有入口共用）。
     let cwd = args
         .cwd
         .clone()
@@ -1454,7 +1455,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         &config.reader().committed_snapshot(),
         logging_output,
         native_stderr,
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
@@ -1495,7 +1496,7 @@ async fn build_agent_client_with_gateways(
         &config.reader().committed_snapshot(),
         logging_output,
         native_stderr,
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
@@ -1583,7 +1584,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         &config.reader().committed_snapshot(),
         logging_output,
         native_stderr,
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let user_agent = config

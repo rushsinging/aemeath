@@ -44,11 +44,12 @@ impl SessionAudit {
 }
 
 pub fn wire_session_audit(
-    agents_dir: &Path,
+    state_root: &Path,
     snapshot: &ConfigSnapshot,
 ) -> Result<SessionAudit, String> {
+    // #2179：审计落盘根为运行时状态根（`~/.aemeath/state/audit/`）。
     let root =
-        SafeStorageRoot::open(agents_dir.join("audit")).map_err(|error| error.to_string())?;
+        SafeStorageRoot::open(state_root.join("audit")).map_err(|error| error.to_string())?;
     let store = wire_audit_store(audit::wire_append_store_for(root));
     let (writer, reader) = wire_audit_client(
         &store,

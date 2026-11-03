@@ -40,7 +40,7 @@ fn unique_temp_dir(name: &str) -> PathBuf {
 fn test_guidance_dir_uses_agents_directory() {
     let _lock = ENV_LOCK.lock().unwrap();
     let temp_agents_dir = unique_temp_dir("guidance_dir");
-    let _guard = EnvVarGuard::set_path(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+    let _guard = EnvVarGuard::set_path(paths::AEMEATH_HOME_DIR_ENV, &temp_agents_dir);
 
     assert_eq!(guidance_dir(), Some(temp_agents_dir.join("guidance")));
 }
@@ -50,7 +50,7 @@ fn test_init_guidance_dir_creates_files() {
     let _lock = ENV_LOCK.lock().unwrap();
     let temp_agents_dir = unique_temp_dir("guidance_init");
     let guidance = temp_agents_dir.join("guidance");
-    let _guard = EnvVarGuard::set_path(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+    let _guard = EnvVarGuard::set_path(paths::AEMEATH_HOME_DIR_ENV, &temp_agents_dir);
     let _ = std::fs::remove_dir_all(&temp_agents_dir);
 
     init_guidance_dir();
@@ -77,7 +77,7 @@ fn test_language_subdir_fallback() {
     let _lock = ENV_LOCK.lock().unwrap();
     let temp_agents_dir = unique_temp_dir("guidance_lang");
     let guidance = temp_agents_dir.join("guidance");
-    let _guard = EnvVarGuard::set_path(paths::AGENTS_DIR_ENV, &temp_agents_dir);
+    let _guard = EnvVarGuard::set_path(paths::AEMEATH_HOME_DIR_ENV, &temp_agents_dir);
     let _ = std::fs::remove_dir_all(&temp_agents_dir);
 
     // Create root file only (no language subdirectory)
