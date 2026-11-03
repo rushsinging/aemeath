@@ -510,7 +510,7 @@ pub fn wire_dry_run_component_registry(
 /// 经验库路径（`{agents_dir}/harness/library.jsonl`，独立于 memory corpus）。
 pub fn wire_lesson_store() -> Arc<LessonStore> {
     Arc::new(LessonStore::new(
-        share::config::paths::global_agents_dir().join("harness/library.jsonl"),
+        share::config::paths::global_harness_dir().join("library.jsonl"),
     ))
 }
 
@@ -598,7 +598,7 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
     let lesson_store = wire_lesson_store();
     let stream = ProductionEvidenceStream {
         datasets_root: share::config::paths::global_session_datasets_dir(),
-        harness_dir: share::config::paths::global_agents_dir().join("harness"),
+        harness_dir: share::config::paths::global_harness_dir(),
     };
     let task = harness::domain::cycle_task::HarnessRsiCycleTask::new(
         registry,
@@ -610,17 +610,15 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
     // #2070：过程事件记录器（fail-open；GC 由 recorder 自管）
     .with_event_recorder(std::sync::Arc::new(
         harness::domain::events::RsiEventRecorder::new(
-            share::config::paths::global_agents_dir().join("harness/events"),
+            share::config::paths::global_harness_dir().join("events"),
         ),
     ))
     .with_version_store(std::sync::Arc::new(
         harness::domain::versioning::ComponentVersionStore::new(
-            share::config::paths::global_agents_dir().join("harness/versions"),
+            share::config::paths::global_harness_dir().join("versions"),
         ),
     ))
-    .with_history_path(
-        share::config::paths::global_agents_dir().join("harness/signal-history.json"),
-    );
+    .with_history_path(share::config::paths::global_harness_dir().join("signal-history.json"));
     let mut task = task;
     if dry_run {
         task = task.with_dry_run();
@@ -860,7 +858,7 @@ fn load_global_config_layered() -> Result<share::config::Config, String> {
 
 /// dry-run 预览落盘（ALWAYS 覆盖写，NEVER 累积；#2050）。
 fn write_dry_run_preview(summary: &str) {
-    let harness_dir = share::config::paths::global_agents_dir().join("harness");
+    let harness_dir = share::config::paths::global_harness_dir();
     if let Err(error) = std::fs::create_dir_all(&harness_dir) {
         log::warn!(target: crate::LOG_TARGET, "创建 harness 目录失败：{error}");
         return;
@@ -892,7 +890,7 @@ pub fn run_rsi_history(component: Option<&str>) -> RsiRunExit {
         }
     };
     let store = harness::domain::versioning::ComponentVersionStore::new(
-        share::config::paths::global_agents_dir().join("harness/versions"),
+        share::config::paths::global_harness_dir().join("versions"),
     );
     let ids: Vec<harness::ComponentId> = match component {
         Some(raw) => match harness::parse_component_id(raw) {
@@ -983,7 +981,7 @@ pub fn run_rsi_rollback(component: &str, cycle: Option<&str>) -> RsiRunExit {
         };
     };
     let store = harness::domain::versioning::ComponentVersionStore::new(
-        share::config::paths::global_agents_dir().join("harness/versions"),
+        share::config::paths::global_harness_dir().join("versions"),
     );
     let snapshot = match store.load(&id, cycle) {
         Ok(snapshot) => snapshot,

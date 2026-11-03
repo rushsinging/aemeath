@@ -74,8 +74,13 @@ fn aemeath_home_dir_from(env_value: Option<String>, home: Option<PathBuf>) -> Pa
         .join(AEMEATH_HOME_DIR_NAME)
 }
 
-/// `~/.agents/models/` — 本地模型资产根目录。
+/// `~/.aemeath/models/` — 本地模型资产根目录。
 pub fn global_models_dir() -> PathBuf {
+    aemeath_home_dir().join(MODELS_DIR_NAME)
+}
+
+/// `~/.agents/models/` — 旧模型资产根目录（只读 fallback 与迁移对账）。
+pub fn legacy_global_models_dir() -> PathBuf {
     global_agents_dir().join(MODELS_DIR_NAME)
 }
 
@@ -176,19 +181,29 @@ pub fn global_skills_dir() -> PathBuf {
 }
 
 pub fn global_logs_dir() -> PathBuf {
+    aemeath_home_dir().join(LOGS_DIR_NAME)
+}
+
+/// `~/.agents/logs/` — 旧日志目录（只读 fallback）。
+pub fn legacy_global_logs_dir() -> PathBuf {
     global_agents_dir().join(LOGS_DIR_NAME)
 }
 
 pub fn global_guidance_dir() -> PathBuf {
+    aemeath_home_dir().join(GUIDANCE_DIR_NAME)
+}
+
+/// `~/.agents/guidance/` — 旧 guidance 目录（只读 fallback）。
+pub fn legacy_global_guidance_dir() -> PathBuf {
     global_agents_dir().join(GUIDANCE_DIR_NAME)
 }
 
 pub fn global_memory_dir() -> PathBuf {
-    global_agents_dir().join(MEMORY_DIR_NAME)
+    aemeath_state_leaf_dir(MEMORY_DIR_NAME)
 }
 
 pub fn global_sessions_dir() -> PathBuf {
-    global_agents_dir().join(SESSIONS_DIR_NAME)
+    aemeath_state_leaf_dir(SESSIONS_DIR_NAME)
 }
 
 /// `~/.agents/worktrees/` — EnterWorktree 默认创建 worktree 的根目录。
@@ -196,8 +211,13 @@ pub fn global_worktrees_dir() -> PathBuf {
     global_agents_dir().join(WORKTREES_DIR_NAME)
 }
 
-/// `~/.agents/tool-results/` — 超长工具结果的落盘根目录。
+/// `~/.aemeath/state/tool-results/` — 超长工具结果的落盘根目录。
 pub fn global_tool_results_dir() -> PathBuf {
+    aemeath_state_leaf_dir(TOOL_RESULTS_DIR_NAME)
+}
+
+/// `~/.agents/tool-results/` — 旧工具结果根（只读 fallback 与迁移对账）。
+pub fn legacy_global_tool_results_dir() -> PathBuf {
     global_agents_dir().join(TOOL_RESULTS_DIR_NAME)
 }
 
@@ -258,8 +278,77 @@ pub fn global_scripts_dir() -> PathBuf {
 
 /// session dataset 落盘根（单数 `session/`；`sessions/` 是 lock 目录）。
 pub fn global_session_datasets_dir() -> PathBuf {
+    aemeath_state_leaf_dir("session")
+}
+
+/// 旧 session dataset 落盘根（`~/.agents/session/`，只读 fallback）。
+pub fn legacy_global_session_datasets_dir() -> PathBuf {
     global_agents_dir().join("session")
 }
+
+/// `~/.aemeath/state/<leaf>/` 的旧位置（`~/.agents/<leaf>/`）。
+///
+/// 用于运行时状态迁移对账与只读 fallback：新路径缺失时读旧位置，
+/// 但**新写入 MUST 走** [`aemeath_state_leaf_dir`]。
+pub fn legacy_agents_state_leaf_dir(leaf: &str) -> PathBuf {
+    global_agents_dir().join(leaf)
+}
+
+/// `~/.aemeath/state/harness/` — RSI 经验库、事件流与组件版本。
+pub fn global_harness_dir() -> PathBuf {
+    aemeath_state_leaf_dir("harness")
+}
+
+/// `~/.aemeath/state/scoring/` — 评分 daemon 的 UDS 与状态。
+pub fn global_scoring_dir() -> PathBuf {
+    aemeath_state_leaf_dir("scoring")
+}
+
+/// `~/.aemeath/state/workflows/` — Workflow 实体落盘根。
+pub fn global_workflows_dir() -> PathBuf {
+    aemeath_state_leaf_dir("workflows")
+}
+
+/// `~/.aemeath/state/audit/` — 审计落盘根。
+pub fn global_audit_dir() -> PathBuf {
+    aemeath_state_leaf_dir("audit")
+}
+
+/// `~/.aemeath/state/background-process/` — 后台进程账本与日志。
+pub fn global_background_process_dir() -> PathBuf {
+    aemeath_state_leaf_dir("background-process")
+}
+
+/// `~/.aemeath/state/background-task/` — 后台任务锁与账本。
+pub fn global_background_task_dir() -> PathBuf {
+    aemeath_state_leaf_dir("background-task")
+}
+
+/// `~/.aemeath/state/meta/` — 运行期元数据。
+pub fn global_meta_dir() -> PathBuf {
+    aemeath_state_leaf_dir("meta")
+}
+
+/// `~/.aemeath/state/tmp/` — 运行期临时文件。
+pub fn global_tmp_dir() -> PathBuf {
+    aemeath_state_leaf_dir("tmp")
+}
+
+/// 运行时状态迁移涉及的叶子目录（与旧 `~/.agents/<leaf>` 同名）。
+pub const RUNTIME_STATE_LEAVES: &[&str] = &[
+    "session",
+    "sessions",
+    "harness",
+    "scoring",
+    "background-process",
+    "background-task",
+    "workflows",
+    "audit",
+    "tool-results",
+    "memory",
+    "meta",
+    "tmp",
+];
 
 /// 全局 plugins 组件目录（c8，#2030）。
 pub fn global_plugins_dir() -> PathBuf {

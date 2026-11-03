@@ -102,7 +102,7 @@ fn wire_runtime_tool_assembly(
     // 持久化的 backend（#2083：Session 索引 + 实体快照 write-through）。
     let workflow_wiring = snapshot.to_config().workflow.enabled.then(|| {
         let persistence = std::sync::Arc::new(workflow::FileWorkflowPersistence::new(
-            agents_dir.join("workflows"),
+            share::config::paths::global_workflows_dir(),
         ));
         let store = std::sync::Arc::new(workflow::InMemoryWorkflowStore::with_persistence(
             persistence,
@@ -215,9 +215,11 @@ pub(crate) async fn from_args_with_gateways(
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
-    let session_dataset = storage::wire_file_system_dataset(agents_dir)
+    // #2179：运行时状态根为 ~/.aemeath/state（启动期迁移未完成时回退旧 ~/.agents）。
+    let state_root = crate::state_layout_migration::resolved_state_layout_root();
+    let session_dataset = storage::wire_file_system_dataset(&state_root)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_blob = storage::wire_file_system_blob(agents_dir)
+    let session_blob = storage::wire_file_system_blob(&state_root)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
@@ -314,7 +316,6 @@ pub(crate) async fn from_args_with_gateways(
     // #1486/#1621：compact 走 LLM 语义压缩，并按 `context.compact_model`
     // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
     // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
-    let agents_dir_buf = agents_dir.to_path_buf();
     // System One 评分端口：全场景开关关闭时零成本（不读模型、不解析 manifest、
     // 不启动 worker）；开启时经 embedded 链装配并取 typed startup outcome——
     // 本 runtime 只消费该 outcome（日志），启动提醒透传由后续任务接手。
@@ -336,13 +337,13 @@ pub(crate) async fn from_args_with_gateways(
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: memory::wire_memory_opener(
-            storage::wire_file_system_dataset(agents_dir_buf.clone())
+            storage::wire_file_system_dataset(state_root.clone())
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
             scoring_ports.for_memory_rerank.clone(),
-            // 事件 jsonl 根与 dataset 根同为 agents_dir（memory/{project}/events/…）；
+            // 事件 jsonl 根与 dataset 根同为新状态根（memory/{project}/events/…）；
             // retention 在 open_memory 时取 candidate `MemoryConfig`。
-            storage::SafeStorageRoot::open(agents_dir)
+            storage::SafeStorageRoot::open(&state_root)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
         ),
         session_management: session_management.clone(),
@@ -397,7 +398,10 @@ pub(crate) async fn from_args_with_gateways(
     let (usage_sink, session_audit): (
         Arc<dyn runtime::UsageSink>,
         Option<crate::audit::SessionAudit>,
-    ) = match crate::audit::wire_session_audit(agents_dir, &snapshot) {
+    ) = match crate::audit::wire_session_audit(
+        &crate::state_layout_migration::resolved_state_layout_root(),
+        &snapshot,
+    ) {
         Ok(session_audit) => (session_audit.usage_sink(), Some(session_audit)),
         Err(error) => {
             log::warn!(
