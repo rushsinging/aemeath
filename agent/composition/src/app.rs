@@ -1433,10 +1433,7 @@ fn wire_workspace_with_config(
 }
 
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
-    // #2179：启动期一次性迁移运行时状态目录到 ~/.aemeath/state（幂等）。
-    // 不做运行时 fallback：迁移失败 MUST 阻止启动，避免新路径空读被误判成历史丢失。
-    crate::state_layout_migration::ensure_state_layout()
-        .map_err(|error| SdkError::Init(format!("运行时状态迁移失败：{error}")))?;
+    // #2179：运行时状态迁移统一在 runtime 装配层执行（所有入口共用）。
     let cwd = args
         .cwd
         .clone()

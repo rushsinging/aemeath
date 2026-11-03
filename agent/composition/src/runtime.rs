@@ -178,6 +178,12 @@ pub(crate) async fn from_args_with_gateways(
     config: config::ConfigWiring,
     agents_dir: &std::path::Path,
 ) -> Result<SessionRuntimeAssembly, sdk::SdkError> {
+    // #2179：所有生产入口（TUI / chat / sessions / eval）都经过这里，迁移在此
+    // 一次执行；测试与嵌入式调用传入临时 agents_dir 时跳过，避免触碰真实 home。
+    if agents_dir == share::config::paths::global_agents_dir() {
+        crate::state_layout_migration::ensure_state_layout()
+            .map_err(|error| sdk::SdkError::Init(format!("运行时状态迁移失败：{error}")))?;
+    }
     let identity = workspace.read().project_identity();
     let project_key = memory_api::ProjectMemoryKey::derive(
         &identity.initial_cwd,
