@@ -203,10 +203,12 @@ pub async fn build_system_prompt_parts(
 }
 
 fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
+    // #2179：每个目录只取一个文件——AGENTS.md 优先，CLAUDE.md 仅作 fallback，
+    // 两者并存时不合并。
     let mut dirs = paths::project_instruction_dirs(cwd, depth);
     dirs.reverse();
     dirs.into_iter()
-        .flat_map(|dir| [dir.join(paths::AGENTS_MD), dir.join(paths::CLAUDE_MD)])
+        .filter_map(|dir| paths::resolve_project_instruction_path(&dir))
         .collect()
 }
 
@@ -222,31 +224,28 @@ async fn read_preferred_user_guidance_layers(
     workspace_root: &Path,
 ) -> Vec<UserGuidanceFile> {
     let mut files = Vec::new();
-    for candidates in candidate_paths.chunks(2) {
-        for path in candidates {
-            match tokio::fs::read_to_string(path).await {
-                Ok(content) => {
-                    hook_port
-                        .dispatch_at(
-                            HookInvocationData::InstructionsLoaded {
-                                file_path: path.to_string_lossy().to_string(),
-                                instruction_type: "agents_md".to_string(),
-                            },
-                            HookDispatchContextData::new(workspace_root),
-                            &tokio_util::sync::CancellationToken::new(),
-                        )
-                        .await;
-                    files.push(UserGuidanceFile {
-                        path: path.clone(),
-                        content,
-                    });
-                    break;
-                }
-                Err(error) if path.exists() => {
-                    log::warn!(target: crate::LOG_TARGET, "Failed to read user guidance {}: {}", path.display(), error);
-                }
-                Err(_) => {}
+    for path in candidate_paths {
+        match tokio::fs::read_to_string(path).await {
+            Ok(content) => {
+                hook_port
+                    .dispatch_at(
+                        HookInvocationData::InstructionsLoaded {
+                            file_path: path.to_string_lossy().to_string(),
+                            instruction_type: "agents_md".to_string(),
+                        },
+                        HookDispatchContextData::new(workspace_root),
+                        &tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await;
+                files.push(UserGuidanceFile {
+                    path: path.clone(),
+                    content,
+                });
             }
+            Err(error) if path.exists() => {
+                log::warn!(target: crate::LOG_TARGET, "Failed to read user guidance {}: {}", path.display(), error);
+            }
+            Err(_) => {}
         }
     }
     files

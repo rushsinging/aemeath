@@ -152,6 +152,46 @@ pub fn project_claude_settings_path(cwd: &Path) -> PathBuf {
     cwd.join(CLAUDE_DIR_NAME).join(SETTINGS_FILE)
 }
 
+/// 项目 instructions 文件的解析结果：同目录 `AGENTS.md` 优先，否则 `CLAUDE.md`；
+/// 两者都不存在返回 `None`（不在此处创建文件）。
+///
+/// 这是 runtime 指令加载、RSI project overlay 注册与 `/init` 的统一入口。
+pub fn resolve_project_instruction_path(dir: &Path) -> Option<PathBuf> {
+    resolve_project_instruction_path_with(dir, Path::exists)
+}
+
+/// 项目 instructions 的写入目标：`AGENTS.md` 存在则写它，否则 `CLAUDE.md`
+/// 存在则写它，都不存在则返回待创建的 `AGENTS.md`。
+///
+/// `/init` 与 RSI 写入 MUST 使用本函数，避免另起一套优先级判断。
+pub fn project_instruction_write_target(dir: &Path) -> PathBuf {
+    project_instruction_write_target_with(dir, Path::exists)
+}
+
+/// `project_instruction_write_target` 的纯函数形态（exists 注入便于测试）。
+fn project_instruction_write_target_with(dir: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    match resolve_project_instruction_path_with(dir, exists) {
+        Some(path) => path,
+        None => dir.join(AGENTS_MD),
+    }
+}
+
+/// 「AGENTS 优先、CLAUDE fallback」的纯函数形态（exists 可注入，便于测试）。
+fn resolve_project_instruction_path_with(
+    dir: &Path,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let agents = dir.join(AGENTS_MD);
+    if exists(&agents) {
+        return Some(agents);
+    }
+    let claude = dir.join(CLAUDE_MD);
+    if exists(&claude) {
+        return Some(claude);
+    }
+    None
+}
+
 /// 从 `cwd` 向上探索 `depth` 级祖先目录（含 `cwd` 自身），返回目录路径列表。
 ///
 /// 纯路径拼接，无 fs IO。用于项目指令搜索（`load_agents_md`）与

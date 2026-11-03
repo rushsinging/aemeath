@@ -6,29 +6,143 @@
 /// 执行 /init 命令。force = true 时强制重新初始化。
 pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
     use std::path::Path;
-    let claude_md = Path::new(cwd).join("CLAUDE.md");
-    let agents_dir = Path::new(cwd).join(".aemeath");
-    if claude_md.exists() && !force {
+    // #2179：统一按「AGENTS.md 优先、CLAUDE.md fallback、都不存在新建
+    // AGENTS.md」解析目标文件；非 force 时 NEVER 覆盖用户内容。
+    let target = share::config::paths::project_instruction_write_target(Path::new(cwd));
+    if target.exists() && !force {
         return (
-            "Already initialized. Use /init force to re-initialize".to_string(),
+            format!(
+                "Already initialized ({} exists). Use /init force to re-initialize",
+                target.display()
+            ),
             true,
         );
     }
-    // 创建 .aemeath 目录
-    if let Err(e) = std::fs::create_dir_all(&agents_dir) {
-        return (format!("Failed to create .aemeath directory: {}", e), true);
-    }
-    // 写入 CLAUDE.md（如果不存在或 force）
-    if !claude_md.exists() || force {
-        let content = "# AGENTS.md\n\nProject instructions for aemeath.\n";
-        if let Err(e) = std::fs::write(&claude_md, content) {
-            return (format!("Failed to write CLAUDE.md: {}", e), true);
+    let write_path = match resolve_symlink_chain(&target) {
+        Ok(path) => path,
+        Err(error) => {
+            return (
+                format!("Failed to resolve {}: {error}", target.display()),
+                true,
+            )
         }
+    };
+    let content = "# AGENTS.md\n\nProject instructions for aemeath.\n";
+    if let Err(error) = write_atomically(&write_path, content) {
+        return (
+            format!("Failed to write {}: {error}", write_path.display()),
+            true,
+        );
     }
     (
-        "Project initialized successfully. Created .aemeath/ directory and CLAUDE.md.".to_string(),
+        format!(
+            "Project initialized successfully. Wrote {}.",
+            write_path.display()
+        ),
         false,
     )
+}
+
+/// 递归解析 symlink 链，返回应写入的最终普通文件路径。
+///
+/// 循环、深度超限或目标为目录时 fail-closed。
+fn resolve_symlink_chain(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    const MAX_LINK_DEPTH: usize = 16;
+    let mut current = path.to_path_buf();
+    for _ in 0..MAX_LINK_DEPTH {
+        let metadata = match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(current),
+            Err(error) => return Err(error.to_string()),
+        };
+        if !metadata.file_type().is_symlink() {
+            if metadata.is_dir() {
+                return Err(format!("{} 是目录，不是指令文件", current.display()));
+            }
+            return Ok(current);
+        }
+        let link_target = std::fs::read_link(&current).map_err(|error| error.to_string())?;
+        current = if link_target.is_absolute() {
+            link_target
+        } else {
+            current
+                .parent()
+                .map(|parent| parent.join(&link_target))
+                .unwrap_or(link_target)
+        };
+    }
+    Err(format!(
+        "symlink 深度超过 {MAX_LINK_DEPTH}：{}",
+        path.display()
+    ))
+}
+
+/// 同目录临时文件 + rename 的原子写入。
+fn write_atomically(path: &std::path::Path, content: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temp = path.with_extension("aemeath-init.tmp");
+    std::fs::write(&temp, content).map_err(|error| error.to_string())?;
+    std::fs::rename(&temp, path).map_err(|error| {
+        let _ = std::fs::remove_file(&temp);
+        error.to_string()
+    })
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    #[test]
+    fn init_creates_agents_md_when_neither_file_exists() {
+        let root = tempfile::tempdir().expect("temp root");
+        let (text, is_error) = execute_init(&root.path().to_string_lossy(), false);
+        assert!(!is_error, "{text}");
+        assert!(root.path().join("AGENTS.md").is_file());
+        assert!(!root.path().join("CLAUDE.md").exists());
+    }
+
+    #[test]
+    fn init_uses_existing_claude_md_instead_of_creating_agents_md() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(root.path().join("CLAUDE.md"), "existing\n").expect("seed claude");
+        let (text, is_error) = execute_init(&root.path().to_string_lossy(), true);
+        assert!(!is_error, "{text}");
+        assert!(!root.path().join("AGENTS.md").exists());
+        let content = std::fs::read_to_string(root.path().join("CLAUDE.md")).expect("claude");
+        assert!(content.contains("AGENTS.md"));
+    }
+
+    #[test]
+    fn init_refuses_to_overwrite_without_force() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(root.path().join("AGENTS.md"), "user content\n").expect("seed agents");
+        let (_, is_error) = execute_init(&root.path().to_string_lossy(), false);
+        assert!(is_error);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("AGENTS.md")).expect("agents"),
+            "user content\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_writes_through_symlink_and_keeps_link() {
+        let root = tempfile::tempdir().expect("temp root");
+        let target = root.path().join("shared-instructions.md");
+        std::fs::write(&target, "old\n").expect("seed target");
+        std::os::unix::fs::symlink(&target, root.path().join("AGENTS.md")).expect("symlink");
+
+        let (text, is_error) = execute_init(&root.path().to_string_lossy(), true);
+
+        assert!(!is_error, "{text}");
+        let link_meta =
+            std::fs::symlink_metadata(root.path().join("AGENTS.md")).expect("link meta");
+        assert!(link_meta.file_type().is_symlink());
+        let content = std::fs::read_to_string(&target).expect("target content");
+        assert!(content.contains("Project instructions for aemeath"));
+    }
 }
 
 /// 执行 /session 命令。

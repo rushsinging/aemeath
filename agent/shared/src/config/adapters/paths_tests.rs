@@ -406,3 +406,36 @@ fn test_config_and_worktrees_paths_ignore_aemeath_home_dir() {
     assert_eq!(global_config_path(), expected.join(NEW_CONFIG_FILE));
     assert_eq!(global_worktrees_dir(), expected.join(WORKTREES_DIR_NAME));
 }
+
+#[test]
+fn test_project_instruction_resolution_prefers_agents_then_claude() {
+    let dir = PathBuf::from("/repo");
+    let agents = dir.join(AGENTS_MD);
+    let claude = dir.join(CLAUDE_MD);
+
+    // 两者都存在：只用 AGENTS.md，不合并。
+    assert_eq!(
+        resolve_project_instruction_path_with(&dir, |_| true),
+        Some(agents.clone())
+    );
+    // 仅 CLAUDE.md 存在：fallback。
+    assert_eq!(
+        resolve_project_instruction_path_with(&dir, |path| path == claude),
+        Some(claude)
+    );
+    // 都不存在：None（不在此处创建）。
+    assert_eq!(resolve_project_instruction_path_with(&dir, |_| false), None);
+}
+
+#[test]
+fn test_project_instruction_write_target_falls_back_to_new_agents_file() {
+    let dir = PathBuf::from("/repo");
+    assert_eq!(
+        project_instruction_write_target_with(&dir, |_| false),
+        dir.join(AGENTS_MD)
+    );
+    assert_eq!(
+        project_instruction_write_target_with(&dir, |path| path == dir.join(CLAUDE_MD)),
+        dir.join(CLAUDE_MD)
+    );
+}

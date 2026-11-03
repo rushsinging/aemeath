@@ -275,7 +275,9 @@ struct ProjectWorkspaceValue {
 fn project_overlay_component_paths_under(
     agents_dir: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
-    let session_root = agents_dir.join("session");
+    // #2179：session dataset 已迁到运行时状态根，项目段从那里反解。
+    let _ = agents_dir;
+    let session_root = share::config::paths::global_session_datasets_dir();
     let mut paths = HashMap::new();
     let Ok(project_entries) = std::fs::read_dir(&session_root) else {
         return paths;
@@ -295,13 +297,9 @@ fn project_overlay_component_paths_under(
         let Some(root) = resolve_project_root_from_snapshots(&project_dir) else {
             continue;
         };
-        let agents_md = root.join("AGENTS.md");
-        let claude_md = root.join("CLAUDE.md");
-        let target = if agents_md.is_file() {
-            agents_md
-        } else if claude_md.is_file() {
-            claude_md
-        } else {
+        // #2179：AGENTS.md 优先、CLAUDE.md fallback 的统一解析由 paths 单点提供，
+        // 两者都缺失时不注册项目组件（NEVER 自动创建项目说明文件）。
+        let Some(target) = share::config::paths::resolve_project_instruction_path(&root) else {
             continue;
         };
         paths.insert(
