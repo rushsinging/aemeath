@@ -31,6 +31,8 @@ pub struct StateLayoutMigrationReport {
     pub warnings: Vec<String>,
     /// 致命失败（复制/写入失败）。非空即视为迁移失败，调用方 MUST fail-closed。
     pub failed: Vec<String>,
+    /// 因目标已存在而跳过的文件数（合并语义；不逐条记 warning 以免爆量）。
+    pub skipped_files: usize,
     /// 命中完成标记，未做任何文件操作。
     pub already_migrated: bool,
 }
@@ -232,10 +234,18 @@ fn migrate_entry(
     }
     if !is_dir && target.exists() {
         // bootstrap 骨架（空占位）不算用户内容：允许用真实源覆盖一次。
-        let is_bootstrap_skeleton = std::fs::read_to_string(&target)
-            .map(|content| content == crate::constants::BOOTSTRAP_TOOL_GUIDANCE_BODY)
-            .unwrap_or(false);
-        if !is_bootstrap_skeleton {
+        // 空文件占位（首次启动创建的空 guidance/骨架）不算用户内容：
+        // 源非空时允许覆盖一次，避免「新进程先建空文件」永久阻塞真实内容迁移。
+        let target_is_placeholder = std::fs::metadata(&target)
+            .map(|meta| meta.len() == 0)
+            .unwrap_or(false)
+            || std::fs::read_to_string(&target)
+                .map(|content| content == crate::constants::BOOTSTRAP_TOOL_GUIDANCE_BODY)
+                .unwrap_or(false);
+        let source_is_empty = std::fs::metadata(&source)
+            .map(|meta| meta.len() == 0)
+            .unwrap_or(true);
+        if !(target_is_placeholder && !source_is_empty) {
             report.skipped.push(name.to_string());
             report
                 .warnings
@@ -322,9 +332,25 @@ fn merge_dir_recursive(
             merge_dir_recursive(&from, &to, report)?;
         } else if file_type.is_file() {
             if to.exists() {
-                report
-                    .warnings
-                    .push(format!("目标已存在，跳过不覆盖：{}", to.display()));
+                // 空文件占位不算用户内容：源非空时覆盖一次（首次启动会先建
+                // 空 guidance/骨架文件，不能让它永久阻塞真实内容迁移）。
+                let placeholder = std::fs::metadata(&to)
+                    .map(|meta| meta.len() == 0)
+                    .unwrap_or(false);
+                let source_empty = std::fs::metadata(&from)
+                    .map(|meta| meta.len() == 0)
+                    .unwrap_or(true);
+                if placeholder && !source_empty {
+                    std::fs::copy(&from, &to).map_err(|error| {
+                        format!(
+                            "覆盖空占位失败（{} -> {}）：{error}",
+                            from.display(),
+                            to.display()
+                        )
+                    })?;
+                } else {
+                    report.skipped_files += 1;
+                }
                 continue;
             }
             std::fs::copy(&from, &to).map_err(|error| {
