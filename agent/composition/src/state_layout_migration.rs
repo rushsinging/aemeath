@@ -86,15 +86,27 @@ pub fn migrate_state_layout(
         if !source.is_dir() {
             continue;
         }
-        if target.exists() {
-            report.skipped.push((*leaf).to_string());
-            report
-                .warnings
-                .push(format!("新路径已存在，跳过且不覆盖：{}", target.display()));
+        // 合并式迁移：目标已存在的文件一律跳过（不覆盖用户数据），
+        // 目标缺失的文件照常复制——避免「目标目录存在」阻塞整体迁移。
+        match merge_dir_recursive(&source, &target, &mut report) {
+            Ok(()) => report.migrated.push((*leaf).to_string()),
+            Err(error) => report.failed.push(format!(
+                "复制失败（{} -> {}）：{error}",
+                source.display(),
+                target.display()
+            )),
+        }
+    }
+
+    // 历史 aemeath 布局（更早版本直接落在 ~/.aemeath 下）同样并入 state。
+    for historical in historical_aemeath_leaves() {
+        let source = aemeath_home.join(historical);
+        let target = state_dir.join(historical);
+        if !source.is_dir() {
             continue;
         }
-        match copy_dir_recursive(&source, &target) {
-            Ok(()) => report.migrated.push((*leaf).to_string()),
+        match merge_dir_recursive(&source, &target, &mut report) {
+            Ok(()) => report.migrated.push((*historical).to_string()),
             Err(error) => report.failed.push(format!(
                 "复制失败（{} -> {}）：{error}",
                 source.display(),
@@ -196,6 +208,14 @@ fn private_asset_dirs() -> &'static [&'static str] {
     &["logs", "guidance", "models"]
 }
 
+/// 更早版本曾直接落在 `~/.aemeath/<leaf>`、现应并入 `state/<leaf>` 的历史目录。
+fn historical_aemeath_leaves() -> &'static [&'static str] {
+    &["tool-results"]
+}
+
+/// 内建骨架内容：目标文件只是 bootstrap 占位时，允许用真实源覆盖。
+const BOOTSTRAP_TOOL_GUIDANCE_BODY: &str = "# Tool Guidance\n";
+
 fn migrate_entry(
     agents_dir: &Path,
     aemeath_home: &Path,
@@ -213,15 +233,21 @@ fn migrate_entry(
     if !source_exists {
         return;
     }
-    if target.exists() {
-        report.skipped.push(name.to_string());
-        report
-            .warnings
-            .push(format!("新路径已存在，跳过且不覆盖：{}", target.display()));
-        return;
+    if !is_dir && target.exists() {
+        // bootstrap 骨架（空占位）不算用户内容：允许用真实源覆盖一次。
+        let is_bootstrap_skeleton = std::fs::read_to_string(&target)
+            .map(|content| content == BOOTSTRAP_TOOL_GUIDANCE_BODY)
+            .unwrap_or(false);
+        if !is_bootstrap_skeleton {
+            report.skipped.push(name.to_string());
+            report
+                .warnings
+                .push(format!("新路径已存在，跳过且不覆盖：{}", target.display()));
+            return;
+        }
     }
     let result = if is_dir {
-        copy_dir_recursive(&source, &target)
+        merge_dir_recursive(&source, &target, report)
     } else {
         std::fs::copy(&source, &target)
             .map(|_| ())
@@ -275,6 +301,50 @@ fn dir_has_entries(path: &Path) -> bool {
     std::fs::read_dir(path)
         .map(|entries| entries.filter_map(Result::ok).next().is_some())
         .unwrap_or(false)
+}
+
+/// 合并式复制：目标已存在的文件跳过并记入 skipped，新文件照常复制。
+fn merge_dir_recursive(
+    source: &Path,
+    target: &Path,
+    report: &mut StateLayoutMigrationReport,
+) -> Result<(), String> {
+    std::fs::create_dir_all(target)
+        .map_err(|error| format!("创建目录失败（{}）：{error}", target.display()))?;
+    let entries = std::fs::read_dir(source)
+        .map_err(|error| format!("读取目录失败（{}）：{error}", source.display()))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("读取目录项失败（{}）：{error}", source.display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("读取文件类型失败（{}）：{error}", entry.path().display()))?;
+        let from = entry.path();
+        let to = target.join(entry.file_name());
+        if file_type.is_dir() {
+            merge_dir_recursive(&from, &to, report)?;
+        } else if file_type.is_file() {
+            if to.exists() {
+                report
+                    .warnings
+                    .push(format!("目标已存在，跳过不覆盖：{}", to.display()));
+                continue;
+            }
+            std::fs::copy(&from, &to).map_err(|error| {
+                format!(
+                    "复制文件失败（{} -> {}）：{error}",
+                    from.display(),
+                    to.display()
+                )
+            })?;
+        } else if file_type.is_symlink() {
+            if to.exists() {
+                continue;
+            }
+            copy_symlink(&from, &to)?;
+        }
+    }
+    Ok(())
 }
 
 fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), String> {
@@ -389,15 +459,17 @@ mod tests {
         write_file(&agents.join("memory/legacy.json"), "old");
         write_file(&home.join("state/memory/current.json"), "new");
 
-        let report = migrate_state_layout(&agents, &home).expect("migration");
+        let _report = migrate_state_layout(&agents, &home).expect("migration");
 
-        assert_eq!(report.skipped, vec!["memory"]);
-        assert!(report.has_warnings());
+        // #2179：目录迁移为合并式——已存在文件不覆盖，缺失文件照常复制。
         assert_eq!(
             std::fs::read_to_string(home.join("state/memory/current.json")).expect("new file"),
             "new"
         );
-        assert!(!home.join("state/memory/legacy.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(home.join("state/memory/legacy.json")).expect("merged file"),
+            "old"
+        );
     }
 
     #[test]
@@ -473,6 +545,38 @@ mod tests {
         assert!(home.join("models/systemone/model.gguf").is_file());
         // 旧位置原样保留（迁移 = 复制，不删除用户数据）。
         assert!(agents.join("tool_guidance.md").is_file());
+    }
+
+    #[test]
+    fn historical_aemeath_tool_results_merge_into_state() {
+        let root = tempfile::tempdir().expect("temp root");
+        let agents = root.path().join(".agents");
+        let home = root.path().join(".aemeath");
+        write_file(
+            &home.join("tool-results/session-a/call.txt"),
+            "legacy result",
+        );
+
+        let report = migrate_state_layout(&agents, &home).expect("migration");
+
+        assert!(report.migrated.contains(&"tool-results".to_string()));
+        assert!(home.join("state/tool-results/session-a/call.txt").is_file());
+    }
+
+    #[test]
+    fn bootstrap_tool_guidance_skeleton_is_replaced_by_real_source() {
+        let root = tempfile::tempdir().expect("temp root");
+        let agents = root.path().join(".agents");
+        let home = root.path().join(".aemeath");
+        write_file(&agents.join("tool_guidance.md"), "# 用户真实工具纪律\n");
+        write_file(&home.join("tool_guidance.md"), "# Tool Guidance\n");
+
+        let _report = migrate_state_layout(&agents, &home).expect("migration");
+
+        assert_eq!(
+            std::fs::read_to_string(home.join("tool_guidance.md")).expect("guidance"),
+            "# 用户真实工具纪律\n"
+        );
     }
 
     #[test]
