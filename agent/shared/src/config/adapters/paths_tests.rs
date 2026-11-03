@@ -83,8 +83,8 @@ fn test_project_paths_use_agents_directory() {
 }
 
 #[test]
-fn test_global_data_paths_use_agents_directory() {
-    // 用 env 隔离，避免污染真实 home/.agents
+fn test_global_config_and_knowledge_paths_use_agents_directory() {
+    // #2179：配置、worktrees、通用知识与 skills 仍在 ~/.agents。
     let temp_agents_dir = std::env::temp_dir().join(format!(
         "aemeath_shared_paths_{}",
         UNIQUE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -94,10 +94,6 @@ fn test_global_data_paths_use_agents_directory() {
     assert_eq!(global_config_path(), temp_agents_dir.join("aemeath.json"));
     assert_eq!(global_agents_md_path(), temp_agents_dir.join("AGENTS.md"));
     assert_eq!(global_skills_dir(), temp_agents_dir.join("skills"));
-    assert_eq!(global_logs_dir(), temp_agents_dir.join("logs"));
-    assert_eq!(global_guidance_dir(), temp_agents_dir.join("guidance"));
-    assert_eq!(global_memory_dir(), temp_agents_dir.join("memory"));
-    assert_eq!(global_sessions_dir(), temp_agents_dir.join("sessions"));
     assert_eq!(global_worktrees_dir(), temp_agents_dir.join("worktrees"));
     assert_eq!(global_hooks_dir(), temp_agents_dir.join("hooks"));
     assert_eq!(global_mcp_config_path(), temp_agents_dir.join("mcp.json"));
@@ -109,34 +105,63 @@ fn test_global_data_paths_use_agents_directory() {
 }
 
 #[test]
-fn test_systemone_models_dir_under_custom_agents_root() {
-    let temp_agents_dir = std::env::temp_dir().join(format!(
+fn test_runtime_state_and_private_asset_paths_use_aemeath_home() {
+    // #2179：运行时状态与模型/日志/guidance 落到 ~/.aemeath。
+    let temp_home = std::env::temp_dir().join(format!(
+        "aemeath_shared_home_{}",
+        UNIQUE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let _guard = TestEnvGuard::set(AEMEATH_HOME_DIR_ENV, &temp_home);
+
+    let state = temp_home.join("state");
+    assert_eq!(global_logs_dir(), temp_home.join("logs"));
+    assert_eq!(global_guidance_dir(), temp_home.join("guidance"));
+    assert_eq!(global_memory_dir(), state.join("memory"));
+    assert_eq!(global_sessions_dir(), state.join("sessions"));
+    assert_eq!(global_session_datasets_dir(), state.join("session"));
+    assert_eq!(global_tool_results_dir(), state.join("tool-results"));
+    assert_eq!(global_harness_dir(), state.join("harness"));
+    assert_eq!(global_scoring_dir(), state.join("scoring"));
+    assert_eq!(global_workflows_dir(), state.join("workflows"));
+    assert_eq!(global_audit_dir(), state.join("audit"));
+    assert_eq!(
+        global_background_process_dir(),
+        state.join("background-process")
+    );
+    assert_eq!(global_background_task_dir(), state.join("background-task"));
+    assert_eq!(global_meta_dir(), state.join("meta"));
+    assert_eq!(global_tmp_dir(), state.join("tmp"));
+    assert_eq!(global_models_dir(), temp_home.join("models"));
+    assert_eq!(systemone_models_dir(), temp_home.join("models/systemone"));
+}
+
+#[test]
+fn test_systemone_models_dir_under_custom_aemeath_home() {
+    let temp_home = std::env::temp_dir().join(format!(
         "aemeath_shared_models_{}",
         UNIQUE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, &temp_agents_dir);
+    let _guard = TestEnvGuard::set(AEMEATH_HOME_DIR_ENV, &temp_home);
 
-    assert_eq!(global_models_dir(), temp_agents_dir.join("models"));
-    assert_eq!(
-        systemone_models_dir(),
-        temp_agents_dir.join("models/systemone")
-    );
+    assert_eq!(global_models_dir(), temp_home.join("models"));
+    assert_eq!(systemone_models_dir(), temp_home.join("models/systemone"));
 }
 
 #[test]
 fn test_systemone_models_dir_env_blank_falls_back_to_home_layout() {
-    let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, "   ");
+    // 空白 AEMEATH_HOME_DIR 视为未设置，回退 home/.aemeath 布局。
+    let _guard = TestEnvGuard::set(AEMEATH_HOME_DIR_ENV, "   ");
     let expected = home_dir_or_dot()
-        .join(AGENTS_DIR_NAME)
+        .join(AEMEATH_HOME_DIR_NAME)
         .join("models/systemone");
     assert_eq!(systemone_models_dir(), expected);
 }
 
 #[test]
 fn test_systemone_models_dir_env_missing_falls_back_to_home_layout() {
-    let _guard = TestEnvGuard::unset(AGENTS_DIR_ENV);
+    let _guard = TestEnvGuard::unset(AEMEATH_HOME_DIR_ENV);
     let expected = home_dir_or_dot()
-        .join(AGENTS_DIR_NAME)
+        .join(AEMEATH_HOME_DIR_NAME)
         .join("models/systemone");
     assert_eq!(systemone_models_dir(), expected);
 }
@@ -309,6 +334,45 @@ fn test_aemeath_state_dir_and_leaf() {
     assert_eq!(
         aemeath_state_leaf_dir("sessions"),
         PathBuf::from("/tmp/aemeath-home-test/state/sessions")
+    );
+}
+
+#[test]
+fn test_tool_guidance_canonical_path_lives_under_aemeath_home() {
+    // 环境锁不支持嵌套持有：分两段覆盖两个 env 键。
+    {
+        let _home = TestEnvGuard::set(AEMEATH_HOME_DIR_ENV, "/tmp/aemeath-home-test");
+        assert_eq!(
+            global_tool_guidance_path(),
+            PathBuf::from("/tmp/aemeath-home-test/tool_guidance.md")
+        );
+    }
+    let _agents = TestEnvGuard::set(AGENTS_DIR_ENV, "/tmp/agents-root");
+    assert_eq!(
+        legacy_global_tool_guidance_path(),
+        PathBuf::from("/tmp/agents-root/tool_guidance.md")
+    );
+}
+
+#[test]
+fn test_resolved_tool_guidance_prefers_canonical_then_legacy() {
+    let canonical = PathBuf::from("/home/u/.aemeath/tool_guidance.md");
+    let legacy = PathBuf::from("/home/u/.agents/tool_guidance.md");
+
+    // 两者都存在：只用 canonical，不合并。
+    assert_eq!(
+        resolve_canonical_then_legacy(canonical.clone(), legacy.clone(), |_| true),
+        canonical
+    );
+    // 仅旧存在：只读 fallback 到 legacy。
+    assert_eq!(
+        resolve_canonical_then_legacy(canonical.clone(), legacy.clone(), |path| path == legacy),
+        legacy
+    );
+    // 都不存在：返回 canonical（调用方静默跳过或新建）。
+    assert_eq!(
+        resolve_canonical_then_legacy(canonical.clone(), legacy.clone(), |_| false),
+        canonical
     );
 }
 

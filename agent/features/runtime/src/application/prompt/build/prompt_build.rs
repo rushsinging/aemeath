@@ -392,7 +392,7 @@ fn render_tool_guidance_section(source_path: &str, content: &str) -> String {
 
 /// 加载全局 tool_guidance 覆盖段（缺文件/空内容 → None）。
 async fn load_tool_guidance_section() -> Option<String> {
-    let path = paths::global_tool_guidance_path();
+    let path = paths::resolved_tool_guidance_path();
     match tokio::fs::read_to_string(&path).await {
         Ok(content) if !content.trim().is_empty() => Some(render_tool_guidance_section(
             &path.to_string_lossy(),

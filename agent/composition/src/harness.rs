@@ -375,7 +375,7 @@ fn builtin_prose_component_paths_under(
             kind: harness::ComponentKind::ToolGuidance,
             name: harness::ComponentName::new("default"),
         },
-        agents_dir.join("tool_guidance.md"),
+        share::config::paths::global_tool_guidance_path(),
     );
     component_paths.insert(
         harness::ComponentId {

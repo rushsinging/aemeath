@@ -62,7 +62,7 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     files.push(expand_home(&paths::global_guardrails_path()));
     files.push(paths::project_guardrails_path(cwd));
     // tool_guidance 覆盖层：全局
-    files.push(expand_home(&paths::global_tool_guidance_path()));
+    files.push(expand_home(&paths::resolved_tool_guidance_path()));
     // skills 目录（目录级监控）
     files.push(expand_home(&paths::global_skills_dir()));
     files.push(paths::project_skills_dir(cwd));
