@@ -271,22 +271,63 @@ impl WorkspaceState {
         if self.worktree_kind == WorktreeKind::NonGit {
             return Err(WorkspaceError::UnsupportedForNonGit.into());
         }
+        // 进入前上下文帧归一化：栈只承载 Primary 帧（restore 不变量——不允许
+        // 嵌套 worktree）。当前工作区是 linked worktree 时：cwd 仍在其内 →
+        // Linked→Linked 嵌套，拒绝；cwd 已越界漂移（AllowAll cd 出工作区）→
+        // 帧回填 cwd 实际所在的同仓 Primary toplevel，与真实位置对齐，
+        // NEVER 压入 root 与 cwd 脱节、kind=Linked 的混合帧——该形状
+        // restore 必拒（InvalidStackShape），会让会话永久无法 resume。
         let mut next_stack = self.stack.clone();
-        if !next_stack.is_empty() {
-            match git
-                .is_linked_worktree(&self.path_base)
-                .map_err(WorkspaceError::GitOperationFailed)?
-            {
-                false => next_stack.clear(),
-                true => {
+        let (frame_path_base, frame_root, frame_kind) =
+            if self.worktree_kind == WorktreeKind::Linked {
+                if self.path_base.starts_with(&self.workspace_root) {
                     return Err(WorkspaceError::NestedWorktree {
                         current_workspace_root: self.workspace_root.clone(),
                         current_path_base: self.path_base.clone(),
                     }
                     .into());
                 }
-            }
-        }
+                let top = git
+                    .show_toplevel(&self.path_base)
+                    .map_err(WorkspaceError::GitOperationFailed)?;
+                let (_, root, kind) = validate_in_repo(self, git, &top)?;
+                if kind != WorktreeKind::Primary {
+                    return Err(WorkspaceError::NestedWorktree {
+                        current_workspace_root: root,
+                        current_path_base: self.path_base.clone(),
+                    }
+                    .into());
+                }
+                next_stack.clear();
+                (self.path_base.clone(), root, WorktreeKind::Primary)
+            } else if !next_stack.is_empty() {
+                match git
+                    .is_linked_worktree(&self.path_base)
+                    .map_err(WorkspaceError::GitOperationFailed)?
+                {
+                    false => {
+                        next_stack.clear();
+                        (
+                            self.path_base.clone(),
+                            self.workspace_root.clone(),
+                            self.worktree_kind,
+                        )
+                    }
+                    true => {
+                        return Err(WorkspaceError::NestedWorktree {
+                            current_workspace_root: self.workspace_root.clone(),
+                            current_path_base: self.path_base.clone(),
+                        }
+                        .into());
+                    }
+                }
+            } else {
+                (
+                    self.path_base.clone(),
+                    self.workspace_root.clone(),
+                    self.worktree_kind,
+                )
+            };
         let target = resolve_worktree_path(self, path, branch.as_deref())?;
         if !target.exists() {
             let b = branch
@@ -307,9 +348,9 @@ impl WorkspaceState {
         }
         let frame = WorkspaceData {
             id: self.workspace_id(),
-            path_base: self.path_base.clone(),
-            workspace_root: self.workspace_root.clone(),
-            worktree_kind: self.worktree_kind,
+            path_base: frame_path_base,
+            workspace_root: frame_root,
+            worktree_kind: frame_kind,
         };
         next_stack.push(frame.clone());
         self.stack = next_stack;
