@@ -674,8 +674,13 @@ fn tool_guidance_section_truncates_at_budget_with_marker() {
 async fn tool_guidance_missing_file_yields_none() {
     let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
-    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    let legacy = tempfile::tempdir().unwrap();
+    // #2179：canonical 落点已迁到 ~/.aemeath（AEMEATH_HOME_DIR）；旧 ~/.agents
+    // 作为只读 fallback，必须一并隔离，才能构造「两边都没有」的场景。
+    std::env::set_var("AEMEATH_HOME_DIR", cwd.path());
+    std::env::set_var("AEMEATH_AGENTS_DIR", legacy.path());
     let section = load_tool_guidance_section().await;
+    std::env::remove_var("AEMEATH_HOME_DIR");
     std::env::remove_var("AEMEATH_AGENTS_DIR");
     assert!(section.is_none(), "缺文件 NEVER 产生空段");
 }
@@ -684,14 +689,14 @@ async fn tool_guidance_missing_file_yields_none() {
 async fn claude_md_message_appends_tool_guidance_section() {
     let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
-    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    std::env::set_var("AEMEATH_HOME_DIR", cwd.path());
     std::fs::write(
         cwd.path().join("tool_guidance.md"),
         "# 工具指南\n优先并行派发",
     )
     .unwrap();
     let section = load_tool_guidance_section().await;
-    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    std::env::remove_var("AEMEATH_HOME_DIR");
     let section = section.expect("tool_guidance 必须加载");
     assert!(section.contains("优先并行派发"));
 }
