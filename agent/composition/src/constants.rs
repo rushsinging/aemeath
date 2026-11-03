@@ -36,3 +36,6 @@ pub(crate) const HF_CDN_REDIRECT_HOSTS: [&str; 4] = [
     "transfer.xethub.hf.co",
     "cdn-lfs.hf.co",
 ];
+
+/// `~/.aemeath/state/` 下运行时状态迁移完成标记文件名（#2179）。
+pub(crate) const STATE_LAYOUT_MARKER_FILE: &str = ".layout-migration.json";

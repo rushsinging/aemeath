@@ -37,3 +37,19 @@ pub const TOOL_RESULTS_DIR_NAME: &str = "tool-results";
 pub const MCP_CONFIG_FILE: &str = "mcp.json";
 pub const HISTORY_FILE: &str = "history.json";
 pub const SETTINGS_FILE: &str = "settings.json";
+
+/// 运行时状态迁移涉及的叶子目录（与旧 `~/.agents/<leaf>` 同名，#2179）。
+pub const RUNTIME_STATE_LEAVES: &[&str] = &[
+    "session",
+    "sessions",
+    "harness",
+    "scoring",
+    "background-process",
+    "background-task",
+    "workflows",
+    "audit",
+    "tool-results",
+    "memory",
+    "meta",
+    "tmp",
+];

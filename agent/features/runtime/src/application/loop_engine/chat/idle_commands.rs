@@ -90,61 +90,6 @@ fn write_atomically(path: &std::path::Path, content: &str) -> Result<(), String>
     })
 }
 
-#[cfg(test)]
-mod init_tests {
-    use super::*;
-
-    #[test]
-    fn init_creates_agents_md_when_neither_file_exists() {
-        let root = tempfile::tempdir().expect("temp root");
-        let (text, is_error) = execute_init(&root.path().to_string_lossy(), false);
-        assert!(!is_error, "{text}");
-        assert!(root.path().join("AGENTS.md").is_file());
-        assert!(!root.path().join("CLAUDE.md").exists());
-    }
-
-    #[test]
-    fn init_uses_existing_claude_md_instead_of_creating_agents_md() {
-        let root = tempfile::tempdir().expect("temp root");
-        std::fs::write(root.path().join("CLAUDE.md"), "existing\n").expect("seed claude");
-        let (text, is_error) = execute_init(&root.path().to_string_lossy(), true);
-        assert!(!is_error, "{text}");
-        assert!(!root.path().join("AGENTS.md").exists());
-        let content = std::fs::read_to_string(root.path().join("CLAUDE.md")).expect("claude");
-        assert!(content.contains("AGENTS.md"));
-    }
-
-    #[test]
-    fn init_refuses_to_overwrite_without_force() {
-        let root = tempfile::tempdir().expect("temp root");
-        std::fs::write(root.path().join("AGENTS.md"), "user content\n").expect("seed agents");
-        let (_, is_error) = execute_init(&root.path().to_string_lossy(), false);
-        assert!(is_error);
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("AGENTS.md")).expect("agents"),
-            "user content\n"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn init_writes_through_symlink_and_keeps_link() {
-        let root = tempfile::tempdir().expect("temp root");
-        let target = root.path().join("shared-instructions.md");
-        std::fs::write(&target, "old\n").expect("seed target");
-        std::os::unix::fs::symlink(&target, root.path().join("AGENTS.md")).expect("symlink");
-
-        let (text, is_error) = execute_init(&root.path().to_string_lossy(), true);
-
-        assert!(!is_error, "{text}");
-        let link_meta =
-            std::fs::symlink_metadata(root.path().join("AGENTS.md")).expect("link meta");
-        assert!(link_meta.file_type().is_symlink());
-        let content = std::fs::read_to_string(&target).expect("target content");
-        assert!(content.contains("Project instructions for aemeath"));
-    }
-}
-
 /// 执行 /session 命令。
 pub async fn execute_session(
     args: &str,
@@ -258,5 +203,60 @@ pub async fn execute_session(
             }
         }
         _ => (format!("Unknown session command: {}", parts[0]), true),
+    }
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    #[test]
+    fn init_creates_agents_md_when_neither_file_exists() {
+        let root = tempfile::tempdir().expect("temp root");
+        let (text, is_error) = execute_init(&root.path().to_string_lossy(), false);
+        assert!(!is_error, "{text}");
+        assert!(root.path().join("AGENTS.md").is_file());
+        assert!(!root.path().join("CLAUDE.md").exists());
+    }
+
+    #[test]
+    fn init_uses_existing_claude_md_instead_of_creating_agents_md() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(root.path().join("CLAUDE.md"), "existing\n").expect("seed claude");
+        let (text, is_error) = execute_init(&root.path().to_string_lossy(), true);
+        assert!(!is_error, "{text}");
+        assert!(!root.path().join("AGENTS.md").exists());
+        let content = std::fs::read_to_string(root.path().join("CLAUDE.md")).expect("claude");
+        assert!(content.contains("AGENTS.md"));
+    }
+
+    #[test]
+    fn init_refuses_to_overwrite_without_force() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(root.path().join("AGENTS.md"), "user content\n").expect("seed agents");
+        let (_, is_error) = execute_init(&root.path().to_string_lossy(), false);
+        assert!(is_error);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("AGENTS.md")).expect("agents"),
+            "user content\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_writes_through_symlink_and_keeps_link() {
+        let root = tempfile::tempdir().expect("temp root");
+        let target = root.path().join("shared-instructions.md");
+        std::fs::write(&target, "old\n").expect("seed target");
+        std::os::unix::fs::symlink(&target, root.path().join("AGENTS.md")).expect("symlink");
+
+        let (text, is_error) = execute_init(&root.path().to_string_lossy(), true);
+
+        assert!(!is_error, "{text}");
+        let link_meta =
+            std::fs::symlink_metadata(root.path().join("AGENTS.md")).expect("link meta");
+        assert!(link_meta.file_type().is_symlink());
+        let content = std::fs::read_to_string(&target).expect("target content");
+        assert!(content.contains("Project instructions for aemeath"));
     }
 }

@@ -17,9 +17,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use share::config::paths::RUNTIME_STATE_LEAVES;
 
-/// `state/` 下的迁移完成标记文件名。
-pub const STATE_LAYOUT_MARKER_FILE: &str = ".layout-migration.json";
-
 /// 迁移结果。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct StateLayoutMigrationReport {
@@ -52,7 +49,7 @@ pub fn migrate_state_layout(
     aemeath_home: &Path,
 ) -> Result<StateLayoutMigrationReport, String> {
     let state_dir = aemeath_home.join(share::config::paths::STATE_DIR_NAME);
-    let marker = state_dir.join(STATE_LAYOUT_MARKER_FILE);
+    let marker = state_dir.join(crate::constants::STATE_LAYOUT_MARKER_FILE);
     if marker.exists() {
         return Ok(StateLayoutMigrationReport {
             already_migrated: true,
@@ -160,7 +157,10 @@ pub fn ensure_state_layout() {
 /// 失败）回退旧 `~/.agents`，保证只读历史与会话仍可继续，下一次启动重试迁移。
 pub fn resolved_state_layout_root() -> PathBuf {
     let state_dir = share::config::paths::aemeath_state_dir();
-    if state_dir.join(STATE_LAYOUT_MARKER_FILE).exists() {
+    if state_dir
+        .join(crate::constants::STATE_LAYOUT_MARKER_FILE)
+        .exists()
+    {
         state_dir
     } else {
         share::config::paths::global_agents_dir()
@@ -290,7 +290,10 @@ mod tests {
         assert!(home.join("state/memory/proj/m.json").exists());
         // 旧目录只读保留：迁移不删除任何用户数据。
         assert!(agents.join("session/proj/a.dataset/manifest.json").exists());
-        assert!(home.join("state").join(STATE_LAYOUT_MARKER_FILE).exists());
+        assert!(home
+            .join("state")
+            .join(crate::constants::STATE_LAYOUT_MARKER_FILE)
+            .exists());
     }
 
     #[test]
@@ -358,7 +361,10 @@ mod tests {
 
         assert!(home.join("state/meta/version.json").exists());
         assert!(!home.join("state/audit/a.log").exists());
-        assert!(!home.join("state").join(STATE_LAYOUT_MARKER_FILE).exists());
+        assert!(!home
+            .join("state")
+            .join(crate::constants::STATE_LAYOUT_MARKER_FILE)
+            .exists());
     }
 
     #[test]
@@ -384,6 +390,9 @@ mod tests {
 
         assert!(report.migrated.is_empty());
         assert!(home.join("state").is_dir());
-        assert!(home.join("state").join(STATE_LAYOUT_MARKER_FILE).exists());
+        assert!(home
+            .join("state")
+            .join(crate::constants::STATE_LAYOUT_MARKER_FILE)
+            .exists());
     }
 }

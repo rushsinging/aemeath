@@ -6,9 +6,9 @@ pub use super::constants::{
     AEMEATH_HOME_DIR_ENV, AEMEATH_HOME_DIR_NAME, AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD,
     CLAUDE_DIR_NAME, CLAUDE_MD, GUARDRAILS_FILE_NAME, GUIDANCE_DIR_NAME, HISTORY_FILE,
     HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE, MEMORY_DIR_NAME, MODELS_DIR_NAME,
-    NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, SCRIPTS_DIR_NAME, SESSIONS_DIR_NAME,
-    SETTINGS_FILE, SKILLS_DIR_NAME, STATE_DIR_NAME, SYSTEMONE_DIR_NAME, TOOL_GUIDANCE_FILE_NAME,
-    TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
+    NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, RUNTIME_STATE_LEAVES, SCRIPTS_DIR_NAME,
+    SESSIONS_DIR_NAME, SETTINGS_FILE, SKILLS_DIR_NAME, STATE_DIR_NAME, SYSTEMONE_DIR_NAME,
+    TOOL_GUIDANCE_FILE_NAME, TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
 };
 
 /// 解析 home 目录（读取 `$HOME`）。
@@ -405,22 +405,6 @@ pub fn global_meta_dir() -> PathBuf {
 pub fn global_tmp_dir() -> PathBuf {
     aemeath_state_leaf_dir("tmp")
 }
-
-/// 运行时状态迁移涉及的叶子目录（与旧 `~/.agents/<leaf>` 同名）。
-pub const RUNTIME_STATE_LEAVES: &[&str] = &[
-    "session",
-    "sessions",
-    "harness",
-    "scoring",
-    "background-process",
-    "background-task",
-    "workflows",
-    "audit",
-    "tool-results",
-    "memory",
-    "meta",
-    "tmp",
-];
 
 /// 全局 plugins 组件目录（c8，#2030）。
 pub fn global_plugins_dir() -> PathBuf {
