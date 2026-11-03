@@ -213,9 +213,6 @@ fn historical_aemeath_leaves() -> &'static [&'static str] {
     &["tool-results"]
 }
 
-/// 内建骨架内容：目标文件只是 bootstrap 占位时，允许用真实源覆盖。
-const BOOTSTRAP_TOOL_GUIDANCE_BODY: &str = "# Tool Guidance\n";
-
 fn migrate_entry(
     agents_dir: &Path,
     aemeath_home: &Path,
@@ -236,7 +233,7 @@ fn migrate_entry(
     if !is_dir && target.exists() {
         // bootstrap 骨架（空占位）不算用户内容：允许用真实源覆盖一次。
         let is_bootstrap_skeleton = std::fs::read_to_string(&target)
-            .map(|content| content == BOOTSTRAP_TOOL_GUIDANCE_BODY)
+            .map(|content| content == crate::constants::BOOTSTRAP_TOOL_GUIDANCE_BODY)
             .unwrap_or(false);
         if !is_bootstrap_skeleton {
             report.skipped.push(name.to_string());
