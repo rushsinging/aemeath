@@ -156,3 +156,31 @@ fn component_path_map_contains_builtin_prose_components() {
     assert!(keys.contains(&tool_guidance_id()));
     assert_eq!(paths.len(), 3);
 }
+
+#[test]
+fn builtin_component_paths_split_agents_knowledge_from_aemeath_home() {
+    // #2179：tool_guidance 落 ~/.aemeath，guardrails 与全局 overlay 落 ~/.agents。
+    let agents = tempfile::tempdir().expect("agents root");
+    let home = tempfile::tempdir().expect("aemeath home");
+    let paths = super::builtin_prose_component_paths_under(agents.path(), home.path());
+
+    assert_eq!(
+        paths[&tool_guidance_id()],
+        home.path().join("tool_guidance.md"),
+        "tool_guidance 属于 aemeath 专属知识"
+    );
+    assert_eq!(
+        paths[&guardrails_id()],
+        agents.path().join("guardrails.md"),
+        "guardrails 属于用户通用知识"
+    );
+    let overlay_global = harness::ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("global"),
+    };
+    assert_eq!(
+        paths[&overlay_global],
+        agents.path().join("AGENTS.md"),
+        "全局 overlay 属于用户通用知识"
+    );
+}

@@ -451,7 +451,10 @@ fn wire_component_registry_under(
         ensure_builtin_prose_components_at(agents_dir, aemeath_home)?;
     }
     let mut component_paths = builtin_prose_component_paths_under(agents_dir, aemeath_home);
-    component_paths.extend(project_overlay_component_paths_under(agents_dir));
+    // #2179：项目 overlay 的项目段来自运行时状态根（~/.aemeath/state/session），
+    // 而 guardrails/AGENTS.md/skills 仍在 ~/.agents。
+    let state_root = crate::state_layout_migration::state_root_for(agents_dir);
+    component_paths.extend(project_overlay_component_paths_under(&state_root));
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> = match mode {
         ComponentBootstrapMode::DryRun => Box::new(
             harness::adapters::filesystem::FilesystemComponentRegistry::with_bootstrap_defaults(
@@ -482,7 +485,7 @@ pub fn wire_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &share::config::paths::aemeath_state_dir(),
+        &share::config::paths::global_agents_dir(),
         &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::None,
     )
@@ -493,7 +496,7 @@ pub fn wire_bootstrapped_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &share::config::paths::aemeath_state_dir(),
+        &share::config::paths::global_agents_dir(),
         &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::Formal,
     )
@@ -504,7 +507,7 @@ pub fn wire_dry_run_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &share::config::paths::aemeath_state_dir(),
+        &share::config::paths::global_agents_dir(),
         &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::DryRun,
     )
