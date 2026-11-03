@@ -23,8 +23,8 @@ impl TestGuidanceDir {
                 .unwrap()
                 .as_nanos()
         ));
-        let previous_agents_dir = std::env::var_os(paths::AGENTS_DIR_ENV);
-        std::env::set_var(paths::AGENTS_DIR_ENV, &root);
+        let previous_agents_dir = std::env::var_os(paths::AEMEATH_HOME_DIR_ENV);
+        std::env::set_var(paths::AEMEATH_HOME_DIR_ENV, &root);
         std::fs::create_dir_all(root.join("guidance")).unwrap();
         Self {
             _lock: lock,
@@ -56,9 +56,9 @@ impl TestGuidanceDir {
 impl Drop for TestGuidanceDir {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous_agents_dir {
-            std::env::set_var(paths::AGENTS_DIR_ENV, previous);
+            std::env::set_var(paths::AEMEATH_HOME_DIR_ENV, previous);
         } else {
-            std::env::remove_var(paths::AGENTS_DIR_ENV);
+            std::env::remove_var(paths::AEMEATH_HOME_DIR_ENV);
         }
         let _ = std::fs::remove_dir_all(&self.root);
     }
