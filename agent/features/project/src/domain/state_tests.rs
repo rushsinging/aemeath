@@ -396,35 +396,94 @@ fn prepare_restore_path_not_found_keeps_live_state() {
 }
 
 #[test]
-fn prepare_restore_path_outside_root_keeps_live_state() {
-    // #894: path_base 越出 workspace_root 且无回退资格（Linked、栈非空）->
-    // PathOutsideWorkspaceRoot，live state 不变。
-    // 普通会话（Primary、空栈）的越界回退语义见
-    // restore_falls_back_to_workspace_root_when_primary_path_base_outside_root。
-    let root = unique_temp_dir("prep_outside_root");
-    let outside = unique_temp_dir("prep_outside_other"); // 真实存在但不在 root 内
+fn restore_falls_back_to_workspace_root_when_linked_path_base_outside_root() {
+    // #2177: Linked + 非空栈的 path_base 越界同样回退，不再 fail-closed。
+    // 根因：AllowAll 下 bash cd 出工作区会把 path_base 持久化成越界路径，而旧实现
+    // 只对 Primary + 空栈放开回退，导致 resume 在 bootstrap 阶段失败、用户无法进入
+    // 会话执行显式 exit 协议（永久死锁）。
+    let top = unique_temp_dir("fallback_linked_top");
+    let frame = unique_temp_dir("fallback_linked_frame");
+    let outside = unique_temp_dir("fallback_linked_outside");
     let common = "/repo/.git";
-    let mut dto = valid_git_dto(&root, &outside, common);
-    dto.worktree_kind = WorktreeKind::Linked;
-    dto.context_stack = vec![share::session_types::PersistedWorkspaceFrame {
-        workspace_root: root.display().to_string(),
-        path_base: root.display().to_string(),
-        worktree_kind: WorktreeKind::Primary,
-    }];
-    let git = git_ops_for(&root, common);
+    let identity = ProjectIdentityData {
+        initial_cwd: top.display().to_string(),
+        git_common_dir: Some(common.to_string()),
+    };
+    let dto = PersistedWorkspaceContext {
+        workspace_id: WorkspaceId::derive(&identity, &top.display().to_string()),
+        project_identity: identity,
+        path_base: outside.display().to_string(),
+        workspace_root: top.display().to_string(),
+        worktree_kind: WorktreeKind::Linked,
+        context_stack: vec![share::session_types::PersistedWorkspaceFrame {
+            path_base: frame.display().to_string(),
+            workspace_root: frame.display().to_string(),
+            worktree_kind: WorktreeKind::Primary,
+        }],
+    };
+    let mut git = FakeGit::default();
+    git.toplevel.insert(top.clone(), top.clone());
+    git.common_dir.insert(top.clone(), PathBuf::from(common));
+    git.toplevel.insert(frame.clone(), frame.clone());
+    git.common_dir.insert(frame.clone(), PathBuf::from(common));
+    git.worktrees.insert(top.clone());
 
-    let live = st("/repo");
-    let before = live.workspace_root.clone();
-    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
+    let mut live = st("/repo");
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git)
+        .expect("Linked 会话越界 path_base 必须回退 workspace_root 而非拒绝恢复");
+    live.commit_restore(prepared);
+    assert_eq!(live.path_base, top);
+    assert_eq!(live.workspace_root, top);
+    // 会话数据不在 workspace 里，回退不改变 step/摘要任何持久化内容。
+    let _ = std::fs::remove_dir_all(outside);
+}
 
-    assert!(
-        matches!(
-            result,
-            Err(crate::domain::types::WorkspaceRestoreError::PathOutsideWorkspaceRoot { .. })
-        ),
-        "expected PathOutsideWorkspaceRoot, got {result:?}"
+#[test]
+fn restore_falls_back_to_frame_root_when_stack_path_base_outside_frame_root() {
+    // #2177: 栈帧 path_base 同样是 cwd 语义，越界时回退到帧 workspace_root，
+    // 而不是让一个已失效的历史 cwd 卡死整个 resume。
+    let top = unique_temp_dir("fallback_frame_top");
+    let frame = unique_temp_dir("fallback_frame_primary");
+    let outside = unique_temp_dir("fallback_frame_outside");
+    let common = "/repo/.git";
+    let identity = ProjectIdentityData {
+        initial_cwd: top.display().to_string(),
+        git_common_dir: Some(common.to_string()),
+    };
+    let dto = PersistedWorkspaceContext {
+        workspace_id: WorkspaceId::derive(&identity, &top.display().to_string()),
+        project_identity: identity,
+        path_base: top.display().to_string(),
+        workspace_root: top.display().to_string(),
+        worktree_kind: WorktreeKind::Linked,
+        context_stack: vec![share::session_types::PersistedWorkspaceFrame {
+            path_base: outside.display().to_string(),
+            workspace_root: frame.display().to_string(),
+            worktree_kind: WorktreeKind::Primary,
+        }],
+    };
+    let mut git = FakeGit::default();
+    git.toplevel.insert(top.clone(), top.clone());
+    git.common_dir.insert(top.clone(), PathBuf::from(common));
+    git.toplevel.insert(frame.clone(), frame.clone());
+    git.common_dir.insert(frame.clone(), PathBuf::from(common));
+    git.worktrees.insert(top.clone());
+
+    let mut live = st("/repo");
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git)
+        .expect("帧 path_base 越界必须回退帧 workspace_root 而非拒绝恢复");
+    live.commit_restore(prepared);
+    let snapshot = live.snapshot();
+    assert_eq!(snapshot.context_stack.len(), 1);
+    assert_eq!(
+        snapshot.context_stack[0].path_base,
+        frame.display().to_string()
     );
-    assert_eq!(live.workspace_root, before);
+    assert_eq!(
+        snapshot.context_stack[0].workspace_root,
+        frame.display().to_string()
+    );
+    let _ = std::fs::remove_dir_all(outside);
 }
 
 #[test]

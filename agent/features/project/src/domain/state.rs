@@ -451,13 +451,17 @@ struct RestoredPaths {
     workspace_root: PathBuf,
     path_base: PathBuf,
     /// path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部替换为
-    /// 嵌套仓库、删除或移动后，对无 worktree 历史的普通会话（Primary + 空栈）
-    /// 回退 workspace_root，与「shell cwd 被删回退 HOME」同语义，不丢任何会话
-    /// 数据；worktree 上下文损坏必须走显式 exit 协议，保持 fail-closed。
+    /// 嵌套仓库、删除或移动后，回退 workspace_root，与「shell cwd 被删回退 HOME」
+    /// 同语义，不丢任何会话数据。#2177：containment / 不存在两类坏值一律回退，
+    /// 不区分 Primary 与 Linked —— 否则 Linked 会话在 AllowAll 下 cd 出工作区后
+    /// resume 会永久失败（无法进入会话执行显式 exit 协议）。
+    ///
+    /// 该资格只用于「path_base 在 containment 内但 git 位置校验失败」这一更模糊的
+    /// 场景：仍要求 Primary + 空栈，避免掩盖 worktree 身份层面的真实损坏。
     path_base_fallback_eligible: bool,
 }
 
-/// 阶段一：恢复身份三路径并校验 containment（含 path_base 回退资格判定）。
+/// 阶段一：恢复身份三路径并校验 containment（含 path_base 回退判定）。
 fn restore_identity(
     dto: &PersistedWorkspaceContext,
 ) -> Result<RestoredPaths, WorkspaceRestoreError> {
@@ -474,9 +478,8 @@ fn restore_identity(
             Ok(()) => path,
             // AllowAll 下 bash cd 出工作区的 path_base 被持久化后越界；
             // restore 发生在会话边界（无逐调用授权上下文），回退 workspace_root。
-            Err(WorkspaceRestoreError::PathOutsideWorkspaceRoot { path, .. })
-                if path_base_fallback_eligible =>
-            {
+            // #2177：Linked 会话同样回退，否则启动即失败且无法自愈。
+            Err(WorkspaceRestoreError::PathOutsideWorkspaceRoot { path, .. }) => {
                 log::warn!(
                     target: crate::LOG_TARGET,
                     "workspace restore path_base fallback: persisted path_base={path} 越出 workspace_root，回退 workspace_root={}",
@@ -486,7 +489,7 @@ fn restore_identity(
             }
             Err(restore_error) => return Err(restore_error),
         },
-        Err(WorkspaceRestoreError::PathNotFound { path }) if path_base_fallback_eligible => {
+        Err(WorkspaceRestoreError::PathNotFound { path }) => {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "workspace restore path_base fallback: persisted path_base={path} 不存在，回退 workspace_root={}",
@@ -511,8 +514,31 @@ fn restore_stack(
     let mut stack = Vec::with_capacity(dto.context_stack.len());
     for persisted in &dto.context_stack {
         let frame_root = restore_path(&persisted.workspace_root)?;
-        let frame_base = restore_path(&persisted.path_base)?;
-        validate_containment(&frame_base, &frame_root)?;
+        // 帧 path_base 同样是 cwd 语义：#2177 起越界/不存在一律回退到帧 root，
+        // 与顶层 path_base 同语义，避免一个已失效的历史 cwd 卡死整个 resume。
+        let frame_base = match restore_path(&persisted.path_base) {
+            Ok(path) => match validate_containment(&path, &frame_root) {
+                Ok(()) => path,
+                Err(WorkspaceRestoreError::PathOutsideWorkspaceRoot { path, .. }) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "workspace restore stack fallback: frame path_base={path} 越出 frame workspace_root，回退 frame workspace_root={}",
+                        frame_root.display()
+                    );
+                    frame_root.clone()
+                }
+                Err(restore_error) => return Err(restore_error),
+            },
+            Err(WorkspaceRestoreError::PathNotFound { path }) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "workspace restore stack fallback: frame path_base={path} 不存在，回退 frame workspace_root={}",
+                    frame_root.display()
+                );
+                frame_root.clone()
+            }
+            Err(restore_error) => return Err(restore_error),
+        };
         stack.push(WorkspaceData {
             id: dto.workspace_id.clone(),
             path_base: frame_base,
