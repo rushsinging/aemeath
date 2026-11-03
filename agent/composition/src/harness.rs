@@ -275,9 +275,8 @@ struct ProjectWorkspaceValue {
 fn project_overlay_component_paths_under(
     agents_dir: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
-    // #2179：session dataset 已迁到运行时状态根，项目段从那里反解。
-    let _ = agents_dir;
-    let session_root = share::config::paths::global_session_datasets_dir();
+    // #2179：session dataset 已迁到运行时状态根，参数即该根（测试可注入）。
+    let session_root = agents_dir.join("session");
     let mut paths = HashMap::new();
     let Ok(project_entries) = std::fs::read_dir(&session_root) else {
         return paths;
@@ -359,6 +358,7 @@ fn resolve_project_root_from_snapshots(project_dir: &Path) -> Option<std::path::
 
 fn builtin_prose_component_paths_under(
     agents_dir: &Path,
+    aemeath_home: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
     let mut component_paths = HashMap::new();
     component_paths.insert(
@@ -373,7 +373,7 @@ fn builtin_prose_component_paths_under(
             kind: harness::ComponentKind::ToolGuidance,
             name: harness::ComponentName::new("default"),
         },
-        share::config::paths::global_tool_guidance_path(),
+        aemeath_home.join(share::config::paths::TOOL_GUIDANCE_FILE_NAME),
     );
     component_paths.insert(
         harness::ComponentId {
@@ -413,8 +413,9 @@ fn builtin_prose_bootstrap_defaults() -> HashMap<harness::ComponentId, harness::
 /// 正式装配前补齐内建 prose 职责面：只创建缺失骨架，NEVER 覆盖用户文件。
 fn ensure_builtin_prose_components_at(
     agents_dir: &Path,
+    aemeath_home: &Path,
 ) -> Result<Vec<harness::ComponentId>, HarnessError> {
-    let component_paths = builtin_prose_component_paths_under(agents_dir);
+    let component_paths = builtin_prose_component_paths_under(agents_dir, aemeath_home);
     let defaults = builtin_prose_bootstrap_defaults();
     let mut ids: Vec<_> = defaults.keys().cloned().collect();
     ids.sort();
@@ -443,12 +444,13 @@ fn ensure_builtin_prose_components_at(
 
 fn wire_component_registry_under(
     agents_dir: &Path,
+    aemeath_home: &Path,
     mode: ComponentBootstrapMode,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     if mode == ComponentBootstrapMode::Formal {
-        ensure_builtin_prose_components_at(agents_dir)?;
+        ensure_builtin_prose_components_at(agents_dir, aemeath_home)?;
     }
-    let mut component_paths = builtin_prose_component_paths_under(agents_dir);
+    let mut component_paths = builtin_prose_component_paths_under(agents_dir, aemeath_home);
     component_paths.extend(project_overlay_component_paths_under(agents_dir));
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> = match mode {
         ComponentBootstrapMode::DryRun => Box::new(
@@ -480,7 +482,8 @@ pub fn wire_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &share::config::paths::global_agents_dir(),
+        &crate::state_layout_migration::resolved_state_layout_root(),
+        &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::None,
     )
 }
@@ -490,7 +493,8 @@ pub fn wire_bootstrapped_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &share::config::paths::global_agents_dir(),
+        &crate::state_layout_migration::resolved_state_layout_root(),
+        &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::Formal,
     )
 }
@@ -500,7 +504,8 @@ pub fn wire_dry_run_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &share::config::paths::global_agents_dir(),
+        &crate::state_layout_migration::resolved_state_layout_root(),
+        &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::DryRun,
     )
 }

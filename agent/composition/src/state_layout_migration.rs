@@ -151,6 +151,17 @@ pub fn ensure_state_layout() {
     }
 }
 
+/// 装配点使用的状态根：显式注入的 `agents_dir`（非默认 `~/.agents`）视为状态根，
+/// 用于测试与嵌入式调用保持目录隔离；默认路径走迁移后的
+/// [`resolved_state_layout_root`]。
+pub fn resolve_state_root_for(agents_dir: &Path) -> PathBuf {
+    if agents_dir == share::config::paths::global_agents_dir() {
+        resolved_state_layout_root()
+    } else {
+        agents_dir.to_path_buf()
+    }
+}
+
 /// 运行时状态 dataset 根目录的解析结果。
 ///
 /// 迁移完成后使用 `~/.aemeath/state`；未完成（标记缺失，通常意味着迁移

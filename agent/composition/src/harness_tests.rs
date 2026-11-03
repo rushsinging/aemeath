@@ -19,7 +19,8 @@ fn tool_guidance_id() -> ComponentId {
 #[test]
 fn builtin_prose_bootstrap_creates_missing_skeletons_atomically_and_idempotently() {
     let root = tempfile::tempdir().expect("tempdir");
-    let created = super::ensure_builtin_prose_components_at(root.path()).expect("bootstrap");
+    let created =
+        super::ensure_builtin_prose_components_at(root.path(), root.path()).expect("bootstrap");
     assert_eq!(created, vec![guardrails_id(), tool_guidance_id()]);
     assert_eq!(
         std::fs::read_to_string(root.path().join("guardrails.md")).expect("guardrails"),
@@ -32,8 +33,8 @@ fn builtin_prose_bootstrap_creates_missing_skeletons_atomically_and_idempotently
 
     // 第二次运行不覆盖用户内容。
     std::fs::write(root.path().join("guardrails.md"), "# 用户规则").unwrap();
-    let created_again =
-        super::ensure_builtin_prose_components_at(root.path()).expect("bootstrap again");
+    let created_again = super::ensure_builtin_prose_components_at(root.path(), root.path())
+        .expect("bootstrap again");
     assert!(created_again.is_empty());
     assert_eq!(
         std::fs::read_to_string(root.path().join("guardrails.md")).unwrap(),
@@ -44,9 +45,12 @@ fn builtin_prose_bootstrap_creates_missing_skeletons_atomically_and_idempotently
 #[test]
 fn synthetic_bootstrap_registry_lists_missing_builtin_components_for_dry_run() {
     let root = tempfile::tempdir().expect("tempdir");
-    let registry =
-        super::wire_component_registry_under(root.path(), super::ComponentBootstrapMode::DryRun)
-            .expect("dry registry");
+    let registry = super::wire_component_registry_under(
+        root.path(),
+        root.path(),
+        super::ComponentBootstrapMode::DryRun,
+    )
+    .expect("dry registry");
     let guard = registry.try_lock().expect("lock");
     assert!(guard.list().contains(&guardrails_id()));
     assert!(guard.list().contains(&tool_guidance_id()));
@@ -118,6 +122,7 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
 
     let registry = super::wire_component_registry_under(
         agents_root.path(),
+        agents_root.path(),
         super::ComponentBootstrapMode::DryRun,
     )
     .expect("registry");
@@ -145,7 +150,7 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
 #[test]
 fn component_path_map_contains_builtin_prose_components() {
     let root = Path::new("/agents");
-    let paths = super::builtin_prose_component_paths_under(root);
+    let paths = super::builtin_prose_component_paths_under(root, root);
     let keys: Vec<ComponentId> = paths.keys().cloned().collect();
     assert!(keys.contains(&guardrails_id()));
     assert!(keys.contains(&tool_guidance_id()));
