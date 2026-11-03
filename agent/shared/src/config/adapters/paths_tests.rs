@@ -224,3 +224,121 @@ fn test_old_project_paths_use_aemeath_and_claude() {
         PathBuf::from("/tmp/demo/.aemeath/skills")
     );
 }
+
+#[test]
+fn test_aemeath_home_dir_defaults_to_dot_aemeath_under_home() {
+    let home = PathBuf::from("/home/tester");
+    assert_eq!(
+        aemeath_home_dir_from(None, Some(home.clone())),
+        home.join(AEMEATH_HOME_DIR_NAME)
+    );
+}
+
+#[test]
+fn test_aemeath_home_dir_env_override_absolute_path() {
+    let home = PathBuf::from("/home/tester");
+    assert_eq!(
+        aemeath_home_dir_from(Some("/opt/aemeath".to_string()), Some(home)),
+        PathBuf::from("/opt/aemeath")
+    );
+}
+
+#[test]
+fn test_aemeath_home_dir_env_override_expands_tilde() {
+    let home = PathBuf::from("/home/tester");
+    assert_eq!(
+        aemeath_home_dir_from(Some("~/private-home".to_string()), Some(home.clone())),
+        home.join("private-home")
+    );
+    assert_eq!(
+        aemeath_home_dir_from(Some("~".to_string()), Some(home.clone())),
+        home
+    );
+}
+
+#[test]
+fn test_aemeath_home_dir_env_override_keeps_relative_path() {
+    // 与 global_agents_dir 同语义：非 `~` 前缀原样返回，不做 cwd 展开。
+    let home = PathBuf::from("/home/tester");
+    assert_eq!(
+        aemeath_home_dir_from(Some("relative/home".to_string()), Some(home)),
+        PathBuf::from("relative/home")
+    );
+}
+
+#[test]
+fn test_aemeath_home_dir_env_blank_falls_back_to_home_layout() {
+    let home = PathBuf::from("/home/tester");
+    for blank in ["   ", ""] {
+        assert_eq!(
+            aemeath_home_dir_from(Some(blank.to_string()), Some(home.clone())),
+            home.join(AEMEATH_HOME_DIR_NAME)
+        );
+    }
+}
+
+#[test]
+fn test_aemeath_home_dir_missing_home_falls_back_to_relative() {
+    // HOME 缺失时不得 panic，也不得生成绝对空路径。
+    assert_eq!(
+        aemeath_home_dir_from(None, None),
+        PathBuf::from(".").join(AEMEATH_HOME_DIR_NAME)
+    );
+}
+
+#[test]
+fn test_aemeath_state_dir_and_leaf() {
+    let home = PathBuf::from("/home/tester");
+    let expected_root = home.join(AEMEATH_HOME_DIR_NAME).join(STATE_DIR_NAME);
+    assert_eq!(
+        aemeath_home_dir_from(None, Some(home.clone())).join(STATE_DIR_NAME),
+        expected_root
+    );
+    assert_eq!(
+        expected_root.join("sessions"),
+        home.join(AEMEATH_HOME_DIR_NAME)
+            .join(STATE_DIR_NAME)
+            .join("sessions")
+    );
+    let _guard = TestEnvGuard::set(AEMEATH_HOME_DIR_ENV, "/tmp/aemeath-home-test");
+    assert_eq!(aemeath_home_dir(), PathBuf::from("/tmp/aemeath-home-test"));
+    assert_eq!(
+        aemeath_state_dir(),
+        PathBuf::from("/tmp/aemeath-home-test/state")
+    );
+    assert_eq!(
+        aemeath_state_leaf_dir("sessions"),
+        PathBuf::from("/tmp/aemeath-home-test/state/sessions")
+    );
+}
+
+#[test]
+fn test_config_and_worktrees_paths_ignore_aemeath_home_dir() {
+    // #2179：配置与 worktrees 保持在 ~/.agents，不受 AEMEATH_HOME_DIR 影响。
+    {
+        let _agents = TestEnvGuard::set(AGENTS_DIR_ENV, "/tmp/agents-root");
+        assert_eq!(
+            global_config_path(),
+            PathBuf::from("/tmp/agents-root/aemeath.json")
+        );
+        assert_eq!(
+            global_worktrees_dir(),
+            PathBuf::from("/tmp/agents-root/worktrees")
+        );
+        assert_eq!(
+            global_agents_md_path(),
+            PathBuf::from("/tmp/agents-root/AGENTS.md")
+        );
+        assert_eq!(
+            global_skills_dir(),
+            PathBuf::from("/tmp/agents-root/skills")
+        );
+    }
+    // 同一把 env 锁不支持嵌套持有：先释放 AGENTS_DIR 覆盖，再单独覆盖
+    // AEMEATH_HOME_DIR，验证它不会改变配置与 worktrees 的 home 布局。
+    let _home = TestEnvGuard::set(AEMEATH_HOME_DIR_ENV, "/tmp/aemeath-home-test");
+    let expected = home_dir_or_dot().join(AGENTS_DIR_NAME);
+    assert_eq!(aemeath_home_dir(), PathBuf::from("/tmp/aemeath-home-test"));
+    assert_eq!(global_config_path(), expected.join(NEW_CONFIG_FILE));
+    assert_eq!(global_worktrees_dir(), expected.join(WORKTREES_DIR_NAME));
+}

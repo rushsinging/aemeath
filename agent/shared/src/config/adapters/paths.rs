@@ -3,11 +3,12 @@
 use std::path::{Path, PathBuf};
 
 pub use super::constants::{
-    AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD, CLAUDE_DIR_NAME, CLAUDE_MD, GUARDRAILS_FILE_NAME,
-    GUIDANCE_DIR_NAME, HISTORY_FILE, HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE,
-    MEMORY_DIR_NAME, MODELS_DIR_NAME, NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE,
-    SCRIPTS_DIR_NAME, SESSIONS_DIR_NAME, SETTINGS_FILE, SKILLS_DIR_NAME, SYSTEMONE_DIR_NAME,
-    TOOL_GUIDANCE_FILE_NAME, TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
+    AEMEATH_HOME_DIR_ENV, AEMEATH_HOME_DIR_NAME, AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD,
+    CLAUDE_DIR_NAME, CLAUDE_MD, GUARDRAILS_FILE_NAME, GUIDANCE_DIR_NAME, HISTORY_FILE,
+    HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE, MEMORY_DIR_NAME, MODELS_DIR_NAME,
+    NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, SCRIPTS_DIR_NAME, SESSIONS_DIR_NAME,
+    SETTINGS_FILE, SKILLS_DIR_NAME, STATE_DIR_NAME, SYSTEMONE_DIR_NAME, TOOL_GUIDANCE_FILE_NAME,
+    TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
 };
 
 /// 解析 home 目录（读取 `$HOME`）。
@@ -34,6 +35,45 @@ pub fn global_agents_dir() -> PathBuf {
     home_dir_or_dot().join(AGENTS_DIR_NAME)
 }
 
+/// `~/.aemeath` — aemeath 私有磁盘根目录（用户级知识 + 运行时状态）。
+///
+/// 与 [`global_agents_dir`] 分层：`~/.agents` 承载用户通用知识、配置与
+/// 跨 agent 资产；`~/.aemeath` 只放 aemeath 专属知识（`tool_guidance.md`）
+/// 与运行时状态。支持 `AEMEATH_HOME_DIR` 覆盖（空白值视为未设置，
+/// `~` / `~/` 前缀按 home 展开，其余值原样返回）。
+pub fn aemeath_home_dir() -> PathBuf {
+    aemeath_home_dir_from(std::env::var(AEMEATH_HOME_DIR_ENV).ok(), home_dir())
+}
+
+/// `~/.aemeath/state/` — aemeath 运行时状态根目录。
+pub fn aemeath_state_dir() -> PathBuf {
+    aemeath_home_dir().join(STATE_DIR_NAME)
+}
+
+/// `~/.aemeath/state/<leaf>/` — 运行时状态叶子目录。
+///
+/// 叶子名保持与旧 `~/.agents/<leaf>` 同名（`session` / `sessions` /
+/// `harness` / `scoring` / …），便于迁移前后按同名目录对账。
+pub fn aemeath_state_leaf_dir(leaf: &str) -> PathBuf {
+    aemeath_state_dir().join(leaf)
+}
+
+/// `aemeath_home_dir` 的纯函数形态。
+///
+/// 把 env 覆盖值与 home 显式传入，使「HOME 缺失」「相对路径」「`~` 展开」
+/// 等边界可在测试中稳定覆盖，避免并行测试改动进程级环境。
+fn aemeath_home_dir_from(env_value: Option<String>, home: Option<PathBuf>) -> PathBuf {
+    if let Some(trimmed) = env_value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return expand_home_with(Path::new(trimmed), home.as_deref());
+    }
+    home.unwrap_or_else(|| PathBuf::from("."))
+        .join(AEMEATH_HOME_DIR_NAME)
+}
+
 /// `~/.agents/models/` — 本地模型资产根目录。
 pub fn global_models_dir() -> PathBuf {
     global_agents_dir().join(MODELS_DIR_NAME)
@@ -52,12 +92,19 @@ pub fn systemone_models_dir() -> PathBuf {
 /// - `~/foo` → home/foo
 /// - 其它原样返回
 pub fn expand_home(path: &Path) -> PathBuf {
+    expand_home_with(path, home_dir().as_deref())
+}
+
+/// `expand_home` 的纯函数形态：home 显式传入，用于测试 HOME 缺失边界。
+fn expand_home_with(path: &Path, home: Option<&Path>) -> PathBuf {
     let text = path.to_string_lossy();
     if text == "~" {
-        return home_dir_or_dot();
+        return home
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
     }
     if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
+        if let Some(home) = home {
             return home.join(rest);
         }
     }

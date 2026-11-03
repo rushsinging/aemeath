@@ -2,6 +2,15 @@
 //! 保持 `share::config::paths::*` 公共路径不变）。
 
 pub const AGENTS_DIR_ENV: &str = "AEMEATH_AGENTS_DIR";
+/// aemeath 私有磁盘根目录的环境变量覆盖名。
+pub const AEMEATH_HOME_DIR_ENV: &str = "AEMEATH_HOME_DIR";
+/// aemeath 私有磁盘根目录名（`~/.aemeath`）。
+///
+/// 与 [`OLD_AEMEATH_DIR_NAME`] 值相同但语义不同：后者是历史配置目录，
+/// 前者是用户级知识 + 运行时状态的私有根。两者互不复用。
+pub const AEMEATH_HOME_DIR_NAME: &str = ".aemeath";
+/// aemeath 运行时状态根目录名（`~/.aemeath/state/`）。
+pub const STATE_DIR_NAME: &str = "state";
 pub const NEW_CONFIG_FILE: &str = "aemeath.json";
 pub const OLD_CONFIG_FILE: &str = "config.json";
 pub const AGENTS_MD: &str = "AGENTS.md";
