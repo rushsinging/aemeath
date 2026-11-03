@@ -674,14 +674,11 @@ fn tool_guidance_section_truncates_at_budget_with_marker() {
 async fn tool_guidance_missing_file_yields_none() {
     let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
-    let legacy = tempfile::tempdir().unwrap();
-    // #2179：canonical 落点已迁到 ~/.aemeath（AEMEATH_HOME_DIR）；旧 ~/.agents
-    // 作为只读 fallback，必须一并隔离，才能构造「两边都没有」的场景。
+    // #2179：canonical 落点已迁到 ~/.aemeath（AEMEATH_HOME_DIR），
+    // 不做运行时 fallback。
     std::env::set_var("AEMEATH_HOME_DIR", cwd.path());
-    std::env::set_var("AEMEATH_AGENTS_DIR", legacy.path());
     let section = load_tool_guidance_section().await;
     std::env::remove_var("AEMEATH_HOME_DIR");
-    std::env::remove_var("AEMEATH_AGENTS_DIR");
     assert!(section.is_none(), "缺文件 NEVER 产生空段");
 }
 

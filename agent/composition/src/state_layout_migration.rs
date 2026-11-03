@@ -9,8 +9,9 @@
 //! - **先备份**：新状态目录已存在且非空时，先整体复制到
 //!   `<aemeath_home>/state.bak-<epoch_ms>`，回滚即「删新目录 + 还原备份」；
 //! - **不合并**：新旧目录同时存在时跳过该叶子并记 warning，绝不覆盖用户数据；
-//! - **fail-open**：调用方按 warn 处理迁移失败，不阻断会话启动；失败时
-//!   旧目录仍在，读取侧 fallback 仍可拿到数据。
+//! - **无运行时 fallback**：迁移是唯一的数据搬运动作；任一叶子/资产复制失败
+//!   即整体返回错误且不写完成标记，调用方 MUST fail-closed（不得在未迁移状态下
+//!   继续启动，否则新路径空读会被误判为「历史丢失」）。
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,8 +27,10 @@ pub struct StateLayoutMigrationReport {
     pub skipped: Vec<String>,
     /// 备份目录（仅当迁移前新状态目录非空时产生）。
     pub backup: Option<PathBuf>,
-    /// 非致命问题（新旧目录并存、单叶子复制失败等）。
+    /// 非致命问题（新旧目录并存等）。
     pub warnings: Vec<String>,
+    /// 致命失败（复制/写入失败）。非空即视为迁移失败，调用方 MUST fail-closed。
+    pub failed: Vec<String>,
     /// 命中完成标记，未做任何文件操作。
     pub already_migrated: bool,
 }
@@ -92,7 +95,7 @@ pub fn migrate_state_layout(
         }
         match copy_dir_recursive(&source, &target) {
             Ok(()) => report.migrated.push((*leaf).to_string()),
-            Err(error) => report.warnings.push(format!(
+            Err(error) => report.failed.push(format!(
                 "复制失败（{} -> {}）：{error}",
                 source.display(),
                 target.display()
@@ -100,6 +103,24 @@ pub fn migrate_state_layout(
         }
     }
 
+    // aemeath 私有资产与用户级工具知识一次性迁移到位（不做运行时 fallback）。
+    for dir in private_asset_dirs() {
+        migrate_entry(agents_dir, aemeath_home, dir, true, &mut report);
+    }
+    migrate_entry(
+        agents_dir,
+        aemeath_home,
+        share::config::paths::TOOL_GUIDANCE_FILE_NAME,
+        false,
+        &mut report,
+    );
+
+    if !report.failed.is_empty() {
+        return Err(format!(
+            "迁移存在失败项，未写入完成标记：{:?}",
+            report.failed
+        ));
+    }
     write_marker(&marker, agents_dir, &report)?;
     Ok(report)
 }
@@ -120,14 +141,16 @@ pub fn rollback_state_layout(aemeath_home: &Path, backup: &Path) -> Result<(), S
         .map_err(|error| format!("还原备份失败（{}）：{error}", backup.display()))
 }
 
-/// 启动期入口：按生产路径执行一次迁移，失败只 warn 不阻断启动。
+/// 启动期入口：按生产路径执行一次迁移。
 ///
-/// 幂等：命中 `state/.layout-migration.json` 时零文件操作直接返回。
-pub fn ensure_state_layout() {
+/// 「不做 fallback」：迁移是唯一的数据搬运动作，失败 MUST 让调用方 fail-closed，
+/// 否则新路径空读会被误判成「历史丢失」。幂等：命中
+/// `state/.layout-migration.json` 时零文件操作直接返回。
+pub fn ensure_state_layout() -> Result<(), String> {
     let agents_dir = share::config::paths::global_agents_dir();
     let aemeath_home = share::config::paths::aemeath_home_dir();
     match migrate_state_layout(&agents_dir, &aemeath_home) {
-        Ok(report) if report.already_migrated => {}
+        Ok(report) if report.already_migrated => Ok(()),
         Ok(report) => {
             if !report.migrated.is_empty() {
                 log::info!(
@@ -143,38 +166,74 @@ pub fn ensure_state_layout() {
                     "[state-layout] {warning}"
                 );
             }
+            Ok(())
         }
-        Err(error) => log::warn!(
-            target: crate::LOG_TARGET,
-            "[state-layout] 迁移失败，本次继续使用旧 ~/.agents 布局：{error}"
-        ),
+        Err(error) => {
+            log::error!(
+                target: crate::LOG_TARGET,
+                "[state-layout] 迁移失败：{error}"
+            );
+            Err(error)
+        }
     }
 }
 
-/// 装配点使用的状态根：显式注入的 `agents_dir`（非默认 `~/.agents`）视为状态根，
-/// 用于测试与嵌入式调用保持目录隔离；默认路径走迁移后的
-/// [`resolved_state_layout_root`]。
-pub fn resolve_state_root_for(agents_dir: &Path) -> PathBuf {
+/// 装配点使用的状态根。
+///
+/// 默认路径一律使用 `~/.aemeath/state`（迁移已完成或启动失败，**没有**运行时
+/// fallback）；显式注入的 `agents_dir`（非默认 `~/.agents`）原样作为状态根，
+/// 仅用于测试与嵌入式调用的目录隔离。
+pub fn state_root_for(agents_dir: &Path) -> PathBuf {
     if agents_dir == share::config::paths::global_agents_dir() {
-        resolved_state_layout_root()
+        share::config::paths::aemeath_state_dir()
     } else {
         agents_dir.to_path_buf()
     }
 }
 
-/// 运行时状态 dataset 根目录的解析结果。
-///
-/// 迁移完成后使用 `~/.aemeath/state`；未完成（标记缺失，通常意味着迁移
-/// 失败）回退旧 `~/.agents`，保证只读历史与会话仍可继续，下一次启动重试迁移。
-pub fn resolved_state_layout_root() -> PathBuf {
-    let state_dir = share::config::paths::aemeath_state_dir();
-    if state_dir
-        .join(crate::constants::STATE_LAYOUT_MARKER_FILE)
-        .exists()
-    {
-        state_dir
+/// `~/.aemeath` 下需要从 `~/.agents` 迁移的私有资产目录。
+fn private_asset_dirs() -> &'static [&'static str] {
+    &["logs", "guidance", "models"]
+}
+
+fn migrate_entry(
+    agents_dir: &Path,
+    aemeath_home: &Path,
+    name: &str,
+    is_dir: bool,
+    report: &mut StateLayoutMigrationReport,
+) {
+    let source = agents_dir.join(name);
+    let target = aemeath_home.join(name);
+    let source_exists = if is_dir {
+        source.is_dir()
     } else {
-        share::config::paths::global_agents_dir()
+        source.is_file()
+    };
+    if !source_exists {
+        return;
+    }
+    if target.exists() {
+        report.skipped.push(name.to_string());
+        report
+            .warnings
+            .push(format!("新路径已存在，跳过且不覆盖：{}", target.display()));
+        return;
+    }
+    let result = if is_dir {
+        copy_dir_recursive(&source, &target)
+    } else {
+        std::fs::copy(&source, &target)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    match result {
+        Ok(()) => report.migrated.push(name.to_string()),
+        Err(error) => report.failed.push(format!(
+            "复制失败（{} -> {}）：{error}",
+            source.display(),
+            target.display()
+        )),
     }
 }
 
@@ -389,6 +448,46 @@ mod tests {
 
         assert!(error.contains("备份目录不存在"));
         assert!(home.join("state/meta/version.json").exists());
+    }
+
+    #[test]
+    fn migrates_tool_guidance_and_private_asset_dirs() {
+        let root = tempfile::tempdir().expect("temp root");
+        let agents = root.path().join(".agents");
+        let home = root.path().join(".aemeath");
+        write_file(&agents.join("tool_guidance.md"), "# 工具纪律\n");
+        write_file(&agents.join("logs/agent.log"), "log line");
+        write_file(&agents.join("models/systemone/model.gguf"), "gguf");
+
+        let report = migrate_state_layout(&agents, &home).expect("migration");
+
+        assert!(report.migrated.contains(&"tool_guidance.md".to_string()));
+        assert!(report.migrated.contains(&"logs".to_string()));
+        assert!(report.migrated.contains(&"models".to_string()));
+        assert!(report.failed.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(home.join("tool_guidance.md")).expect("guidance"),
+            "# 工具纪律\n"
+        );
+        assert!(home.join("logs/agent.log").is_file());
+        assert!(home.join("models/systemone/model.gguf").is_file());
+        // 旧位置原样保留（迁移 = 复制，不删除用户数据）。
+        assert!(agents.join("tool_guidance.md").is_file());
+    }
+
+    #[test]
+    fn migration_failure_returns_error_and_writes_no_marker() {
+        let root = tempfile::tempdir().expect("temp root");
+        let agents = root.path().join(".agents");
+        write_file(&agents.join("memory/m.json"), "[]");
+        // 让 aemeath home 位置被普通文件占用：创建 state 根必然失败。
+        let home = root.path().join(".aemeath");
+        std::fs::write(&home, "not a dir").expect("blocker file");
+
+        let error = migrate_state_layout(&agents, &home).expect_err("must fail");
+
+        assert!(error.contains("创建状态根失败"), "{error}");
+        assert!(!home.join("state").exists() || !home.join("state").is_dir());
     }
 
     #[test]

@@ -482,7 +482,7 @@ pub fn wire_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &crate::state_layout_migration::resolved_state_layout_root(),
+        &share::config::paths::aemeath_state_dir(),
         &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::None,
     )
@@ -493,7 +493,7 @@ pub fn wire_bootstrapped_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &crate::state_layout_migration::resolved_state_layout_root(),
+        &share::config::paths::aemeath_state_dir(),
         &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::Formal,
     )
@@ -504,7 +504,7 @@ pub fn wire_dry_run_component_registry(
     _config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
-        &crate::state_layout_migration::resolved_state_layout_root(),
+        &share::config::paths::aemeath_state_dir(),
         &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::DryRun,
     )

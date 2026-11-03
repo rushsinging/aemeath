@@ -316,33 +316,6 @@ pub fn legacy_global_tool_guidance_path() -> PathBuf {
     global_agents_dir().join(TOOL_GUIDANCE_FILE_NAME)
 }
 
-/// tool_guidance 的解析结果：新路径存在则用新；否则旧路径存在则只读 fallback；
-/// 两者都不存在时返回新路径（调用方据此静默跳过或新建）。
-///
-/// 两者同时存在时**只用新路径**：不合并、不覆盖旧文件。
-pub fn resolved_tool_guidance_path() -> PathBuf {
-    resolve_canonical_then_legacy(
-        global_tool_guidance_path(),
-        legacy_global_tool_guidance_path(),
-        Path::exists,
-    )
-}
-
-/// 「canonical 优先、legacy 只读 fallback、都不存在回落 canonical」的纯函数形态。
-fn resolve_canonical_then_legacy(
-    canonical: PathBuf,
-    legacy: PathBuf,
-    exists: impl Fn(&Path) -> bool,
-) -> PathBuf {
-    if exists(&canonical) {
-        return canonical;
-    }
-    if exists(&legacy) {
-        return legacy;
-    }
-    canonical
-}
-
 /// 全局 scripts 组件目录（c7，#2020）。
 pub fn global_scripts_dir() -> PathBuf {
     global_agents_dir().join(SCRIPTS_DIR_NAME)

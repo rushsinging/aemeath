@@ -355,28 +355,6 @@ fn test_tool_guidance_canonical_path_lives_under_aemeath_home() {
 }
 
 #[test]
-fn test_resolved_tool_guidance_prefers_canonical_then_legacy() {
-    let canonical = PathBuf::from("/home/u/.aemeath/tool_guidance.md");
-    let legacy = PathBuf::from("/home/u/.agents/tool_guidance.md");
-
-    // 两者都存在：只用 canonical，不合并。
-    assert_eq!(
-        resolve_canonical_then_legacy(canonical.clone(), legacy.clone(), |_| true),
-        canonical
-    );
-    // 仅旧存在：只读 fallback 到 legacy。
-    assert_eq!(
-        resolve_canonical_then_legacy(canonical.clone(), legacy.clone(), |path| path == legacy),
-        legacy
-    );
-    // 都不存在：返回 canonical（调用方静默跳过或新建）。
-    assert_eq!(
-        resolve_canonical_then_legacy(canonical.clone(), legacy.clone(), |_| false),
-        canonical
-    );
-}
-
-#[test]
 fn test_config_and_worktrees_paths_ignore_aemeath_home_dir() {
     // #2179：配置与 worktrees 保持在 ~/.agents，不受 AEMEATH_HOME_DIR 影响。
     {

@@ -216,7 +216,7 @@ pub(crate) async fn from_args_with_gateways(
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
     // #2179：运行时状态根为 ~/.aemeath/state（启动期迁移未完成时回退旧 ~/.agents）。
-    let state_root = crate::state_layout_migration::resolve_state_root_for(agents_dir);
+    let state_root = crate::state_layout_migration::state_root_for(agents_dir);
     let session_dataset = storage::wire_file_system_dataset(&state_root)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_blob = storage::wire_file_system_blob(&state_root)
@@ -399,7 +399,7 @@ pub(crate) async fn from_args_with_gateways(
         Arc<dyn runtime::UsageSink>,
         Option<crate::audit::SessionAudit>,
     ) = match crate::audit::wire_session_audit(
-        &crate::state_layout_migration::resolve_state_root_for(agents_dir),
+        &crate::state_layout_migration::state_root_for(agents_dir),
         &snapshot,
     ) {
         Ok(session_audit) => (session_audit.usage_sink(), Some(session_audit)),
