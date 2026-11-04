@@ -3,6 +3,7 @@
 //! Pure domain logic. NEVER touches fs / env / network.
 
 pub mod audit;
+pub mod cleanup;
 pub mod config;
 mod constants;
 pub mod context;

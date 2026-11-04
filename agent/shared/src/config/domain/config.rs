@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::audit::AuditConfig;
+use crate::config::cleanup::CleanupConfig;
 use crate::config::context::ContextConfig;
 use crate::config::harness::HarnessConfig;
 use crate::config::hooks::HooksConfig;
@@ -107,6 +108,10 @@ pub struct Config {
     #[serde(default)]
     pub audit: AuditConfig,
 
+    /// `aemeath cleanup` 落盘清理配置
+    #[serde(default)]
+    pub cleanup: CleanupConfig,
+
     /// Storage configuration
     #[serde(default)]
     pub storage: StorageConfig,
@@ -166,6 +171,7 @@ impl Default for Config {
             permissions: PermissionConfig::default(),
             skills: SkillsConfig::default(),
             audit: AuditConfig::default(),
+            cleanup: CleanupConfig::default(),
             storage: StorageConfig::default(),
             scoring: crate::config::scoring::ScoringConfig::default(),
             workflow: crate::config::workflow::WorkflowConfig::default(),
