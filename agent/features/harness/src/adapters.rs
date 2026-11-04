@@ -8,6 +8,7 @@ pub mod daemon_client;
 pub mod daemon_serve;
 #[cfg(test)]
 mod daemon_tests;
+pub(crate) mod file_write;
 pub mod filesystem;
 #[cfg(test)]
 mod filesystem_tests;

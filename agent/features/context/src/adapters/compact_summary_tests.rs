@@ -2931,8 +2931,7 @@ async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user
 fn sized_user_message(label: &str, tokens: usize) -> Message {
     let label_tokens = crate::domain::token_budget::estimate_tokens(label);
     let remaining = tokens.saturating_sub(label_tokens.max(1));
-    let filler_chars =
-        ((remaining as f64) / crate::domain::token_budget::TOKENS_PER_LATIN_CHAR).ceil() as usize;
+    let filler_chars = ((remaining as f64) / share::TOKENS_PER_LATIN_CHAR).ceil() as usize;
     Message::user(format!("{label}{}", "x".repeat(filler_chars)))
 }
 

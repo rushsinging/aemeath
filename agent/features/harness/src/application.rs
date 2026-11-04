@@ -2,7 +2,7 @@
 //!
 //! 实现方（文件系统 adapter、测试桩）MUST 保证：
 //! - `list()` 稳定排序（kind 声明序、name 升序）；
-//! - `write()` 内建原子写（tmp+rename），rename 前完成 `validate`；
+//! - `write()` 先递归解析 symlink，再写最终普通文件；写入前完成 `validate`；
 //! - 本端口是组件读写的唯一通道（NEVER 绕过直连文件）。
 
 use crate::domain::component::ComponentContent;
@@ -28,7 +28,7 @@ pub trait ComponentRegistry: crate::sealed::Sealed + Send {
     /// 校验拟写入内容（不落盘）。校验规则按组件分注册。
     fn validate(&self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError>;
 
-    /// 写入组件（实现 MUST 原子写）。
+    /// 写入组件（实现 MUST 递归解析 symlink，写最终普通文件，NEVER 替换 link）。
     fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError>;
 
     /// 删除组件。
@@ -54,7 +54,7 @@ pub trait ComponentRegistry: crate::sealed::Sealed + Send {
         Ok(text)
     }
 
-    /// 写入**原始文本**（#2074 回滚：先校验解析结果再原子写）。
+    /// 写入**原始文本**（#2074 回滚：先校验解析结果，再写最终普通文件）。
     /// 默认实现解析为 content 后走 write。
     fn write_raw(&mut self, id: &ComponentId, text: &str) -> Result<(), HarnessError> {
         let content = crate::adapters::filesystem::parse_markdown_with_frontmatter(text)?;

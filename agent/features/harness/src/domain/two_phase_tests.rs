@@ -111,31 +111,24 @@ fn single_project_evidence() -> EvidenceBundle {
 /// 跨 scope 硬门禁：project overlay 新提案复述 global tool guidance 时，
 /// 宿主 MUST 拒绝整份提案且零落盘。
 #[tokio::test]
-async fn two_phase_rejects_project_body_duplicating_global_guidance() {
-    let project = ComponentId {
-        kind: ComponentKind::SystemPromptOverlay,
-        name: ComponentName::new("0123456789abcdef"),
-    };
-    let global = tool_guidance();
-    let mut registry = FakeRegistry::with_entries(vec![
-        (
-            global.clone(),
-            body_content("- Read 超长时先分段、过滤或摘要，只保留诊断片段。\n"),
-        ),
-        (project.clone(), body_content("# Project\n")),
-    ]);
+async fn two_phase_patch_updates_only_anchored_fragment() {
+    let target = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![(
+        target.clone(),
+        body_content("# Tool Guidance\nold rule\nkeep tail\n"),
+    )]);
     let lesson_dir = tempfile::tempdir().expect("tempdir");
     let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
     let llm = TwoPhaseLlm::new(vec![
-        r#"{"decision":"diagnose","reason":"Read 超长","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"Read 超长","direction":"分段读取","route_reason":"项目证据"}]}"#.to_string(),
+        r#"{"decision":"diagnose","reason":"Bash 失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重试纪律","direction":"补 patch","route_reason":"工具纪律"}]}"#.to_string(),
         serde_json::json!({
             "decision": "propose",
-            "reason": "补充读取规则",
+            "reason": "只替换目标行",
             "evidence_refs": ["E0"],
-            "body": "# Project\n- Read 超长时先分段、过滤或摘要，只保留诊断片段。\n"
+            "operations": [{"op":"replace_exact","old_string":"old rule","new_string":"new rule"}]
         })
         .to_string(),
-        r#"{"verdicts":[{"index":0,"verdict":"duplicate","authority":"global","reason":"复述全局规则"}]}"#.to_string(),
+        r#"{"verdicts":[]}"#.to_string(),
     ]);
     let mut history = crate::domain::strength::SignalHistory::default();
     let outcome = crate::domain::improvement::run_two_phase_cycle(
@@ -155,16 +148,74 @@ async fn two_phase_rejects_project_body_duplicating_global_guidance() {
     .await
     .expect("two-phase cycle");
 
-    assert_eq!(outcome.outcome.summary, "采纳 0 / 无变更 0 / 作废 1");
-    assert_eq!(llm.call_count(), 3);
-    assert!(llm.prompt(2).contains("scope 仲裁器"));
+    assert_eq!(outcome.outcome.summary, "采纳 1 / 无变更 0 / 作废 0");
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some("# Tool Guidance\nnew rule\nkeep tail\n".to_string()),
+        "patch 只替换锚点，其余正文必须保留"
+    );
+    assert_eq!(outcome.outcome.adopted[0].id, target, "patch 仍绑定原组件");
+}
+
+#[tokio::test]
+async fn two_phase_tool_signal_never_writes_project_overlay() {
+    let project = ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("0123456789abcdef"),
+    };
+    let global = tool_guidance();
+    let mut registry = FakeRegistry::with_entries(vec![
+        (global.clone(), body_content("# Tool Guidance\nold\n")),
+        (project.clone(), body_content("# Project\n")),
+    ]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Read 超长","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"Read 超长","direction":"分段读取","route_reason":"工具纪律"}]}"#.to_string(),
+        serde_json::json!({
+            "decision": "propose",
+            "reason": "补充读取规则",
+            "evidence_refs": ["E0"],
+            "body": "# Tool Guidance\n- Read 超长时先分段、过滤或摘要。\n"
+        })
+        .to_string(),
+        r#"{"verdicts":[]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        single_project_evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "采纳 1 / 无变更 0 / 作废 0");
+    assert!(llm.prompt(1).contains("目标组件：tool-guidance/default"));
     assert_eq!(
         registry
             .content_of(&project)
             .map(|content| content.body.clone()),
-        Some("# Project\n".to_string())
+        Some("# Project\n".to_string()),
+        "工具信号 NEVER 写项目 overlay"
     );
-    assert!(lesson_store.load_active().expect("lessons").is_empty());
+    assert_eq!(
+        registry
+            .content_of(&global)
+            .map(|content| content.body.clone()),
+        Some("# Tool Guidance\n- Read 超长时先分段、过滤或摘要。\n".to_string())
+    );
 }
 
 /// 存量收敛：结构化判定为 duplicate 且权威在 global 时，宿主只删除项目侧
@@ -407,7 +458,7 @@ async fn two_phase_routes_candidate_then_executes_fixed_component() {
     assert!(diagnosis_prompt.contains("工具参数类问题 NEVER 复述或改写工具 schema"));
     let execution_prompt = llm.prompt(1);
     assert!(execution_prompt.contains("目标 scope：global"));
-    assert!(execution_prompt.contains("正文预算：3800 字符"));
+    assert!(execution_prompt.contains("正文预算：3800 tokens"));
     assert_eq!(outcome.outcome.adopted.len(), 1);
     assert_eq!(outcome.outcome.adopted[0].id, target);
     assert_eq!(
@@ -548,7 +599,7 @@ async fn two_phase_execution_parse_failure_retries_once() {
     let retry_prompt = llm.prompt(2);
     assert!(retry_prompt.contains("执行应答解析失败"));
     assert!(retry_prompt.contains("紧凑 JSON"));
-    assert!(retry_prompt.contains("body 不超过 3800 字符"));
+    assert!(retry_prompt.contains("body 不超过 3800 tokens"));
     assert_eq!(
         registry
             .content_of(&target)
@@ -609,7 +660,7 @@ async fn two_phase_oversized_body_gets_one_llm_compaction_pass() {
         "decision": "propose",
         "reason": "初稿超预算",
         "evidence_refs": ["E0"],
-        "body": "长".repeat(3801),
+        "body": "长".repeat(6400),
     })
     .to_string();
     let compact = serde_json::json!({
@@ -663,7 +714,7 @@ async fn two_phase_rejects_body_still_oversized_after_compaction() {
         "decision": "propose",
         "reason": "仍超预算",
         "evidence_refs": ["E0"],
-        "body": "长".repeat(3801),
+        "body": "长".repeat(6400),
     })
     .to_string();
     let llm = TwoPhaseLlm::new(vec![
@@ -706,7 +757,7 @@ async fn two_phase_rejects_body_still_oversized_after_compaction() {
 async fn two_phase_oversized_existing_body_gets_compaction_first_prompt() {
     let target = tool_guidance();
     let mut registry =
-        FakeRegistry::with_entries(vec![(target.clone(), body_content(&"长".repeat(3801)))]);
+        FakeRegistry::with_entries(vec![(target.clone(), body_content(&"长".repeat(6400)))]);
     let lesson_dir = tempfile::tempdir().expect("tempdir");
     let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
     let response = serde_json::json!({

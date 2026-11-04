@@ -148,50 +148,22 @@ fn source_project_label(session_id: &str) -> String {
     project
 }
 
-/// signal 来源的去重项目段；unknown/legacy 不伪装成项目。
-fn signal_projects(signal: &EvidenceSignal) -> Vec<String> {
-    let mut projects: Vec<String> = Vec::new();
-    for source in &signal.sources {
-        let project = source_project_label(&source.session_id);
-        if project != "unknown" && !projects.contains(&project) {
-            projects.push(project);
-        }
-    }
-    projects
-}
-
-/// 内置工具信号的 scope 硬门禁：
-/// - 单项目 → 只允许同名 project overlay；
-/// - 多项目 → 只允许 global tool-guidance/guardrails；
-/// - unknown/无来源 → unresolved。
-fn scoped_builtin_candidates(
-    signal: &EvidenceSignal,
-    candidates: &[ComponentId],
-) -> Option<Vec<ComponentId>> {
-    match signal_projects(signal).as_slice() {
-        [] => None,
-        [project] => Some(
-            candidates
-                .iter()
-                .filter(|id| {
-                    id.kind == ComponentKind::SystemPromptOverlay && id.name.as_str() == project
-                })
-                .cloned()
-                .collect(),
-        ),
-        _ => Some(
-            candidates
-                .iter()
-                .filter(|id| {
-                    matches!(
-                        id.kind,
-                        ComponentKind::ToolGuidance | ComponentKind::Guardrails
-                    )
-                })
-                .cloned()
-                .collect(),
-        ),
-    }
+/// 内置工具信号的职责面只有工具纪律/硬约束：
+/// - tool-guidance/default
+/// - guardrails/default
+///
+/// 项目 overlay 不承接工具行为；项目业务知识由未来的 project signal 路由。
+fn builtin_tool_candidates(candidates: &[ComponentId]) -> Vec<ComponentId> {
+    candidates
+        .iter()
+        .filter(|id| {
+            matches!(
+                id.kind,
+                ComponentKind::ToolGuidance | ComponentKind::Guardrails
+            )
+        })
+        .cloned()
+        .collect()
 }
 
 fn profile_for(id: &ComponentId) -> ComponentRouteProfile {
@@ -253,19 +225,10 @@ fn profile_allows(
 ) -> bool {
     let tool = signal_tool(signal);
     if is_builtin_tool(tool) {
-        match signal_projects(signal).as_slice() {
-            [] => return false,
-            [project] => {
-                return profile.id.kind == ComponentKind::SystemPromptOverlay
-                    && profile.id.name.as_str() == project;
-            }
-            _ => {
-                return matches!(
-                    profile.id.kind,
-                    ComponentKind::ToolGuidance | ComponentKind::Guardrails
-                );
-            }
-        }
+        return matches!(
+            profile.id.kind,
+            ComponentKind::ToolGuidance | ComponentKind::Guardrails
+        );
     }
     if profile.id.kind == ComponentKind::SystemPromptOverlay
         && profile.id.name.as_str() != "global"
@@ -307,37 +270,20 @@ pub fn route_signal(
     }
 
     let tool = signal_tool(signal).to_string();
-    // #2168：内置工具纪律先做 scope 硬门禁。单项目经验 NEVER 提升 global，
-    // 多项目共性 NEVER 写入某个项目 overlay，unknown NEVER 猜测落点。
+    // 工具行为属于 aemeath 用户级工具纪律，NEVER 写项目 overlay。
+    // 旧 #2168 的“单项目工具信号进同名 project overlay”已废止。
     let candidates: Vec<ComponentId> = if is_builtin_tool(&tool) {
-        match scoped_builtin_candidates(signal, candidates) {
-            Some(scoped) => scoped,
-            None => {
-                return RouteDecision::Unresolved {
-                    reason: "内置工具 signal 项目归属未知，NEVER 写 global 或项目 overlay"
-                        .to_string(),
-                };
-            }
+        let scoped = builtin_tool_candidates(candidates);
+        if scoped.is_empty() {
+            return RouteDecision::Unresolved {
+                reason: "缺少 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 写项目 overlay"
+                    .to_string(),
+            };
         }
+        scoped
     } else {
         candidates.to_vec()
     };
-    // 内置工具纪律的主职责面是 tool-guidance/guardrails；单项目时同名
-    // project overlay 是唯一主候选。候选缺失时 MUST unresolved。
-    if is_builtin_tool(&tool)
-        && !candidates.iter().any(|candidate| {
-            matches!(
-                candidate.kind,
-                ComponentKind::ToolGuidance | ComponentKind::Guardrails
-            ) || candidate.kind == ComponentKind::SystemPromptOverlay
-        })
-    {
-        return RouteDecision::Unresolved {
-            reason:
-                "缺少同名项目 overlay 或 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 兜底"
-                    .to_string(),
-        };
-    }
     let mut routed: Vec<(ComponentRouteProfile, String)> = candidates
         .iter()
         .filter_map(|id| {
@@ -410,7 +356,8 @@ pub fn validate_change_set_routes(
 ) -> Result<(), crate::domain::errors::HarnessError> {
     for edit in &change_set.edits {
         let id = match edit {
-            crate::domain::changeset::ComponentEdit::Upsert { id, .. } => id,
+            crate::domain::changeset::ComponentEdit::Upsert { id, .. }
+            | crate::domain::changeset::ComponentEdit::Patch { id, .. } => id,
             crate::domain::changeset::ComponentEdit::Delete { id } => {
                 return Err(crate::domain::errors::HarnessError::invalid(
                     crate::constants::ERROR_DOMAIN,

@@ -327,7 +327,7 @@ async fn trigger_runs_cycle_and_writes_component_file() {
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert!(written, "Trigger 周期必须把提案原子写入组件文件");
+    assert!(written, "Trigger 周期必须把提案写入组件文件");
 
     let _ = send_control(&sock, &RsiControl::Stop).await;
     tokio::time::timeout(Duration::from_secs(2), daemon)

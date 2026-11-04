@@ -281,12 +281,12 @@ fn render_user_guidance(files: &[UserGuidanceFile]) -> String {
 /// （指令是语义整体，截断会丢关键规则）——改为不注入正文，仅留
 /// 引导行让模型按需 Read 全文（全文可达、语义完整、常驻成本 O(1)）。
 fn truncate_guidance_content(content: &str, source_path: &str) -> String {
-    let budget = crate::constants::GUIDANCE_FILE_MAX_CHARS;
-    if content.chars().count() <= budget {
+    let budget = crate::constants::GUIDANCE_FILE_MAX_TOKENS;
+    if share::token_budget::estimate_tokens(content) <= budget {
         return content.to_string();
     }
     format!(
-        "（本 guidance 文件 {source_path} 超过注入预算 {budget} 字符，正文未注入——         需要其内容时用 Read 工具读取完整文件，NEVER 凭猜测假设其内容）"
+        "（本 guidance 文件 {source_path} 超过注入预算 {budget} tokens，正文未注入——         需要其内容时用 Read 工具读取完整文件，NEVER 凭猜测假设其内容）"
     )
 }
 
@@ -346,14 +346,13 @@ mod prompt_build_tests;
 
 // ---- #2021 guardrails（c2）注入：全局 + 项目 guardrails.md → static_part ----
 
-/// 渲染单个 guardrails 段（source 标签包裹 + 预算截断）。
+/// 渲染单个 guardrails 段（source 标签包裹 + token 预算截断）。
 fn render_guardrails_section(source_path: &str, content: &str) -> String {
-    let mut body: String = content.trim().chars().collect();
-    let budget = crate::constants::GUARDRAILS_SECTION_MAX_CHARS;
-    if body.chars().count() > budget {
-        body = body.chars().take(budget).collect();
-        body.push_str("…（截断）");
-    }
+    let body = share::token_budget::truncate_to_token_budget(
+        content.trim(),
+        crate::constants::GUARDRAILS_SECTION_MAX_TOKENS,
+        "…（截断）",
+    );
     format!("<guardrails source=\"{source_path}\">\n{body}\n</guardrails>")
 }
 
@@ -381,14 +380,13 @@ async fn load_guardrails_sections(cwd: &Path) -> Vec<String> {
 
 // ---- #2022 tool_guidance（c4）注入：user-context 消息侧（通道 B） ----
 
-/// 渲染 tool_guidance 段（source 标签包裹 + 预算截断）。
+/// 渲染 tool_guidance 段（source 标签包裹 + token 预算截断）。
 fn render_tool_guidance_section(source_path: &str, content: &str) -> String {
-    let mut body: String = content.trim().chars().collect();
-    let budget = crate::constants::TOOL_GUIDANCE_SECTION_MAX_CHARS;
-    if body.chars().count() > budget {
-        body = body.chars().take(budget).collect();
-        body.push_str("…（截断）");
-    }
+    let body = share::token_budget::truncate_to_token_budget(
+        content.trim(),
+        crate::constants::TOOL_GUIDANCE_SECTION_MAX_TOKENS,
+        "…（截断）",
+    );
     format!("<tool_guidance source=\"{source_path}\">\n{body}\n</tool_guidance>")
 }
 

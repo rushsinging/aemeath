@@ -32,7 +32,7 @@
 
 投影器只读 dataset（manifest 定位成员、按成员清单流式扫描），NEVER 依赖主进程内存态。
 
-**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。上下文读取 `step/accepted_input/messages` 与 `step/outcome/messages`，包含目标 step 与前后各一步：目标 step 800 字符、单邻居 200 字符、单来源总计 1200 字符，目标事实 MUST 保留；缺失来源显式标记不可用。生产读取 MUST 以 datasets root 为基准验证 session id 是单一 Normal `.dataset` 成员，且 canonicalize 后仍在 root 内（拒绝 `..`、绝对路径与 dataset/成员级 symlink 逃逸）；同一 step 的多 revision 只保留最新副本。
+**来源回读**：`SessionEventRecord` MUST 保留 `session_id / run_id / step_id`；聚合后的 `EvidenceSignal.sources` 保留有界 `EvidenceSourceRef`（单信号最多 3 条，按 step 去重）。Compose 只通过这些来源回读 session 上下文，NEVER 从理由文本反推来源。上下文读取 `step/accepted_input/messages` 与 `step/outcome/messages`，包含目标 step 与前后各一步：目标 step 800 tokens、单邻居 200 tokens、单来源总计 1200 tokens，目标事实 MUST 保留；缺失来源显式标记不可用。生产读取 MUST 以 datasets root 为基准验证 session id 是单一 Normal `.dataset` 成员，且 canonicalize 后仍在 root 内（拒绝 `..`、绝对路径与 dataset/成员级 symlink 逃逸）；同一 step 的多 revision 只保留最新副本。
 
 ### 2A.2 投影器（`SessionEvidenceProjector`，harness crate）
 
@@ -53,7 +53,7 @@
 ### 2A.3 材料注入与提案门禁
 
 - `ImprovementMaterials` 增第三字段 `evidence: EvidenceBundle`；`build_block_prompt` 在组件块与 lessons 块之间注入 **evidence 块**（证据是改进依据，lessons 是历史经验）。
-- 证据块字符预算独立（`EVIDENCE_BLOCK_MAX_CHARS`，实施定值，量级 6000）；超限按 2A.2 优先级从低往高裁剪。
+- 证据块 token 预算独立（`EVIDENCE_BLOCK_MAX_TOKENS`，实施定值，量级 6000）；超限按 2A.2 优先级从低往高裁剪。
 - **提案门禁**：`BlockProposal::Propose.signal_ids` 为结构化必填（空、重复、未知 signal id 整份作废）；合法性在解析后、registry 预检前校验，作废写 `proposal_rejected { stage: signals }`。该门禁替代旧的 reason 文本推断。
 - 空证据兜底：窗口内无 session/无信号时渲染「（近期无执行证据）」，周期照常执行（对齐空 corpus JSON 兜底先例）。
 
@@ -232,7 +232,7 @@ struct LessonEntry {
 
 - 证据装配（2A）：投影器从真实 dataset fixture 提取聚合信号（L2）；材料含 evidence 块、空证据兜底渲染（L2）；真模型在有证据材料下提案引用 signal id、lesson 落盘带真实 SignalKind（e2e，#2046 前置）。
 - 证据不变量：无证据提案被拒（L2）；采纳 lesson 均含 EvidenceBinding（L2 + e2e）。
-- 来源回读：`SessionEventRecord` 保留 session/run/step，`EvidenceSignal.sources` 有界且去重（L2）；scanner 从真实形态 dataset 回读目标 step 与相邻上下文（含 `step/accepted_input` 用户任务）并保证目标 step 在 1200 字符预算内，来源缺失/损坏成员不阻断（L2 + 真实 fixture）。
+- 来源回读：`SessionEventRecord` 保留 session/run/step，`EvidenceSignal.sources` 有界且去重（L2）；scanner 从真实形态 dataset 回读目标 step 与相邻上下文（含 `step/accepted_input` 用户任务）并保证目标 step 在 1200 token 预算内，来源缺失/损坏成员不阻断（L2 + 真实 fixture）。
 - 提案门禁：空、重复、未知 `signal_ids` 整份作废且零落盘副作用；合法引用绑定真实 signal kind 与 source（L2）。
 - Compose 证据继承：修正未采纳组件或引用未知 signal 作废且零落盘；修正已采纳组件时新 lesson 保留原 signal/source（L2）。完整周期必须在首个 Block 前保存 Active lesson 快照，Compose prompt 含历史 lesson 与双方上下文，且不含本周期自身派生 lesson（L2）。
 - dry-run 全链路：虚拟采纳 MUST 进入 Compose，并基于内存 overlay 的叠加终态仲裁；真实组件、lesson、checkpoint 与 signal-history 全部零写入（L2 + 真模型 e2e）。

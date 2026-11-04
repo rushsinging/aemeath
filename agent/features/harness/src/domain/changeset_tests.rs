@@ -1,7 +1,9 @@
 //! ChangeSet 编辑契约测试：omitted-is-inherited 与整份作废语义。
 
 use crate::application::ComponentRegistry;
-use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet, ComponentEdit};
+use crate::domain::changeset::{
+    apply_change_set, AppliedEdit, ChangeSet, ComponentEdit, PatchOperation,
+};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::test_support::FakeRegistry;
 
@@ -148,4 +150,94 @@ fn successful_apply_returns_edits_in_order() {
         ],
     );
     assert_eq!(registry.list().len(), 1);
+}
+
+/// Patch 只替换唯一锚点，保留其余正文。
+#[test]
+fn patch_replaces_unique_anchor_and_preserves_rest() {
+    let target = id(ComponentKind::Skill, "progressive");
+    let mut registry = FakeRegistry::with_entries(vec![(
+        target.clone(),
+        body_content("## A\nold\n## B\nkeep\n"),
+    )]);
+
+    let change_set = ChangeSet {
+        edits: vec![ComponentEdit::Patch {
+            id: target.clone(),
+            operations: vec![
+                PatchOperation::ReplaceExact {
+                    old_string: "old".to_string(),
+                    new_string: "new".to_string(),
+                },
+                PatchOperation::InsertAfterAnchor {
+                    anchor: "## B\n".to_string(),
+                    new_text: "- appended\n".to_string(),
+                },
+            ],
+        }],
+    };
+    let applied = apply_change_set(&mut registry, &change_set).expect("patch apply");
+
+    assert_eq!(applied, vec![AppliedEdit::Patched { id: target.clone() }]);
+    assert_eq!(
+        registry.content_of(&target).map(|content| &content.body),
+        Some(&"## A\nnew\n## B\n- appended\nkeep\n".to_string()),
+    );
+}
+
+/// 非唯一 old_string 必须在写前拒绝，正文保持不变。
+#[test]
+fn patch_non_unique_anchor_is_rejected_before_write() {
+    let target = id(ComponentKind::Skill, "progressive");
+    let mut registry =
+        FakeRegistry::with_entries(vec![(target.clone(), body_content("same\nsame\n"))]);
+
+    let change_set = ChangeSet {
+        edits: vec![ComponentEdit::Patch {
+            id: target.clone(),
+            operations: vec![PatchOperation::ReplaceExact {
+                old_string: "same".to_string(),
+                new_string: "new".to_string(),
+            }],
+        }],
+    };
+    let error = apply_change_set(&mut registry, &change_set).expect_err("非唯一锚点必须拒绝");
+
+    assert!(error.message().contains("唯一"), "{error}");
+    assert!(registry.writes.is_empty());
+    assert_eq!(
+        registry.content_of(&target).map(|content| &content.body),
+        Some(&"same\nsame\n".to_string()),
+    );
+}
+
+/// 多条目中途写入失败时按写前快照回滚已写条目。
+#[test]
+fn apply_rolls_back_written_edits_when_later_write_fails() {
+    let first = id(ComponentKind::Skill, "first");
+    let second = id(ComponentKind::Skill, "second");
+    let mut registry = FakeRegistry::with_entries(vec![(second.clone(), body_content("old"))]);
+    registry.fail_write_ids.push(second.clone());
+
+    let change_set = ChangeSet {
+        edits: vec![
+            ComponentEdit::Upsert {
+                id: first.clone(),
+                content: body_content("created"),
+            },
+            ComponentEdit::Upsert {
+                id: second.clone(),
+                content: body_content("new"),
+            },
+        ],
+    };
+    let error = apply_change_set(&mut registry, &change_set).expect_err("中途失败必须报错");
+
+    assert!(error.message().contains("模拟写入失败"), "{error}");
+    assert_eq!(registry.content_of(&first), None, "新建文件必须回滚删除");
+    assert_eq!(
+        registry.content_of(&second).map(|content| &content.body),
+        Some(&"old".to_string()),
+        "已有组件必须恢复旧内容"
+    );
 }

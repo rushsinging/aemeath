@@ -22,7 +22,7 @@
 | **改进块**（Block） | `build_block_prompt` | 每数据源块 1 次 | 看证据 + 组件现状 + 历史经验 → 提案编辑 |
 | **周期汇总**（Compose） | `run_compose_phase` 内联 | 每周期 1 次（有采纳时） | 看本周期全部采纳 + 组件终态 → 仲裁矛盾/合并/精炼 |
 
-> 当前默认执行模式为 **two_phase**：宿主先生成受限候选，诊断选择固定组件，执行只写正文。`single_phase` 保留为兼容回退路径，并同样接受路由门禁校验。两条路径共用落盘链路（校验 → 整份作废 → 原子写 → lesson 回写 → 事件流）。
+> 当前默认执行模式为 **two_phase**：宿主先生成受限候选，诊断选择固定组件，执行写正文或 anchored patch。`single_phase` 保留为兼容回退路径，并同样接受路由门禁校验。两条路径共用落盘链路（校验 → 整份作废 → 写前快照 → symlink 安全写 → lesson 回写 → 事件流）。
 
 ## 1.1 落点、schema 与预算安全契约（所有改进 prompt 共用）
 
@@ -30,7 +30,7 @@
 - `scope=global` 只承接跨项目通用规律；单项目的项目特定经验 NEVER 写 global；项目 A 证据 NEVER 写项目 B；没有同项目候选时输出 no_change/no_issue。
 - 跨 scope 重复由宿主硬门禁处理：规则单元先词法召回，再结构化判定 duplicate/specialization/conflict/distinct；duplicate/conflict 拒绝，specialization/distinct 放行。周期开始自动收敛存量重复与单项目 global 专属规则。
 - 工具参数类问题 NEVER 复述或改写工具 schema（必填性、类型、枚举、示例）。只写「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
-- guardrails/tool-guidance body 预算 3800 字符，overlay 7800 字符。初次产出超预算时 runtime 追加一次压缩 prompt；仍超预算整份提案作废，NEVER 硬截断。既有正文已超预算时，执行 prompt 的第一任务是语义压缩，而非逐字保留超长原文。
+- guardrails/tool-guidance body 预算 3800 tokens，overlay 7800 tokens。初次产出超预算时 runtime 追加一次压缩 prompt；仍超预算整份提案作废，NEVER 硬截断。既有正文已超预算时，执行 prompt 的第一任务是语义压缩，而非逐字保留超长原文。
 - 空文本响应最多重试一次；成功时 usage 聚合并在 `llm_call.attempts` 记录 2，连续空文本显式失败。
 - TwoPhase 诊断/执行 JSON 解析失败各追加一次紧凑 JSON 重试：诊断重试仍失败则周期失败；执行重试仍失败则该任务作废。NEVER 把解析失败当作 no_issue、空 issues 或空正文继续收口。
 
@@ -175,7 +175,7 @@ TwoPhase 不再把全部组件 chunk 与证据混合后让模型自由选择落�
 - 执行输出 NEVER 包含 component id、action、change_set。
 - runtime 用诊断结果组装唯一 upsert；delete 不允许。
 - evidence_refs 只能指向本次输入的短编号。
-- dry-run 只写虚拟 overlay；正式路径 validate 后原子写盘并回写 lesson。
+- dry-run 只写虚拟 overlay；正式路径 validate 后写最终普通文件并回写 lesson。
 
 ## 3. 周期汇总（Compose）提示词
 
@@ -224,7 +224,7 @@ TwoPhase 不再把全部组件 chunk 与证据混合后让模型自由选择落�
 | 只在**有采纳**时触发 | 无采纳时无可仲裁对象（NEVER 为凑 Compose 造编辑） |
 | 材料 = 采纳清单 + **叠加后终态** + 采纳前 Active lesson 快照 | 终态是各块 Last-Write-Wins 的结果；历史 lesson 不能被 Block 采纳退役，也不能混入本周期自身派生 lesson |
 | 候选相似对先召回、再回读 session 上下文 | 文本相似只召回；合并判定 MUST 依据来源上下文 |
-| 候选上限 8 对、上下文总预算 12000 字符、单来源 1200 字符（目标 800 + 单邻居 200） | 防止 Compose 材料无界膨胀，同时保证目标 step 事实不被超大邻居挤出 |
+| 候选上限 8 对、上下文总预算 12000 tokens、单来源 1200 tokens（目标 800 + 单邻居 200） | 防止 Compose 材料无界膨胀，同时保证目标 step 事实不被超大邻居挤出 |
 | 三种仲裁动作显式列举（矛盾/合并/精炼） | 模型对"汇总"理解宽泛，需枚举目标形态 |
 | 上下文不同或缺失时禁止合并 | 表面相似的任务/失败不得被合并成一条错误经验 |
 | 显式格式示例（NEVER 其他形态） | 实测失败：只写"格式同改进块"时模型输出裸 `{"edits":[]}` → 解析失败 |

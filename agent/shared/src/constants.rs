@@ -25,3 +25,9 @@ pub const BASE62_CHARS: &[u8; 62] =
 
 /// 雪花 id epoch（2026-01-01T00:00:00Z 毫秒，#1884）。
 pub const SNOWFLAKE_EPOCH_MS: u64 = 1_767_225_600_000;
+
+/// 中文字符（CJK）粗估：约 0.6 token / 字。
+pub const TOKENS_PER_CJK_CHAR: f64 = 0.6;
+
+/// 英文字符（拉丁等非 CJK）粗估：约 0.3 token / 字。
+pub const TOKENS_PER_LATIN_CHAR: f64 = 0.3;

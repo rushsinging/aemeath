@@ -42,10 +42,10 @@ fn signal_with_session(kind: SignalKind, signal_id: &str, session_ids: &[&str]) 
 }
 
 #[test]
-fn project_overlay_only_accepts_matching_single_project_signal() {
+fn project_overlay_never_accepts_builtin_tool_signal() {
     let project_a = component_id(ComponentKind::SystemPromptOverlay, "0123456789abcdef");
     let project_b = component_id(ComponentKind::SystemPromptOverlay, "fedcba9876543210");
-    let candidates = vec![tool_guidance(), project_a.clone(), project_b.clone()];
+    let candidates = vec![tool_guidance(), project_a, project_b];
     let only_a = signal_with_session(
         SignalKind::RepeatedFailure,
         "repeated_failure:Bash:project-a-only",
@@ -56,12 +56,13 @@ fn project_overlay_only_accepts_matching_single_project_signal() {
         &candidates,
         &crate::domain::routing::RouteContext::default(),
     );
-    match decision {
-        crate::domain::routing::RouteDecision::Exact { component, .. } => {
-            assert_eq!(component, project_a);
+    assert_eq!(
+        decision,
+        crate::domain::routing::RouteDecision::Exact {
+            component: tool_guidance(),
+            reason: "内置工具 Bash 的执行纪律问题".to_string(),
         }
-        other => panic!("单项目内置工具信号 MUST 只落项目 overlay：{other:?}"),
-    }
+    );
 
     let cross_project = signal_with_session(
         SignalKind::RepeatedFailure,
@@ -83,38 +84,42 @@ fn project_overlay_only_accepts_matching_single_project_signal() {
 }
 
 #[test]
-fn single_project_signal_without_matching_overlay_stays_unresolved() {
+fn single_project_tool_signal_without_overlay_routes_to_global_guidance() {
     let decision = crate::domain::routing::route_signal(
         &signal_with_session(
             SignalKind::RepeatedFailure,
             "repeated_failure:Bash:project-only",
             &["0123456789abcdef/s1.dataset"],
         ),
-        &[tool_guidance(), guardrails()],
+        &[tool_guidance()],
         &crate::domain::routing::RouteContext::default(),
     );
-    assert!(matches!(
+    assert_eq!(
         decision,
-        crate::domain::routing::RouteDecision::Unresolved { reason, .. }
-            if reason.contains("缺少同名项目 overlay")
-    ));
+        crate::domain::routing::RouteDecision::Exact {
+            component: tool_guidance(),
+            reason: "内置工具 Bash 的执行纪律问题".to_string(),
+        }
+    );
 }
 
 #[test]
-fn builtin_tool_signal_without_project_source_stays_unresolved() {
+fn builtin_tool_signal_without_project_source_routes_to_global_guidance() {
     let decision = crate::domain::routing::route_signal(
         &signal(
             SignalKind::RepeatedFailure,
             "repeated_failure:Bash:unknown-source",
         ),
-        &[tool_guidance(), guardrails()],
+        &[tool_guidance()],
         &crate::domain::routing::RouteContext::default(),
     );
-    assert!(matches!(
+    assert_eq!(
         decision,
-        crate::domain::routing::RouteDecision::Unresolved { reason, .. }
-            if reason.contains("项目归属未知")
-    ));
+        crate::domain::routing::RouteDecision::Exact {
+            component: tool_guidance(),
+            reason: "内置工具 Bash 的执行纪律问题".to_string(),
+        }
+    );
 }
 
 #[test]
@@ -232,7 +237,7 @@ fn builtin_tool_signal_never_falls_back_to_overlay_alone() {
     assert!(matches!(
         decision,
         crate::domain::routing::RouteDecision::Unresolved { reason, .. }
-            if reason.contains("项目归属未知")
+            if reason.contains("缺少 tool-guidance/guardrails")
     ));
 }
 

@@ -269,9 +269,9 @@ struct ProjectWorkspaceValue {
 /// 从 `<agents>/session/<project-segment>/` 反解项目 overlay 落点。
 ///
 /// 项目段本身是单向哈希，NEVER 从路径猜测项目根；权威来源是同目录 canonical
-/// session 的 workspace 快照。每个项目根按运行时注入优先级选择：
-/// `AGENTS.md` 存在则优先，否则 `CLAUDE.md`；两者都缺失时不注册项目组件，
-/// NEVER 自动创建项目说明文件。
+/// session 的 workspace 快照。每个项目根按统一写入目标解析：
+/// `AGENTS.md` 存在则优先，否则 `CLAUDE.md`；两者都缺失时注册待创建的
+/// `AGENTS.md`，实际文件只在采纳写入时创建。
 fn project_overlay_component_paths_under(
     agents_dir: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
@@ -296,11 +296,8 @@ fn project_overlay_component_paths_under(
         let Some(root) = resolve_project_root_from_snapshots(&project_dir) else {
             continue;
         };
-        // #2179：AGENTS.md 优先、CLAUDE.md fallback 的统一解析由 paths 单点提供，
-        // 两者都缺失时不注册项目组件（NEVER 自动创建项目说明文件）。
-        let Some(target) = share::config::paths::resolve_project_instruction_path(&root) else {
-            continue;
-        };
+        // #2179：AGENTS.md 优先、CLAUDE.md fallback、都缺失时待创建 AGENTS.md。
+        let target = share::config::paths::project_instruction_write_target(&root);
         paths.insert(
             harness::ComponentId {
                 kind: harness::ComponentKind::SystemPromptOverlay,
@@ -310,6 +307,31 @@ fn project_overlay_component_paths_under(
         );
     }
     paths
+}
+
+/// 缺失项目 overlay 的虚拟骨架：只让 registry 可见，不写盘。
+///
+/// 实际 `AGENTS.md` 仅在 RSI 采纳并调用 registry.write 时创建。
+fn project_overlay_bootstrap_defaults(
+    component_paths: &HashMap<harness::ComponentId, std::path::PathBuf>,
+) -> HashMap<harness::ComponentId, harness::ComponentContent> {
+    component_paths
+        .iter()
+        .filter(|(id, path)| {
+            id.kind == harness::ComponentKind::SystemPromptOverlay
+                && id.name.as_str() != "global"
+                && !path.exists()
+        })
+        .map(|(id, _)| {
+            (
+                id.clone(),
+                harness::ComponentContent {
+                    frontmatter: None,
+                    body: "# Project\n".to_string(),
+                },
+            )
+        })
+        .collect()
 }
 
 fn resolve_project_root_from_snapshots(project_dir: &Path) -> Option<std::path::PathBuf> {
@@ -455,14 +477,17 @@ fn wire_component_registry_under(
     // 而 guardrails/AGENTS.md/skills 仍在 ~/.agents。
     let state_root = crate::state_layout_migration::state_root_for(agents_dir);
     component_paths.extend(project_overlay_component_paths_under(&state_root));
+    let project_defaults = project_overlay_bootstrap_defaults(&component_paths);
+    let mut bootstrap_defaults = builtin_prose_bootstrap_defaults();
+    bootstrap_defaults.extend(project_defaults);
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> = match mode {
-        ComponentBootstrapMode::DryRun => Box::new(
+        ComponentBootstrapMode::DryRun | ComponentBootstrapMode::Formal => Box::new(
             harness::adapters::filesystem::FilesystemComponentRegistry::with_bootstrap_defaults(
                 component_paths,
-                builtin_prose_bootstrap_defaults(),
+                bootstrap_defaults,
             ),
         ),
-        ComponentBootstrapMode::None | ComponentBootstrapMode::Formal => Box::new(
+        ComponentBootstrapMode::None => Box::new(
             harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths),
         ),
     };

@@ -233,20 +233,22 @@ impl BackgroundProcessReminderSource {
 /// 截断标记（标记计入总长，预览 NEVER 超上限、NEVER 无声腰斩）。
 fn recall_content_preview(content: &str) -> String {
     const TRUNCATION_MARKER: &str = "…（截断）";
-    let max_chars = crate::application::constants::MEMORY_RECALL_PREVIEW_CHARS;
-    if content.chars().count() <= max_chars {
+    let max_tokens = crate::application::constants::MEMORY_RECALL_PREVIEW_TOKENS;
+    if share::token_budget::estimate_tokens(content) <= max_tokens {
         return content.to_string();
     }
-    let window_chars: Vec<char> = content
-        .chars()
-        .take(max_chars - TRUNCATION_MARKER.chars().count())
-        .collect();
+    let hard_truncated =
+        share::token_budget::truncate_to_token_budget(content, max_tokens, TRUNCATION_MARKER);
+    let Some(window) = hard_truncated.strip_suffix(TRUNCATION_MARKER) else {
+        return hard_truncated;
+    };
+    let window_chars: Vec<char> = window.chars().collect();
     let sentence_end = window_chars
         .iter()
         .rposition(|ch| matches!(ch, '。' | '；' | '！' | '？' | '\n' | '.' | ';' | '!' | '?'));
     let mut preview: String = match sentence_end {
         Some(index) => window_chars[..=index].iter().collect(),
-        None => window_chars.into_iter().collect(),
+        None => window.to_string(),
     };
     preview.push_str(TRUNCATION_MARKER);
     preview
@@ -310,17 +312,21 @@ impl MemoryRecallReminderSource {
         if recalled.first()?.probability < crate::application::constants::MEMORY_RECALL_THRESHOLD {
             return None;
         }
-        // token 预算（字符近似）：逐条累加，超预算依次减条——宁可不注入不超预算。
+        // token 预算：逐条累加，超预算依次减条——宁可不注入不超预算。
         let mut entries = Vec::new();
         let mut confirmed_ids = Vec::new();
-        let mut used_chars = 0usize;
+        let mut used_tokens = 0usize;
         for item in recalled {
             let preview = recall_content_preview(&item.entry.content);
-            let line_chars = preview.chars().count() + item.entry.id.to_string().len() + 4;
-            if used_chars + line_chars > crate::application::constants::MEMORY_RECALL_BUDGET_CHARS {
+            let line_tokens = share::token_budget::estimate_tokens(&preview)
+                + share::token_budget::estimate_tokens(&item.entry.id.to_string())
+                + 4;
+            if used_tokens + line_tokens
+                > crate::application::constants::MEMORY_RECALL_BUDGET_TOKENS
+            {
                 break;
             }
-            used_chars += line_chars;
+            used_tokens += line_tokens;
             confirmed_ids.push(item.entry.id);
             entries.push(context::MemoryRecallEntryData {
                 id: item.entry.id.to_string(),

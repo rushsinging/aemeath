@@ -1,12 +1,13 @@
 //! skills 目录 registry（c5）：`skills/<name>/SKILL.md` 扫描枚举 +
-//! YAML frontmatter 校验 + 原子写（#2018）。
+//! YAML frontmatter 校验 + symlink 安全写（#2018）。
 
+use crate::adapters::file_write::write_component_text;
 use crate::adapters::filesystem::parse_markdown_with_frontmatter;
 use crate::application::ComponentRegistry;
 use crate::constants::{ERROR_DOMAIN, SKILL_MAX_BYTES};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::errors::HarnessError;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// skills 目录组件注册表：每 run 扫描枚举（天然热载），
 /// ComponentId = { Skill, skill 目录名 }。
@@ -56,23 +57,6 @@ impl SkillsDirectoryRegistry {
                 "SKILL.md frontmatter 缺少非空 description",
             ));
         }
-        Ok(())
-    }
-
-    /// 原子写（tmp+rename，与 filesystem adapter 同约定）。
-    fn atomic_write(path: &Path, text: &str) -> Result<(), HarnessError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                HarnessError::storage(ERROR_DOMAIN, format!("创建目录失败：{error}"))
-            })?;
-        }
-        let temp_path = path.with_extension("md.tmp");
-        std::fs::write(&temp_path, text).map_err(|error| {
-            HarnessError::storage(ERROR_DOMAIN, format!("写临时文件失败：{error}"))
-        })?;
-        std::fs::rename(&temp_path, path).map_err(|error| {
-            HarnessError::storage(ERROR_DOMAIN, format!("原子替换失败：{error}"))
-        })?;
         Ok(())
     }
 }
@@ -125,7 +109,7 @@ impl ComponentRegistry for SkillsDirectoryRegistry {
     fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError> {
         self.validate(id, content)?;
         let path = self.skill_path(&id.name);
-        Self::atomic_write(&path, &content.body)
+        write_component_text(&path, &content.body, &self.directory)
     }
 
     fn delete(&mut self, id: &ComponentId) -> Result<(), HarnessError> {

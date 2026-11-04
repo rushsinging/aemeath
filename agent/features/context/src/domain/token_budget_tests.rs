@@ -1,46 +1,6 @@
 use super::*;
 
 #[test]
-fn test_estimate_ascii() {
-    // 英文字符 ≈ 0.3 token/字 → ceil(11 × 0.3) = 4
-    let tokens = estimate_tokens("hello world");
-    assert_eq!(tokens, 4);
-}
-
-#[test]
-fn test_estimate_cjk() {
-    // 中文字符 ≈ 0.6 token/字 → ceil(4 × 0.6) = 3
-    let tokens = estimate_tokens("你好世界");
-    assert_eq!(tokens, 3);
-}
-
-#[test]
-fn test_estimate_ascii_uses_chars_times_point_three() {
-    let text = "the quick brown fox jumps over the lazy dog. ".repeat(50);
-    let expected = ((text.chars().count() as f64) * TOKENS_PER_LATIN_CHAR).ceil() as usize;
-    assert_eq!(estimate_tokens(&text), expected);
-}
-
-#[test]
-fn test_estimate_json_uses_same_latin_ratio() {
-    let json = r#"{"name":"Read","path":"src/main.rs","line":10}"#;
-    let expected = ((json.chars().count() as f64) * TOKENS_PER_LATIN_CHAR).ceil() as usize;
-    assert_eq!(estimate_json_tokens(json), expected);
-}
-
-#[test]
-fn test_estimate_mixed_cjk_and_latin() {
-    // 「你好」×0.6 + "AB"×0.3 → ceil(1.2 + 0.6) = 2
-    assert_eq!(estimate_tokens("你好AB"), 2);
-}
-
-#[test]
-fn test_estimate_tokens_with_ratio_maps_bytes_to_latin_rate() {
-    // bytes_per_token=4 → latin rate 0.25；纯 ASCII "abcd" → ceil(4*0.25)=1
-    assert_eq!(estimate_tokens_with_ratio("abcd", 4.0), 1);
-}
-
-#[test]
 fn effective_window_reserves_guidance_summary_and_output_independently() {
     // #1773：摘要预留由 2% 放宽到 5%，让压缩后的摘要能承载更多历史。
     assert_eq!(summary_budget(200_000), 10_000);
