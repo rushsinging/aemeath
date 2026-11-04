@@ -418,6 +418,13 @@ impl ConfigSnapshot {
         self.inner.logging.retention_days
     }
 
+    // ── Cleanup ─────────────────────────────────────────────
+
+    /// `cleanup.retention_days`（全局默认 + per 面分项）。
+    pub fn cleanup_retention_days(&self) -> crate::config::cleanup::CleanupRetentionDaysConfig {
+        self.inner.cleanup.retention_days.clone()
+    }
+
     // ── UI ───────────────────────────────────────────────────
 
     pub fn verbose(&self) -> bool {

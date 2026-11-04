@@ -5,6 +5,9 @@
 pub const DEFAULT_USAGE_QUEUE_CAPACITY: usize = 1024;
 pub const DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
 
+// ── cleanup.rs：过期清理默认保留天数 ──
+pub const DEFAULT_CLEANUP_RETENTION_DAYS: u64 = 30;
+
 // ── context.rs：auto-compact 阈值安全区间 ──
 /// `auto_compact_threshold_ratio` 的安全区间下限。
 ///

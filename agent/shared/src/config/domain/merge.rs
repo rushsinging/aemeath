@@ -60,6 +60,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub audit: Option<AuditConfigPatch>,
     #[serde(default)]
+    pub cleanup: Option<crate::config::cleanup::CleanupConfig>,
+    #[serde(default)]
     pub storage: Option<StorageConfigPatch>,
     #[serde(default)]
     pub scoring: Option<ScoringConfigPatch>,
@@ -100,6 +102,7 @@ impl ConfigPatch {
             && self.permissions.is_none()
             && self.skills.is_none()
             && self.audit.is_none()
+            && self.cleanup.is_none()
             && self.storage.is_none()
             && self.scoring.is_none()
             && self.workflow.is_none()
@@ -480,6 +483,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(audit) = patch.audit {
         base.audit = apply_audit_patch(base.audit, audit);
+    }
+    if let Some(cleanup) = patch.cleanup {
+        base.cleanup = cleanup;
     }
     if let Some(storage) = patch.storage {
         base.storage = apply_storage_patch(base.storage, storage);

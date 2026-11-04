@@ -2223,6 +2223,8 @@
         "constants.rs",
         "delivery_logging.rs",
         "delivery_logging_tests.rs",
+        "disk_cleanup.rs",
+        "disk_cleanup_tests.rs",
         "harness.rs",
         "harness_tests.rs",
         "lib.rs",

@@ -122,8 +122,9 @@ pub enum Commands {
         command: RsiCommands,
     },
 
-    /// Remove orphaned on-disk data (sessions / tool results / workflows) that
-    /// no longer has any reference. Irreversible.
+    /// Remove on-disk data no longer referenced or past its retention
+    /// window (sessions / tool results / workflows / legacy layouts).
+    /// Irreversible.
     Cleanup {
         /// Only list what would be removed, delete nothing
         #[arg(long)]
@@ -132,6 +133,12 @@ pub enum Commands {
         /// Skip the interactive confirmation prompt
         #[arg(long, short = 'y')]
         yes: bool,
+
+        /// Override the global default retention window in days
+        /// (per-face overrides in cleanup.retention_days still win; 0 keeps
+        /// the configured value)
+        #[arg(long)]
+        days: Option<u64>,
     },
 
     /// Check for and install updates
