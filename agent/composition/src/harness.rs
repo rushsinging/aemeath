@@ -777,10 +777,17 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
             let all_runs = harness::adapters::session_scanner::dataset_run_ids(
                 &self.datasets_root.join(&session_key),
             );
+            let source_updated_at_secs = std::fs::metadata(self.datasets_root.join(&session_key))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
             if let Some(progress) = state.sessions.get_mut(&session_key) {
                 progress.session_complete = all_runs
                     .iter()
                     .all(|run_id| progress.processed_run_ids.contains(run_id));
+                progress.source_updated_at_secs = source_updated_at_secs;
             }
         }
         let live: std::collections::BTreeSet<String> =
