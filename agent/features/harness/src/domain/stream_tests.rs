@@ -30,6 +30,7 @@ fn state_with(session: &str, runs: &[&str], complete: bool) -> EvidenceStreamSta
         SessionProgress {
             processed_run_ids: runs.iter().map(|r| r.to_string()).collect(),
             session_complete: complete,
+            source_updated_at_secs: 0,
         },
     );
     state
@@ -188,6 +189,7 @@ fn state_roundtrip_and_auto_prune() {
             SessionProgress {
                 processed_run_ids: vec!["r".to_string()],
                 session_complete: true,
+                source_updated_at_secs: 1_000 + (60 - index) as u64,
             },
         );
     }
@@ -196,6 +198,7 @@ fn state_roundtrip_and_auto_prune() {
         SessionProgress {
             processed_run_ids: vec!["r1".to_string()],
             session_complete: false,
+            source_updated_at_secs: 0,
         },
     );
     let live: std::collections::BTreeSet<String> = state
@@ -213,12 +216,12 @@ fn state_roundtrip_and_auto_prune() {
         "未完成 NEVER 清"
     );
     assert!(
-        !loaded.sessions.contains_key("done-0.dataset"),
-        "最旧完整被裁"
+        loaded.sessions.contains_key("done-0.dataset"),
+        "按处理时间最新完整保留，即使 key 字典序最小"
     );
     assert!(
-        loaded.sessions.contains_key("done-59.dataset"),
-        "最新完整保留"
+        !loaded.sessions.contains_key("done-59.dataset"),
+        "按处理时间最旧完整被裁，即使 key 字典序最大"
     );
 
     // 纯 prune：盘上消失即时删
@@ -228,8 +231,23 @@ fn state_roundtrip_and_auto_prune() {
         SessionProgress {
             processed_run_ids: vec![],
             session_complete: false,
+            source_updated_at_secs: 0,
         },
     );
     let pruned = prune_stream_state(&with_vanished, &Default::default());
     assert!(pruned.sessions.is_empty());
+}
+
+/// 旧 checkpoint 缺 source_updated_at_secs 时按 0 兼容，不因反序列化失败重建。
+#[test]
+fn legacy_checkpoint_without_source_time_deserializes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("checkpoint.json"),
+        r#"{"sessions":{"s.dataset":{"processed_run_ids":["r1"],"session_complete":true}}}"#,
+    )
+    .unwrap();
+    let loaded = load_stream_state(dir.path()).unwrap();
+    assert_eq!(loaded.sessions["s.dataset"].source_updated_at_secs, 0);
+    assert_eq!(loaded.sessions["s.dataset"].processed_run_ids, vec!["r1"]);
 }
