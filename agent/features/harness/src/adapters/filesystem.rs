@@ -1,10 +1,11 @@
 //! 通用文件组件 adapter：`ComponentId` → 文件路径的注册表实现。
 //!
 //! - 落盘格式：YAML frontmatter（可选）+ markdown 正文；
-//! - `write()` 内建原子写（同目录 tmp + rename），rename 前完成校验；
+//! - `write()` 先递归解析 symlink，再直接写最终普通文件（保留 link 语义）；
 //! - 具体组件面（skills 目录扫描、overlay 多层链、guardrails 语义校验）
 //!   由各组件接入 issue 装配，本 adapter 只提供统一文件读写底座。
 
+use crate::adapters::file_write::write_component_text;
 use crate::application::ComponentRegistry;
 use crate::constants::ERROR_DOMAIN;
 use crate::domain::component::{ComponentContent, ComponentId};
@@ -104,43 +105,6 @@ pub fn parse_markdown_with_frontmatter(text: &str) -> Result<ComponentContent, H
     })
 }
 
-impl FilesystemComponentRegistry {
-    /// 原子写：同目录临时文件 + rename（读方 NEVER 看到半写状态）。
-    fn atomic_write(path: &Path, text: &str) -> Result<(), HarnessError> {
-        let parent_directory = path.parent().ok_or_else(|| {
-            HarnessError::storage(
-                ERROR_DOMAIN,
-                format!("组件路径缺少父目录：{}", path.display()),
-            )
-        })?;
-        std::fs::create_dir_all(parent_directory).map_err(|error| {
-            HarnessError::storage(
-                ERROR_DOMAIN,
-                format!("创建组件父目录失败 {}: {error}", path.display()),
-            )
-        })?;
-        let temp_path = path.with_extension("tmp");
-        std::fs::write(&temp_path, text).map_err(|error| {
-            HarnessError::storage(
-                ERROR_DOMAIN,
-                format!("写入临时文件失败 {}: {error}", temp_path.display()),
-            )
-        })?;
-        std::fs::rename(&temp_path, path).map_err(|error| {
-            HarnessError::storage(
-                ERROR_DOMAIN,
-                format!("原子替换组件文件失败 {}: {error}", path.display()),
-            )
-        })?;
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "组件已原子写入：{}",
-            path.display()
-        );
-        Ok(())
-    }
-}
-
 impl ComponentRegistry for FilesystemComponentRegistry {
     fn list(&self) -> Vec<ComponentId> {
         // list 语义 = 当前存在（文件在盘）的组件；已删除但保留注册的项不列出，
@@ -230,21 +194,33 @@ impl ComponentRegistry for FilesystemComponentRegistry {
         }
     }
 
-    /// 原始文本写（#2074：解析校验后原子写，保留原字节布局）。
+    /// 原始文本写（#2074：解析校验后写最终普通文件，保留原字节布局）。
     fn write_raw(&mut self, id: &ComponentId, text: &str) -> Result<(), HarnessError> {
         let content = parse_markdown_with_frontmatter(text)?;
         self.validate(id, &content)?;
         let path = self.path_of(id).ok_or_else(|| {
             HarnessError::invalid(ERROR_DOMAIN, format!("组件未注册文件路径：{id}"))
         })?;
-        Self::atomic_write(path, text)
+        let root = path.parent().ok_or_else(|| {
+            HarnessError::storage(
+                ERROR_DOMAIN,
+                format!("组件路径缺少父目录：{}", path.display()),
+            )
+        })?;
+        write_component_text(path, text, root)
     }
 
     fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError> {
         self.validate(id, content)?;
         let path = self.path_of(id).expect("validate 已确认路径存在");
         let text = Self::serialize_content(content)?;
-        Self::atomic_write(path, &text)
+        let root = path.parent().ok_or_else(|| {
+            HarnessError::storage(
+                ERROR_DOMAIN,
+                format!("组件路径缺少父目录：{}", path.display()),
+            )
+        })?;
+        write_component_text(path, &text, root)
     }
 
     fn delete(&mut self, id: &ComponentId) -> Result<(), HarnessError> {

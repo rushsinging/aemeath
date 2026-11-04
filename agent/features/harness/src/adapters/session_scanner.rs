@@ -5,8 +5,8 @@
 //! NEVER 依赖主进程内存态；流式逐成员解析，NEVER 全量载入。
 
 use crate::constants::{
-    EVIDENCE_EXCERPT_BOUND, SESSION_CONTEXT_NEIGHBOR_CHARS, SESSION_CONTEXT_SOURCE_CHARS,
-    SESSION_CONTEXT_TARGET_CHARS,
+    EVIDENCE_EXCERPT_BOUND, SESSION_CONTEXT_NEIGHBOR_TOKENS, SESSION_CONTEXT_SOURCE_TOKENS,
+    SESSION_CONTEXT_TARGET_TOKENS,
 };
 use crate::domain::evidence::{
     truncate_with_marker, EvidenceSourceRef, SessionContextExcerpt, SessionEventRecord,
@@ -366,13 +366,21 @@ impl SessionDatasetScanner {
             append_accepted_input_context(&member, &mut lines);
             append_outcome_context(&member, &mut lines);
             let budget = if selected_index == target_index {
-                SESSION_CONTEXT_TARGET_CHARS
+                SESSION_CONTEXT_TARGET_TOKENS
             } else {
-                SESSION_CONTEXT_NEIGHBOR_CHARS
+                SESSION_CONTEXT_NEIGHBOR_TOKENS
             };
-            segments.push(truncate_with_marker(&lines.join("\n"), budget));
+            segments.push(share::token_budget::truncate_to_token_budget(
+                &lines.join("\n"),
+                budget,
+                "…",
+            ));
         }
-        let text = truncate_with_marker(&segments.join("\n"), SESSION_CONTEXT_SOURCE_CHARS);
+        let text = share::token_budget::truncate_to_token_budget(
+            &segments.join("\n"),
+            SESSION_CONTEXT_SOURCE_TOKENS,
+            "…",
+        );
         Some(SessionContextExcerpt {
             source: source.clone(),
             text,

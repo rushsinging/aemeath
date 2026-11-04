@@ -1,13 +1,14 @@
 //! plugins 目录 registry（c8）：`plugins/<name>/plugin.md` 声明式规则
 //! 落盘 + 解析 + 校验（#2030）。plugin 是数据 NEVER 代码。
 
+use crate::adapters::file_write::write_component_text;
 use crate::adapters::filesystem::parse_markdown_with_frontmatter;
 use crate::application::ComponentRegistry;
 use crate::constants::{ERROR_DOMAIN, PLUGIN_MAX_BYTES};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::errors::HarnessError;
 use crate::domain::plugin::{validate_plugin_rule, PluginRule};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// 解析 plugin.md 正文为规则集（`## seam: <kind>` 分节 + 节内键值）。
 pub fn parse_plugin_rules(body: &str) -> Result<Vec<PluginRule>, HarnessError> {
@@ -111,23 +112,6 @@ impl PluginsDirectoryRegistry {
             name: ComponentName::new(name),
         }
     }
-
-    /// 原子写（tmp+rename）。
-    fn atomic_write(path: &Path, text: &str) -> Result<(), HarnessError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                HarnessError::storage(ERROR_DOMAIN, format!("创建目录失败：{error}"))
-            })?;
-        }
-        let temp_path = path.with_extension("md.tmp");
-        std::fs::write(&temp_path, text).map_err(|error| {
-            HarnessError::storage(ERROR_DOMAIN, format!("写临时文件失败：{error}"))
-        })?;
-        std::fs::rename(&temp_path, path).map_err(|error| {
-            HarnessError::storage(ERROR_DOMAIN, format!("原子替换失败：{error}"))
-        })?;
-        Ok(())
-    }
 }
 
 impl ComponentRegistry for PluginsDirectoryRegistry {
@@ -200,7 +184,7 @@ impl ComponentRegistry for PluginsDirectoryRegistry {
     fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError> {
         self.validate(id, content)?;
         let path = self.plugin_path(&id.name);
-        Self::atomic_write(&path, &content.body)
+        write_component_text(&path, &content.body, &self.directory)
     }
 
     fn delete(&mut self, id: &ComponentId) -> Result<(), HarnessError> {

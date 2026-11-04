@@ -6,6 +6,7 @@ mod constants;
 
 pub use crate::constants::COMPILED_VERSION;
 pub(crate) use crate::constants::LOG_TARGET;
+pub use crate::constants::{TOKENS_PER_CJK_CHAR, TOKENS_PER_LATIN_CHAR};
 
 /// 运行时版本号：优先读 `AEMEATH_VERSION` 环境变量（方便本地测试覆盖），
 /// fallback 到编译期注入的 [`COMPILED_VERSION`]。
@@ -40,6 +41,7 @@ pub mod string_idx;
 pub mod time;
 pub mod tools_vocab;
 
+pub mod token_budget;
 #[cfg(test)]
 #[path = "tools_vocab_tests.rs"]
 mod tools_vocab_tests;

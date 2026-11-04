@@ -6,8 +6,8 @@
 
 use crate::application::ComponentRegistry;
 use crate::constants::{
-    ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_CHARS,
-    RSI_OVERLAY_COMPONENT_BODY_BUDGET_CHARS,
+    ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS,
+    RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS,
 };
 use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
@@ -151,10 +151,10 @@ pub(crate) fn component_scope_label(id: &ComponentId) -> String {
 
 /// RSI 组件 body 预算。低于 runtime 注入预算，为标签包装保留余量；
 /// 超限 MUST 经 LLM 再压缩一轮，NEVER 硬截断。
-pub(crate) fn component_body_budget_chars(id: &ComponentId) -> usize {
+pub(crate) fn component_body_budget_tokens(id: &ComponentId) -> usize {
     match id.kind {
-        ComponentKind::SystemPromptOverlay => RSI_OVERLAY_COMPONENT_BODY_BUDGET_CHARS,
-        _ => RSI_BUILTIN_COMPONENT_BODY_BUDGET_CHARS,
+        ComponentKind::SystemPromptOverlay => RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS,
+        _ => RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS,
     }
 }
 
@@ -439,7 +439,7 @@ pub fn build_execution_prompt(
             serde_json::json!({
                 "id": id,
                 "scope": component_scope_label(id),
-                "body_budget_chars": component_body_budget_chars(id),
+                "body_budget_tokens": component_body_budget_tokens(id),
                 "frontmatter": content.frontmatter,
                 "body": content.body,
             })
@@ -464,8 +464,8 @@ pub fn build_execution_prompt(
   NEVER 枚举字段必填性/类型/示例，只写按错误与当前 schema 修正 payload
   的通用纪律。
 - **成本意识**：always-on 组件每轮付费，用最短篇幅表达完整语义；
-  guardrails/tool_guidance 正文预算 3800 字符，global overlay 预算
-  7800 字符；超预算会再压缩一轮，NEVER 硬截断。
+  guardrails/tool_guidance 正文预算 3800 tokens，global overlay 预算
+  7800 tokens；超预算会再压缩一轮，NEVER 硬截断。
 - 每条编辑的 reason MUST 引用该任务的 target_signal。
 
 编辑契约：
@@ -509,7 +509,10 @@ pub enum FixedComponentExecutionProposal {
     Propose {
         reason: String,
         evidence_refs: Vec<String>,
-        body: String,
+        #[serde(default)]
+        body: Option<String>,
+        #[serde(default)]
+        operations: Vec<crate::domain::changeset::PatchOperation>,
     },
     NoChange {
         reason: String,
@@ -581,11 +584,14 @@ pub fn build_block_prompt(
   能阻止它吗？」——不能就不要写。
 - **不破坏**：只改证据指向的部分；与证据无关的现有规则 MUST 原样保留
   （保留原有结构与有效条款，NEVER 顺手重写整篇）。
+- **大文件用 patch**：已有 AGENTS.md / CLAUDE.md 或其他渐进披露文件时，
+  优先输出 patch；old_string 或 anchor MUST 在正文中唯一且非空。只有新建
+  组件或短小正文才使用 upsert 完整正文。
 - **不冲突**：新规则不得与现有内容矛盾；与已有条款重复时只补差异部分。
 - **成本意识**：always-on 组件（guardrails/tool_guidance/overlay）每轮
   对话都要付费，越简洁越好——用最短的篇幅表达完整语义。
-- **正文预算**：guardrails/tool_guidance 正文预算 3800 字符，global overlay
-  预算 7800 字符；超预算时会被要求再压缩一轮，NEVER 通过硬截断交付。
+- **正文预算**：guardrails/tool_guidance 正文预算 3800 tokens，global overlay
+  预算 7800 tokens；超预算时会被要求再压缩一轮，NEVER 通过硬截断交付。
 
 改进时优先关注的失效模式（证据命中哪类就修哪类，未命中不臆测）：
 **证据中的每一类 repeated_failure 都应至少得到一条对应规则（除非现有规则
@@ -610,9 +616,11 @@ pub fn build_block_prompt(
   - 提案只携带要变更的组件（未提及的组件自动保持原样）
   - evidence_refs 必须非空，且每个 ref 都来自上方证据块（E0/E1…）；未知引用会作废整份提案
   - 任一条目校验失败会作废整份提案
+  - patch 的 old_string/anchor MUST 唯一且非空；patch 只改目标片段
 
-  只输出一个 JSON 对象，格式二选一：
+  只输出一个 JSON 对象，格式三选一：
   {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -1364,13 +1372,14 @@ async fn compact_block_proposal_budgets(
     for index in 0..change_set.edits.len() {
         let (component_id, draft, budget) = match &change_set.edits[index] {
             crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
-                let budget = component_body_budget_chars(id);
-                if content.body.chars().count() <= budget {
+                let budget = component_body_budget_tokens(id);
+                if share::token_budget::estimate_tokens(&content.body) <= budget {
                     continue;
                 }
                 (id.clone(), content.body.clone(), budget)
             }
-            crate::domain::changeset::ComponentEdit::Delete { .. } => continue,
+            crate::domain::changeset::ComponentEdit::Patch { .. }
+            | crate::domain::changeset::ComponentEdit::Delete { .. } => continue,
         };
         let prompt = format!(
             r#"你是 harness 组件压缩器。以下是超预算的完整组件草稿：
@@ -1379,7 +1388,7 @@ async fn compact_block_proposal_budgets(
 证据任务：{evidence_context}
 目标组件：{component_id}
 目标 scope：{component_scope}
-硬性预算：正文不超过 {budget} 字符。
+硬性预算：正文不超过 {budget} tokens。
 
 要求：
 - 再压缩一轮：合并重复规则、删除套话、保留可执行条件与动作；
@@ -1398,11 +1407,9 @@ async fn compact_block_proposal_budgets(
                 .await
                 .ok()?;
         let compacted = match parse_fixed_component_execution(&completion.text) {
-            Ok(FixedComponentExecutionProposal::Propose { body, .. })
-                if body.chars().count() <= budget =>
-            {
-                Some(body)
-            }
+            Ok(FixedComponentExecutionProposal::Propose {
+                body: Some(body), ..
+            }) if share::token_budget::estimate_tokens(&body) <= budget => Some(body),
             _ => None,
         };
         let Some(body) = compacted else {
@@ -1410,7 +1417,7 @@ async fn compact_block_proposal_budgets(
                 recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
                     block_index,
                     stage: "block_budget".to_string(),
-                    message: format!("压缩一轮后仍超过 {budget} 字符，整份提案作废"),
+                    message: format!("压缩一轮后仍超过 {budget} tokens，整份提案作废"),
                 });
             }
             return None;
@@ -1522,10 +1529,7 @@ async fn run_block(
             let components: Vec<String> = change_set
                 .edits
                 .iter()
-                .map(|edit| match edit {
-                    crate::domain::changeset::ComponentEdit::Upsert { id, .. }
-                    | crate::domain::changeset::ComponentEdit::Delete { id } => id.to_string(),
-                })
+                .map(|edit| edit.id().to_string())
                 .collect();
             if let Some(recorder) = recorder {
                 recorder.record(
@@ -1560,27 +1564,50 @@ async fn run_block(
                 // 不写 lesson、不推游标；预览行供 preview 文件。
                 let mut valid = true;
                 for edit in &change_set.edits {
-                    let (id, content) = match edit {
+                    let outcome = match edit {
                         crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
-                            (id, Some(content))
+                            registry.validate(id, content).map(|()| {
+                                preview_lines.push(render_dry_run_edit_summary(
+                                    registry,
+                                    id,
+                                    Some(content),
+                                    reason.as_str(),
+                                ));
+                            })
                         }
-                        crate::domain::changeset::ComponentEdit::Delete { id } => (id, None),
-                    };
-                    let outcome = match content {
-                        Some(content) => registry.validate(id, content),
-                        None => registry.read(id).map(|_| ()),
-                    };
-                    match outcome {
-                        Ok(()) => preview_lines.push(render_dry_run_edit_summary(
-                            registry,
-                            id,
-                            content,
-                            reason.as_str(),
-                        )),
-                        Err(error) => {
-                            valid = false;
-                            preview_lines.push(format!("[dry-run] 拒绝 {id}：{}", error.message()));
+                        crate::domain::changeset::ComponentEdit::Patch { id, operations } => {
+                            registry.read(id).and_then(|content| {
+                                let body = crate::domain::changeset::apply_patch_operations(
+                                    &content.body,
+                                    operations,
+                                )?;
+                                registry.validate(
+                                    id,
+                                    &crate::domain::component::ComponentContent {
+                                        frontmatter: content.frontmatter,
+                                        body,
+                                    },
+                                )?;
+                                preview_lines.push(format!(
+                                    "[dry-run] patch {id}：{} 个操作",
+                                    operations.len()
+                                ));
+                                Ok(())
+                            })
                         }
+                        crate::domain::changeset::ComponentEdit::Delete { id } => {
+                            registry.read(id).map(|_| {
+                                preview_lines.push(format!("[dry-run] delete {id}"));
+                            })
+                        }
+                    };
+                    if let Err(error) = outcome {
+                        valid = false;
+                        preview_lines.push(format!(
+                            "[dry-run] 拒绝 {}：{}",
+                            edit.id(),
+                            error.message()
+                        ));
                     }
                 }
                 return if valid {
@@ -1605,12 +1632,7 @@ async fn run_block(
             // 阻断采纳，但会丢失该次回滚能力）
             if let Some(version_store) = version_store {
                 for edit in &change_set.edits {
-                    let (id, action) = match edit {
-                        crate::domain::changeset::ComponentEdit::Upsert { id, .. } => {
-                            (id, "upsert")
-                        }
-                        crate::domain::changeset::ComponentEdit::Delete { id } => (id, "delete"),
-                    };
+                    let (id, action) = (edit.id(), edit.action());
                     if let Err(error) = version_store.capture(registry, id, cycle_ref, action) {
                         log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");
                     }
@@ -1621,12 +1643,23 @@ async fn run_block(
                     if let Some(recorder) = recorder {
                         for edit in &change_set.edits {
                             let (component, action, old_chars, new_chars) = match edit {
-                                crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
+                                crate::domain::changeset::ComponentEdit::Upsert {
+                                    id,
+                                    content,
+                                    ..
+                                } => {
                                     let old = registry
                                         .read(id)
                                         .map(|c| c.body.chars().count())
                                         .unwrap_or(0);
                                     (format!("{id}"), "upsert", old, content.body.chars().count())
+                                }
+                                crate::domain::changeset::ComponentEdit::Patch { id, .. } => {
+                                    let current = registry
+                                        .read(id)
+                                        .map(|c| c.body.chars().count())
+                                        .unwrap_or(0);
+                                    (format!("{id}"), "patch", current, current)
                                 }
                                 crate::domain::changeset::ComponentEdit::Delete { id } => {
                                     let old = registry
@@ -1725,10 +1758,7 @@ fn compose_evidence_by_component(
 
     let mut by_component = Vec::new();
     for edit in &change_set.edits {
-        let id = match edit {
-            crate::domain::changeset::ComponentEdit::Upsert { id, .. }
-            | crate::domain::changeset::ComponentEdit::Delete { id } => id,
-        };
+        let id = edit.id();
         let evidence: Vec<EvidenceBinding> = adoptions
             .iter()
             .filter(|adoption| &adoption.id == id)
@@ -1756,10 +1786,7 @@ fn record_adopted_lesson(
     evidence_for: &dyn Fn(&crate::domain::component::ComponentId) -> Vec<EvidenceBinding>,
 ) {
     for edit in &change_set.edits {
-        let (id, action) = match edit {
-            crate::domain::changeset::ComponentEdit::Upsert { id, .. } => (id, "upsert"),
-            crate::domain::changeset::ComponentEdit::Delete { id } => (id, "delete"),
-        };
+        let (id, action) = (edit.id(), edit.action());
         let evidence_bindings = {
             let bindings = evidence_for(id);
             if bindings.is_empty() {
@@ -2196,7 +2223,7 @@ pub async fn run_two_phase_cycle(
             serde_json::json!({
                 "id": id,
                 "scope": component_scope_label(id),
-                "body_budget_chars": component_body_budget_chars(id),
+                "body_budget_tokens": component_body_budget_tokens(id),
                 "frontmatter": content.frontmatter,
                 "body": content.body,
             })
@@ -2408,19 +2435,20 @@ pub async fn run_two_phase_cycle(
             })
             .collect::<Vec<_>>()
             .join("");
-        let body_budget = component_body_budget_chars(&component_id);
-        let existing_body_over_budget = content.body.chars().count() > body_budget;
+        let body_budget = component_body_budget_tokens(&component_id);
+        let existing_body_over_budget =
+            share::token_budget::estimate_tokens(&content.body) > body_budget;
         let preservation_requirement = if existing_body_over_budget {
             "- 当前正文已超过预算；第一任务是语义压缩，把既有规则收敛到预算内：\n  合并重复规则、删除套话、压缩表述，保留可执行条件与动作及必要语义；\n  若无法在不丢必要语义的前提下压入预算，选择 no_change。"
         } else {
             "- 正文必须保留与任务无关的既有规则。"
         };
         let execution_prompt = format!(
-            r#"你是 harness 组件执行器（固定组件）。目标组件由诊断阶段确定，你只能输出完整正文；NEVER 输出组件 id、action 或 change_set。
+            r#"你是 harness 组件执行器（固定组件）。目标组件由诊断阶段确定；你可以输出完整正文，或输出 patch operations。NEVER 输出组件 id、action 或 change_set。
 
 目标组件：{component_id}
 目标 scope：{component_scope}
-正文预算：{body_budget} 字符
+正文预算：{body_budget} tokens
 当前内容：
 {body}
 
@@ -2433,11 +2461,14 @@ pub async fn run_two_phase_cycle(
 - 不得把单项目经验写入 global，也不得把项目 A 内容写入项目 B；
 - 工具参数类任务 NEVER 复述或改写工具 schema，NEVER 枚举必填字段或
 示例；只写按错误与当前 schema 修正 payload 的通用纪律；
-- 输出必须是完整 body，不是 diff；超预算时会再压缩一轮，NEVER 硬截断。
+- 已有 AGENTS.md/CLAUDE.md 或其他渐进披露文件时，优先输出 operations patch；
+  old_string/anchor MUST 唯一且非空，只改目标片段，其余正文 MUST 原样保留；
+- 只有新建组件或短小正文才输出完整 body；完整 body 超预算时会再压缩一轮，
+  NEVER 硬截断。
 
-只输出一个 JSON 对象：
+只输出一个 JSON 对象，格式三选一：
 {{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<完整正文>"}}
-或：
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
 {{"decision":"no_change","reason":"<一句话>"}}
 不要输出 JSON 以外的任何文字。"#,
             component_scope = component_scope_label(&component_id),
@@ -2467,7 +2498,8 @@ pub async fn run_two_phase_cycle(
 
 上一轮执行应答解析失败：{error}。
 重新输出完整紧凑 JSON，并严格遵守：
-- body 不超过 {body_budget} 字符；
+- body 不超过 {body_budget} tokens；
+- 已有大文件优先输出 operations patch，old_string/anchor MUST 唯一；
 - 合并重复规则、删除套话，只保留可执行条件与动作；
 - NEVER 输出 Markdown、注释、转义换行以外的多余文字。"#
             );
@@ -2495,16 +2527,104 @@ pub async fn run_two_phase_cycle(
                 reason,
                 evidence_refs,
                 body,
+                operations,
             }) => {
                 if execution_evidence_refs_invalid(&evidence_refs, issues.len()) {
                     discarded += issues.len();
                     continue;
                 }
-                let mut final_body = body;
-                if final_body.chars().count() > component_body_budget_chars(&component_id) {
-                    let budget = component_body_budget_chars(&component_id);
-                    let compaction_prompt = format!(
-                        r#"你是 harness 组件压缩器。以下是超预算的完整组件草稿：
+                if !operations.is_empty() {
+                    let patched_body = match crate::domain::changeset::apply_patch_operations(
+                        &content.body,
+                        &operations,
+                    ) {
+                        Ok(body) => body,
+                        Err(error) => {
+                            if let Some(recorder) = recorder {
+                                recorder.record(
+                                    &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                        block_index,
+                                        stage: "two_phase_execution".to_string(),
+                                        message: error.message().chars().take(120).collect(),
+                                    },
+                                );
+                            }
+                            discarded += issues.len();
+                            continue;
+                        }
+                    };
+                    if share::token_budget::estimate_tokens(&patched_body)
+                        > component_body_budget_tokens(&component_id)
+                    {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                    block_index,
+                                    stage: "two_phase_execution_budget".to_string(),
+                                    message: "patch 后正文超过预算，整份提案作废".to_string(),
+                                },
+                            );
+                        }
+                        discarded += issues.len();
+                        continue;
+                    }
+                    let patched_content = ComponentContent {
+                        frontmatter: content.frontmatter.clone(),
+                        body: patched_body,
+                    };
+                    if let Err(error) = registry.validate(&component_id, &patched_content) {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                    block_index,
+                                    stage: "two_phase_execution".to_string(),
+                                    message: error.message().chars().take(120).collect(),
+                                },
+                            );
+                        }
+                        discarded += issues.len();
+                        continue;
+                    }
+                    if !cross_scope_duplicate_gate(
+                        &component_id,
+                        &patched_content.body,
+                        &component_contents,
+                        block_index,
+                        llm,
+                        recorder,
+                    )
+                    .await?
+                    {
+                        discarded += issues.len();
+                        continue;
+                    }
+                    (
+                        reason,
+                        crate::domain::changeset::ComponentEdit::Patch {
+                            id: component_id.clone(),
+                            operations,
+                        },
+                    )
+                } else {
+                    let Some(mut final_body) = body else {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                    block_index,
+                                    stage: "two_phase_execution".to_string(),
+                                    message: "propose 缺少 body 或 operations".to_string(),
+                                },
+                            );
+                        }
+                        discarded += issues.len();
+                        continue;
+                    };
+                    if share::token_budget::estimate_tokens(&final_body)
+                        > component_body_budget_tokens(&component_id)
+                    {
+                        let budget = component_body_budget_tokens(&component_id);
+                        let compaction_prompt = format!(
+                            r#"你是 harness 组件压缩器。以下是超预算的完整组件草稿：
 {draft}
 
 诊断任务：
@@ -2512,7 +2632,7 @@ pub async fn run_two_phase_cycle(
 
 目标组件：{component_id}
 目标 scope：{component_scope}
-硬性预算：正文不超过 {budget} 字符。
+硬性预算：正文不超过 {budget} tokens。
 
 要求：
 - 再压缩一轮：合并重复规则、删除套话、保留可执行条件与动作；
@@ -2524,80 +2644,89 @@ pub async fn run_two_phase_cycle(
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
-                        draft = final_body,
-                        component_scope = component_scope_label(&component_id),
-                    );
-                    let compaction_completion = complete_with_usage_event(
-                        llm,
-                        &compaction_prompt,
-                        "two_phase_execution_compaction",
-                        block_index,
-                        recorder,
-                    )
-                    .await?;
-                    let compacted =
-                        match parse_fixed_component_execution(&compaction_completion.text) {
-                            Ok(FixedComponentExecutionProposal::Propose {
-                                evidence_refs,
-                                body,
-                                ..
-                            }) => {
-                                if execution_evidence_refs_invalid(&evidence_refs, issues.len())
-                                    || body.chars().count() > budget
-                                {
-                                    None
-                                } else {
-                                    Some(body)
+                            draft = final_body,
+                            component_scope = component_scope_label(&component_id),
+                        );
+                        let compaction_completion = complete_with_usage_event(
+                            llm,
+                            &compaction_prompt,
+                            "two_phase_execution_compaction",
+                            block_index,
+                            recorder,
+                        )
+                        .await?;
+                        let compacted =
+                            match parse_fixed_component_execution(&compaction_completion.text) {
+                                Ok(FixedComponentExecutionProposal::Propose {
+                                    evidence_refs,
+                                    body: Some(body),
+                                    ..
+                                }) => {
+                                    if execution_evidence_refs_invalid(&evidence_refs, issues.len())
+                                        || share::token_budget::estimate_tokens(&body) > budget
+                                    {
+                                        None
+                                    } else {
+                                        Some(body)
+                                    }
                                 }
+                                _ => None,
+                            };
+                        let Some(compacted_body) = compacted else {
+                            if let Some(recorder) = recorder {
+                                recorder.record(
+                                    &crate::domain::events::RsiCycleEvent::ProposalRejected {
+                                        block_index,
+                                        stage: "two_phase_execution_budget".to_string(),
+                                        message: format!(
+                                            "压缩一轮后仍超过 {budget} tokens，整份提案作废"
+                                        ),
+                                    },
+                                );
                             }
-                            _ => None,
+                            discarded += issues.len();
+                            continue;
                         };
-                    let Some(compacted_body) = compacted else {
+                        final_body = compacted_body;
+                    }
+                    let new_content = ComponentContent {
+                        frontmatter: content.frontmatter.clone(),
+                        body: final_body,
+                    };
+                    if let Err(error) = registry.validate(&component_id, &new_content) {
                         if let Some(recorder) = recorder {
                             recorder.record(
                                 &crate::domain::events::RsiCycleEvent::ProposalRejected {
                                     block_index,
-                                    stage: "two_phase_execution_budget".to_string(),
-                                    message: format!(
-                                        "压缩一轮后仍超过 {budget} 字符，整份提案作废"
-                                    ),
+                                    stage: "two_phase_execution".to_string(),
+                                    message: error.message().chars().take(120).collect(),
                                 },
                             );
                         }
                         discarded += issues.len();
                         continue;
-                    };
-                    final_body = compacted_body;
-                }
-                let new_content = ComponentContent {
-                    frontmatter: content.frontmatter.clone(),
-                    body: final_body,
-                };
-                if let Err(error) = registry.validate(&component_id, &new_content) {
-                    if let Some(recorder) = recorder {
-                        recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
-                            block_index,
-                            stage: "two_phase_execution".to_string(),
-                            message: error.message().chars().take(120).collect(),
-                        });
                     }
-                    discarded += issues.len();
-                    continue;
+                    if !cross_scope_duplicate_gate(
+                        &component_id,
+                        &new_content.body,
+                        &component_contents,
+                        block_index,
+                        llm,
+                        recorder,
+                    )
+                    .await?
+                    {
+                        discarded += issues.len();
+                        continue;
+                    }
+                    (
+                        reason,
+                        crate::domain::changeset::ComponentEdit::Upsert {
+                            id: component_id.clone(),
+                            content: new_content,
+                        },
+                    )
                 }
-                if !cross_scope_duplicate_gate(
-                    &component_id,
-                    &new_content.body,
-                    &component_contents,
-                    block_index,
-                    llm,
-                    recorder,
-                )
-                .await?
-                {
-                    discarded += issues.len();
-                    continue;
-                }
-                (reason, new_content)
             }
             Ok(FixedComponentExecutionProposal::NoChange { .. }) => {
                 no_change += 1;
@@ -2615,12 +2744,9 @@ pub async fn run_two_phase_cycle(
                 continue;
             }
         };
-        let (reason, new_content) = execution;
+        let (reason, edit) = execution;
         let change_set = ChangeSet {
-            edits: vec![crate::domain::changeset::ComponentEdit::Upsert {
-                id: component_id.clone(),
-                content: new_content.clone(),
-            }],
+            edits: vec![edit.clone()],
         };
         let evidence_bindings: Vec<EvidenceBinding> = signal_ids
             .iter()
@@ -2668,7 +2794,8 @@ pub async fn run_two_phase_cycle(
         }
 
         if let Some(version_store) = version_store {
-            if let Err(error) = version_store.capture(registry, &component_id, &cycle_ref, "upsert")
+            if let Err(error) =
+                version_store.capture(registry, &component_id, &cycle_ref, edit.action())
             {
                 log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");
             }
@@ -2676,11 +2803,15 @@ pub async fn run_two_phase_cycle(
         match apply_change_set(registry, &change_set) {
             Ok(applied) => {
                 if let Some(recorder) = recorder {
+                    let new_chars = registry
+                        .read(&component_id)
+                        .map(|content| content.body.chars().count())
+                        .unwrap_or(0);
                     recorder.record(&crate::domain::events::RsiCycleEvent::EditApplied {
                         component: component_id.to_string(),
-                        action: "upsert".to_string(),
+                        action: edit.action().to_string(),
                         old_chars: content.body.chars().count(),
-                        new_chars: new_content.body.chars().count(),
+                        new_chars,
                     });
                 }
                 record_adopted_lesson(
@@ -2695,7 +2826,9 @@ pub async fn run_two_phase_cycle(
                 for edit in applied {
                     adoption_records.push(crate::domain::task::AdoptionRecord {
                         id: match edit {
-                            AppliedEdit::Upserted { id } | AppliedEdit::Deleted { id } => id,
+                            AppliedEdit::Upserted { id }
+                            | AppliedEdit::Patched { id }
+                            | AppliedEdit::Deleted { id } => id,
                         },
                         reason: reason.clone(),
                         evidence: evidence_bindings.clone(),
@@ -2822,7 +2955,9 @@ pub async fn run_improvement_cycle(
             for edit in &accepted.edits {
                 adoption_records.push(crate::domain::task::AdoptionRecord {
                     id: match edit {
-                        AppliedEdit::Upserted { id } | AppliedEdit::Deleted { id } => id.clone(),
+                        AppliedEdit::Upserted { id }
+                        | AppliedEdit::Patched { id }
+                        | AppliedEdit::Deleted { id } => id.clone(),
                     },
                     reason: accepted.reason.clone(),
                     evidence: accepted.evidence.clone(),
@@ -3070,7 +3205,7 @@ pub(crate) fn select_similar_candidate_pairs(
     });
     scored.truncate(limit.max(1));
 
-    let mut remaining_context_chars = crate::constants::COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS;
+    let mut remaining_context_tokens = crate::constants::COMPOSE_SIMILAR_CONTEXT_TOTAL_TOKENS;
     let mut context_cache: std::collections::HashMap<
         String,
         Option<crate::domain::evidence::SessionContextExcerpt>,
@@ -3082,13 +3217,13 @@ pub(crate) fn select_similar_candidate_pairs(
                 &left.source,
                 context_reader,
                 &mut context_cache,
-                &mut remaining_context_chars,
+                &mut remaining_context_tokens,
             );
             let right_context = take_source_context(
                 &right.source,
                 context_reader,
                 &mut context_cache,
-                &mut remaining_context_chars,
+                &mut remaining_context_tokens,
             );
             SimilarCandidatePair {
                 left_label: left.label,
@@ -3153,8 +3288,8 @@ fn take_source_context(
     if *remaining == 0 || context.text.trim().is_empty() {
         return None;
     }
-    let text = crate::domain::evidence::truncate_with_marker(&context.text, *remaining);
-    *remaining = remaining.saturating_sub(text.chars().count());
+    let text = share::token_budget::truncate_to_token_budget(&context.text, *remaining, "…");
+    *remaining = remaining.saturating_sub(share::token_budget::estimate_tokens(&text));
     Some(text)
 }
 
@@ -3355,17 +3490,24 @@ pub async fn run_compose_phase(
                 };
             if dry_run {
                 for edit in &change_set.edits {
-                    let (id, content) = match edit {
+                    match edit {
                         crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
-                            (id, Some(content))
+                            preview_lines.push(format!(
+                                "[dry-run][Compose] {}",
+                                render_dry_run_edit_summary(registry, id, Some(content), &reason)
+                                    .trim_start_matches("[dry-run] ")
+                            ));
                         }
-                        crate::domain::changeset::ComponentEdit::Delete { id } => (id, None),
-                    };
-                    preview_lines.push(format!(
-                        "[dry-run][Compose] {}",
-                        render_dry_run_edit_summary(registry, id, content, &reason)
-                            .trim_start_matches("[dry-run] ")
-                    ));
+                        crate::domain::changeset::ComponentEdit::Patch { id, operations } => {
+                            preview_lines.push(format!(
+                                "[dry-run][Compose] patch {id}: {} operations",
+                                operations.len()
+                            ));
+                        }
+                        crate::domain::changeset::ComponentEdit::Delete { id } => {
+                            preview_lines.push(format!("[dry-run][Compose] delete {id}"));
+                        }
+                    }
                 }
                 "仲裁修正（将采纳）"
             } else {
@@ -3373,14 +3515,7 @@ pub async fn run_compose_phase(
                 // 阻断采纳，但会丢失该次回滚能力）
                 if let Some(version_store) = version_store {
                     for edit in &change_set.edits {
-                        let (id, action) = match edit {
-                            crate::domain::changeset::ComponentEdit::Upsert { id, .. } => {
-                                (id, "upsert")
-                            }
-                            crate::domain::changeset::ComponentEdit::Delete { id } => {
-                                (id, "delete")
-                            }
-                        };
+                        let (id, action) = (edit.id(), edit.action());
                         if let Err(error) = version_store.capture(registry, id, &cycle_ref, action)
                         {
                             log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");

@@ -8,7 +8,7 @@
 - **子命令**：`aemeath rsi serve`（对齐 `aemeath systemone serve` 先例），UDS socket 控制面路径按 `specs/3.9-config-compat.md` 运行时路径约定落在 `~/.agents/` 下（实施时定具体文件名）。
 - **常驻**：daemon 启动后**NEVER 空闲自动退出**；停止只能经控制面显式 `stop`（或进程级终止）。启动方式：用户/服务管理器手动启动，或首次 Manual 触发时拉起——拉起后常驻。
 - **崩溃隔离**：daemon 崩溃不影响任何主会话；下一次定时周期或 Manual 触发时重新拉起。主进程对 daemon 的依赖仅为可选控制面，NEVER 因 RSI 失败阻塞用户 turn。
-- **落盘职责**：daemon 持有 registry **完整读写路径**——validate + 原子写盘（tmp+rename）都在 daemon 侧完成。主进程只做 run 边界热载检测（detect + 防御性复检）与 Remind 通知（见 02 分片）。原子 rename 保证 daemon 写与主进程读永不读到半写状态：读方看到的一定是完整旧版或完整新版，无需跨进程锁。
+- **落盘职责**：daemon 持有 registry **完整读写路径**——validate + symlink 安全写盘都在 daemon 侧完成。主进程只做 run 边界热载检测（detect + 防御性复检）与 Remind 通知（见 02 分片）。写入前 MUST 捕获 component version snapshot；checkpoint 仅记录已处理 run，不承担组件内容备份。
 
 ## 2. 控制协议（UDS，帧式 JSON）——仅控制面
 
@@ -45,7 +45,7 @@ enum RsiControlAck {
 
 1. **材料分块**：按组件分组读入（每块 = 一个/一组组件 + 与其相关的行为投影切片 + 相关 Active lessons）；跨会话行为投影按时间窗口切块。
 2. **分块提案**：LLM 逐块处理——每块独立产出局部 ChangeSet（每条 edit 附证据引用与理由，结构化输出 + JSON 兜底，对齐反思解析修复链路经验：空输出/解析失败重试与修复上限）。single-phase 兼容路径使用短 evidence ref；two-phase 则先由宿主路由候选组件，再由诊断阶段选择固定目标。
-3. **分块落盘**：每块局部 ChangeSet 独立 validate → 成功即原子写盘（块级采纳）→ 回写该块经验；**单块失败只作废该块**，NEVER 拖垮整个周期（区别于交互提案的整份作废：定时批量场景块级幂等优先）。two-phase 执行只写诊断指定组件，NEVER 输出 component id/action。
+3. **分块落盘**：每块局部 ChangeSet 独立 validate → 成功即写盘（块级采纳）→ 回写该块经验；**单块失败只作废该块**，NEVER 拖垮整个周期（区别于交互提案的整份作废：定时批量场景块级幂等优先）。two-phase 执行只写诊断指定组件，NEVER 输出 component id/action。
 4. 周期结束记录汇总（采纳/作废/无变更计数）入经验库与日志。
 
 变更对会话的生效路径：daemon 落盘 → 活跃会话在下一 run 边界热载检测到变更 → 防御性复检 → 生效/回退 → **Remind 通知 LLM**（复用 GuidanceReloadPolicy 通道，告知组件已更新）。
@@ -76,7 +76,7 @@ enum RsiControlAck {
 - 跨 scope 重复治理（#2168）：规则单元经 CJK bigram 召回后，由结构化 LLM 判定 `duplicate / specialization / conflict / distinct`；duplicate/conflict 的新提案被宿主拒绝，specialization/distinct 放行。周期开始时自动 reconciliation：按权威落点删除 global/project 重复行，并将证据只来自单项目的 global 专属规则下沉到对应 project overlay。
 - 项目 overlay 组件由宿主从同项目 canonical session 的 workspace 快照反解项目根，按运行时注入优先级映射 `AGENTS.md` 优先、`CLAUDE.md` 兜底；两者都缺失时不注册、不自动创建。
 - prose 组件 NEVER 复述或改写工具 schema（字段必填性、类型、枚举、示例）。工具 schema 由宿主在每次 provider 请求中权威携带；参数类改进只沉淀「读取错误 → 核对当前 schema → 修正 payload → 禁止无效原样重试」的通用纪律。
-- RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 字符、overlay 7800 字符。初稿超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。既有组件正文已超预算时，执行阶段的第一任务就是语义压缩（合并重复规则、删除套话、保留条件与动作），NEVER 要求模型携带超长原文逐字重写。
+- RSI 落盘 body 预算低于运行时注入预算：guardrails/tool-guidance 3800 tokens、overlay 7800 tokens。初稿超预算时 MUST 追加一次 LLM 压缩；仍超预算则整份提案作废，NEVER 硬截断交付。既有组件正文已超预算时，执行阶段的第一任务就是语义压缩（合并重复规则、删除套话、保留条件与动作），NEVER 要求模型携带超长原文逐字重写。
 - LLM 稳定性契约：空文本响应最多重试一次，两次调用 usage 聚合且 `llm_call.attempts=2`；连续空文本显式失败。TwoPhase 诊断/执行 JSON 解析失败各重试一次紧凑 JSON；诊断重试仍失败则周期失败，执行重试仍失败则该任务作废，NEVER 把解析失败伪装成 no_issue 或空结果。
 
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）

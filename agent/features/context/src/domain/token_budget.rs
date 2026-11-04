@@ -1,75 +1,14 @@
-//! Token estimation service for context management
+//! Token estimation service for context management.
 //!
-//! Provides CJK-aware token estimation for messages and text content.
-//! Note: This uses estimation algorithms, not actual tokenizers.
-//! For more accurate results, consider integrating tiktoken.
+//! 单文本 token 成本统一由 `share::token_budget` 提供；本模块只保留依赖
+//! message/tool schema 形状的上下文聚合估算与窗口预算策略。
 
 pub use super::constants::MIN_EFFECTIVE_WINDOW;
 pub(crate) use super::constants::{
     COMPACT_TAIL_WINDOW_PERCENT, FALLBACK_PREVIOUS_SUMMARY_CAP, MAX_OUTPUT_WINDOW_RATIO_CAP,
-    TOKENS_PER_CJK_CHAR, TOKENS_PER_LATIN_CHAR,
 };
 use share::message::{ContentBlock, Message};
-
-// ── 预算与估算函数 ──────────────────────────────────────────────
-// （历史遗留的 TokenEstimation / ContextUsage 包装类型无任何消费者，
-// 已在 #1486 修复中删除；以下为仍在使用的纯函数。）
-
-/// Estimate token count for a string.
-/// CJK-aware：中文字符 ≈ 0.6 token/字，英文字符 ≈ 0.3 token/字。
-pub fn estimate_tokens(text: &str) -> usize {
-    estimate_tokens_with_char_rates(text, TOKENS_PER_CJK_CHAR, TOKENS_PER_LATIN_CHAR)
-}
-
-/// Estimate tokens with custom per-character rates（CJK / 非 CJK）。
-pub fn estimate_tokens_with_char_rates(
-    text: &str,
-    tokens_per_cjk_char: f64,
-    tokens_per_latin_char: f64,
-) -> usize {
-    let mut cjk_chars = 0usize;
-    let mut latin_chars = 0usize;
-
-    for ch in text.chars() {
-        if is_cjk_char(ch) {
-            cjk_chars += 1;
-        } else {
-            latin_chars += 1;
-        }
-    }
-
-    let cjk_rate = tokens_per_cjk_char.clamp(0.1, 2.0);
-    let latin_rate = tokens_per_latin_char.clamp(0.1, 2.0);
-    ((cjk_chars as f64) * cjk_rate + (latin_chars as f64) * latin_rate).ceil() as usize
-}
-
-/// 兼容旧调用：`bytes_per_token` 换算为拉丁字符比率 `1 / bytes_per_token`，
-/// CJK 仍用默认 0.6。新代码应优先 [`estimate_tokens`] /
-/// [`estimate_tokens_with_char_rates`]。生产路径走默认比率；仅历史测试引用。
-#[cfg(test)]
-pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
-    let ratio = bytes_per_token.clamp(2.0, 6.0);
-    estimate_tokens_with_char_rates(text, TOKENS_PER_CJK_CHAR, 1.0 / ratio)
-}
-
-/// Check if a character is in CJK Unicode ranges.
-fn is_cjk_char(ch: char) -> bool {
-    matches!(ch,
-        '\u{4E00}'..='\u{9FFF}'   // CJK Unified Ideographs
-        | '\u{3400}'..='\u{4DBF}' // CJK Unified Ideographs Extension A
-        | '\u{F900}'..='\u{FAFF}' // CJK Compatibility Ideographs
-        | '\u{3000}'..='\u{303F}' // CJK Symbols and Punctuation
-        | '\u{FF00}'..='\u{FFEF}' // Fullwidth Forms
-        | '\u{AC00}'..='\u{D7AF}' // Hangul Syllables
-        | '\u{3040}'..='\u{309F}' // Hiragana
-        | '\u{30A0}'..='\u{30FF}' // Katakana
-    )
-}
-
-/// Estimate tokens for JSON content（与文本相同：按字符比率粗估）。
-pub fn estimate_json_tokens(text: &str) -> usize {
-    estimate_tokens(text)
-}
+pub use share::token_budget::{estimate_json_tokens, estimate_tokens};
 
 /// Estimate total tokens in a message list
 pub fn estimate_messages_tokens(messages: &[Message]) -> usize {

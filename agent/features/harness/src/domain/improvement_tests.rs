@@ -308,7 +308,7 @@ fn block_prompt_carries_project_and_global_scope_contract() {
 fn block_prompt_states_component_body_budget() {
     let chunk = vec![(id("alpha"), body_content("old"))];
     let prompt = build_block_prompt(&chunk, &[], &evidence_with_signal());
-    assert!(prompt.contains("正文预算 3800 字符"));
+    assert!(prompt.contains("正文预算 3800 tokens"));
     assert!(prompt.contains("超预算时会被要求再压缩一轮"));
     assert!(prompt.contains("NEVER 通过硬截断"));
 }
@@ -827,11 +827,11 @@ fn compose_similarity_context_total_budget_is_bounded() {
         .iter()
         .flat_map(|pair| [pair.left_context.as_deref(), pair.right_context.as_deref()])
         .flatten()
-        .map(|text| text.chars().count())
+        .map(share::token_budget::estimate_tokens)
         .sum();
     assert!(
-        total <= crate::constants::COMPOSE_SIMILAR_CONTEXT_TOTAL_CHARS,
-        "相似上下文总预算超限：{total}"
+        total <= crate::constants::COMPOSE_SIMILAR_CONTEXT_TOTAL_TOKENS,
+        "相似上下文总 token 预算超限：{total}"
     );
 }
 

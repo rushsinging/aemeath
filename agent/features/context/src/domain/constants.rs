@@ -7,11 +7,6 @@ pub(crate) const HEURISTIC_CALIBRATION_RANGE: std::ops::RangeInclusive<f64> = 0.
 pub(crate) const PROVIDER_USAGE_TRUST_RATIO_RANGE: std::ops::RangeInclusive<f64> =
     HEURISTIC_CALIBRATION_RANGE;
 
-/// 中文字符（CJK）粗估：约 0.6 token / 字。
-pub(crate) const TOKENS_PER_CJK_CHAR: f64 = 0.6;
-
-/// 英文字符（拉丁等非 CJK）粗估：约 0.3 token / 字。
-pub(crate) const TOKENS_PER_LATIN_CHAR: f64 = 0.3;
 /// fallback/护栏中 previous_summary 允许嵌入的最大字符数（#1486）。
 ///
 /// 多次 compact 时 previous_summary 若被全文 verbatim 嵌入会线性累加，

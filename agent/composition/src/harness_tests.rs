@@ -78,10 +78,16 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
     let agents_root = tempfile::tempdir().expect("agents tempdir");
     let project_a = tempfile::tempdir().expect("project a");
     let project_b = tempfile::tempdir().expect("project b");
+    let project_c = tempfile::tempdir().expect("project c");
     let segment_a = "0123456789abcdef";
     let segment_b = "fedcba9876543210";
+    let segment_c = "aaaaaaaaaaaaaaaa";
     let session_dir = agents_root.path().join("session");
-    for (segment, root) in [(segment_a, project_a.path()), (segment_b, project_b.path())] {
+    for (segment, root) in [
+        (segment_a, project_a.path()),
+        (segment_b, project_b.path()),
+        (segment_c, project_c.path()),
+    ] {
         std::fs::create_dir_all(session_dir.join(segment)).unwrap();
         let canonical = serde_json::json!({
             "workspace": {
@@ -117,8 +123,13 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
         kind: ComponentKind::SystemPromptOverlay,
         name: harness::ComponentName::new(segment_b),
     };
+    let overlay_c = harness::ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: harness::ComponentName::new(segment_c),
+    };
     assert_eq!(paths[&overlay_a], project_a.path().join("AGENTS.md"));
     assert_eq!(paths[&overlay_b], project_b.path().join("CLAUDE.md"));
+    assert_eq!(paths[&overlay_c], project_c.path().join("AGENTS.md"));
 
     let registry = super::wire_component_registry_under(
         agents_root.path(),
@@ -129,6 +140,7 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
     let registry = registry.try_lock().expect("lock");
     assert!(registry.list().contains(&overlay_a));
     assert!(registry.list().contains(&overlay_b));
+    assert!(registry.list().contains(&overlay_c));
     assert_eq!(
         registry
             .read(&overlay_a)
@@ -144,6 +156,18 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
             .body
             .trim(),
         "# B CLAUDE"
+    );
+    assert_eq!(
+        registry
+            .read(&overlay_c)
+            .expect("read missing project C")
+            .body
+            .trim(),
+        "# Project"
+    );
+    assert!(
+        !project_c.path().join("AGENTS.md").exists(),
+        "虚拟项目 overlay NEVER 在读取时写盘"
     );
 }
 
