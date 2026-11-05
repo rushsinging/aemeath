@@ -111,23 +111,25 @@ pub enum RsiRunExit {
 struct ProductionRsiLlm {
     client: LlmClient,
     model: ModelInfo,
+    reasoning: ReasoningLevel,
+    max_tokens: u32,
 }
 
 impl ProductionRsiLlm {
     async fn invoke_text(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
-        // 结构化 JSON 输出任务显式低思考档（对齐反思链路教训：高思考
-        // 档会把输出预算耗在 thinking 上导致正文为空）——取模型阶梯
-        // 最低档；空阶梯 fallback Off。
-        let reasoning = self
-            .model
-            .supported_reasoning
-            .first()
-            .copied()
-            .unwrap_or(ReasoningLevel::Off);
+        let reasoning = self.reasoning;
+        log::info!(
+            target: crate::LOG_TARGET,
+            "RSI LLM request: model={} reasoning={:?} max_tokens={} prompt_chars={}",
+            self.model.model,
+            reasoning,
+            self.max_tokens,
+            prompt.chars().count()
+        );
         let request = ProviderRequestData::new(
             self.model.model.clone(),
             [share::message::Message::user(prompt.to_string())],
-            16384,
+            self.max_tokens,
             reasoning,
         );
         let response = self
@@ -145,6 +147,19 @@ impl ProductionRsiLlm {
                 _ => None,
             })
             .collect::<String>();
+        if text.trim().is_empty() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "RSI LLM empty text: model={} ok={} stop_reason={:?} effective_reasoning={:?} usage={:?} blocks={} prompt_chars={}",
+                self.model.model,
+                response.ok,
+                response.stop_reason,
+                response.effective_reasoning,
+                response.token_usage,
+                response.output.len(),
+                prompt.chars().count()
+            );
+        }
         let usage = response
             .token_usage
             .map(|usage| RsiLlmUsage {
@@ -204,9 +219,8 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
             Some(resolved.source_config.base_url.clone())
         },
         model: resolved.model.id.clone(),
-        max_tokens: resolved.model.max_tokens,
-        // #2032 阶梯装配：requested=false 会被连续化档位判为 effective 超
-        // 限；声明支持并按模型阶梯取最低档请求（结构化输出低思考）。
+        max_tokens: config.harness.rsi.max_tokens,
+        // 结构化 JSON 输出使用 RSI 独立思考档与输出预算。
         reasoning: true,
         reasoning_config: None,
         timeout_secs: 300,
@@ -227,12 +241,17 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        supported_reasoning: vec![ReasoningLevel::Off],
+        supported_reasoning: ReasoningLevel::ALL.to_vec(),
         server_effort_map: Vec::new(),
         context_limit: Some(128 * 1024),
-        output_limit: Some(4096),
+        output_limit: Some(config.harness.rsi.max_tokens as usize),
     };
-    Ok(Arc::new(ProductionRsiLlm { client, model }))
+    Ok(Arc::new(ProductionRsiLlm {
+        client,
+        model,
+        reasoning: config.harness.rsi.reasoning,
+        max_tokens: config.harness.rsi.max_tokens,
+    }))
 }
 
 #[cfg(test)]
