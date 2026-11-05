@@ -66,6 +66,15 @@ pub(crate) const RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS: usize = 3800;
 /// RSI 可落盘的 overlay body 预算（token；低于 runtime overlay 注入预算）。
 pub(crate) const RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS: usize = 7800;
 
+/// 组件维护审计：rule 数量上限。
+pub(crate) const COMPONENT_AUDIT_MAX_RULES: usize = 40;
+
+/// 组件维护审计：单条 rule token 上限。
+pub(crate) const COMPONENT_AUDIT_MAX_RULE_TOKENS: usize = 600;
+
+/// 组件维护审计：body token 达到预算的百分比阈值。
+pub(crate) const COMPONENT_AUDIT_BODY_BUDGET_PERCENT: usize = 70;
+
 /// checkpoint 落盘文件名（`~/.agents/harness/checkpoint.json`，#2049）。
 pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";
 

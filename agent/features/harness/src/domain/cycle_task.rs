@@ -471,6 +471,55 @@ impl RsiTask for HarnessRsiCycleTask {
                 summary_parts.push(compose_outcome.summary);
             }
         }
+        // 组件维护：确定性审计触发后，即使本周期无采纳也清理已有膨胀。
+        let mut audit_findings = Vec::new();
+        for id in registry.list() {
+            let Ok(content) = registry.read(&id) else {
+                continue;
+            };
+            if let Some(finding) = crate::domain::component_audit::audit_component(&id, &content) {
+                if let Some(recorder) = &self.recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::ComponentAudit {
+                        component: id.to_string(),
+                        triggers: finding
+                            .triggers
+                            .iter()
+                            .map(|trigger| match trigger {
+                                crate::domain::component_audit::AuditTrigger::RuleCount => {
+                                    "rule_count"
+                                }
+                                crate::domain::component_audit::AuditTrigger::OversizedRule => {
+                                    "oversized_rule"
+                                }
+                                crate::domain::component_audit::AuditTrigger::BodyBudget => {
+                                    "body_budget"
+                                }
+                            })
+                            .map(str::to_string)
+                            .collect(),
+                        rule_count: finding.rule_count,
+                        body_tokens: finding.body_tokens,
+                        oversized_rules: finding.oversized_rules.len(),
+                    });
+                }
+                audit_findings.push(finding);
+            }
+        }
+        if !audit_findings.is_empty() {
+            if let Ok(maintenance) = crate::domain::maintenance::run_maintenance_compose_phase(
+                registry,
+                self.llm.as_ref(),
+                &audit_findings,
+                self.dry_run,
+                &mut preview_lines,
+                self.recorder.as_deref(),
+                self.version_store.as_deref(),
+            )
+            .await
+            {
+                summary_parts.extend(maintenance);
+            }
+        }
         if summary_parts.is_empty() {
             return Ok(crate::domain::task::CycleOutcome {
                 summary: "无待处理证据块".to_string(),

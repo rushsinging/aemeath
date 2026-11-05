@@ -123,6 +123,22 @@ pub enum RsiCycleEvent {
     ComposeResult {
         label: String,
     },
+    ComponentAudit {
+        component: String,
+        triggers: Vec<String>,
+        rule_count: usize,
+        body_tokens: usize,
+        oversized_rules: usize,
+    },
+    MaintenanceComposeResult {
+        component: String,
+        action: String,
+        before_tokens: usize,
+        after_tokens: usize,
+        before_rules: usize,
+        after_rules: usize,
+        reason: String,
+    },
     LessonRecorded {
         lesson_id: String,
         signal: String,

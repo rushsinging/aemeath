@@ -778,7 +778,7 @@ fn validate_block_proposal_signals(
 }
 
 /// 调用 LLM 并记录 token/耗时事件；usage 缺失时字段为 null，NEVER 伪造。
-async fn complete_with_usage_event(
+pub(crate) async fn complete_with_usage_event(
     llm: &dyn RsiLlmPort,
     prompt: &str,
     stage: &str,
