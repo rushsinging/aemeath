@@ -599,6 +599,11 @@ fn harness_rsi_defaults() {
     assert_eq!(config.harness.rsi.chunk_max_components, 8);
     assert_eq!(config.harness.rsi.evidence_max_runs_per_cycle, 50);
     assert_eq!(config.harness.rsi.evidence_block_runs, 5);
+    assert_eq!(
+        config.harness.rsi.reasoning,
+        crate::reasoning::ReasoningLevel::Low
+    );
+    assert_eq!(config.harness.rsi.max_tokens, 65_536);
 }
 
 #[test]
@@ -629,6 +634,8 @@ fn harness_rsi_patch_merges_fields() {
                 evidence_max_runs_per_cycle: Some(10),
                 evidence_block_runs: Some(3),
                 execution_mode: Some(crate::config::RsiExecutionMode::DiagnoseOnly),
+                reasoning: Some(crate::reasoning::ReasoningLevel::Minimal),
+                max_tokens: Some(8_192),
             }),
         }),
         ..Default::default()
@@ -647,6 +654,11 @@ fn harness_rsi_patch_merges_fields() {
         merged.harness.rsi.execution_mode,
         crate::config::RsiExecutionMode::DiagnoseOnly
     );
+    assert_eq!(
+        merged.harness.rsi.reasoning,
+        crate::reasoning::ReasoningLevel::Minimal
+    );
+    assert_eq!(merged.harness.rsi.max_tokens, 8_192);
 }
 
 #[test]

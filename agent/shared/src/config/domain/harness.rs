@@ -22,6 +22,14 @@ pub(crate) fn default_evidence_block_runs() -> usize {
     5
 }
 
+pub(crate) fn default_rsi_reasoning() -> crate::reasoning::ReasoningLevel {
+    crate::reasoning::ReasoningLevel::Low
+}
+
+pub(crate) fn default_rsi_max_tokens() -> u32 {
+    65_536
+}
+
 /// RSI 改进执行模式（#2078 拍板修订）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -81,6 +89,14 @@ pub struct RsiConfig {
     /// diagnose_only（每块仅诊断 + 跨块汇总，不落盘，执行由 #2092 派发）。
     #[serde(default)]
     pub execution_mode: RsiExecutionMode,
+
+    /// RSI LLM 思考档；结构化 JSON 输出默认低档，避免 thinking 吃光输出预算。
+    #[serde(default = "default_rsi_reasoning")]
+    pub reasoning: crate::reasoning::ReasoningLevel,
+
+    /// RSI LLM 单次输出预算（tokens）。
+    #[serde(default = "default_rsi_max_tokens")]
+    pub max_tokens: u32,
 }
 
 impl Default for RsiConfig {
@@ -94,6 +110,8 @@ impl Default for RsiConfig {
             evidence_max_runs_per_cycle: default_evidence_max_runs_per_cycle(),
             evidence_block_runs: default_evidence_block_runs(),
             execution_mode: RsiExecutionMode::default(),
+            reasoning: default_rsi_reasoning(),
+            max_tokens: default_rsi_max_tokens(),
         }
     }
 }

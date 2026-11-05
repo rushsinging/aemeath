@@ -356,6 +356,10 @@ pub struct RsiConfigPatch {
     pub evidence_block_runs: Option<usize>,
     #[serde(default)]
     pub execution_mode: Option<crate::config::RsiExecutionMode>,
+    #[serde(default)]
+    pub reasoning: Option<crate::reasoning::ReasoningLevel>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -1015,6 +1019,12 @@ pub(crate) fn apply_harness_patch(
         }
         if let Some(v) = rsi.execution_mode {
             base.rsi.execution_mode = v;
+        }
+        if let Some(v) = rsi.reasoning {
+            base.rsi.reasoning = v;
+        }
+        if let Some(v) = rsi.max_tokens {
+            base.rsi.max_tokens = v;
         }
     }
     base
