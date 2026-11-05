@@ -604,6 +604,8 @@ pub struct SessionCommitPlan {
     reuse_fallbacks: Vec<SessionMemberBytes>,
     preserves_unloaded_steps: bool,
     project_dir: Option<storage::SafePathSegmentData>,
+    /// Session 来源（#2160 P2）：`SubRun` 时落盘到 `subruns/` 子空间。
+    origin: Option<super::SessionOrigin>,
 }
 
 impl SessionCommitPlan {
@@ -926,6 +928,7 @@ impl SessionCommitPlan {
             reuse_fallbacks: Vec::new(),
             preserves_unloaded_steps: false,
             project_dir: super::project_layout::session_project_dir(after),
+            origin: after.metadata.origin,
         })
     }
 
@@ -933,6 +936,11 @@ impl SessionCommitPlan {
     /// session workspace 缺失（无 Captured 快照）时为 `None`，写路径退回平铺 key。
     pub fn project_dir(&self) -> Option<&storage::SafePathSegmentData> {
         self.project_dir.as_ref()
+    }
+
+    /// Session 来源：`Some(SubRun)` 表示该提交属于 sub run 存档。
+    pub fn origin(&self) -> Option<super::SessionOrigin> {
+        self.origin
     }
 
     pub fn changed_members(&self) -> &[SessionMemberBytes] {

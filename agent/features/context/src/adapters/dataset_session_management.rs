@@ -135,6 +135,11 @@ impl SessionManagementPort for DatasetSessionManagement {
                 continue;
             };
             if let Ok(session) = self.load_canonical(Some(&project_dir), &session_id).await {
+                // #2160 P2：sub run 存档不进 session 枚举（路径已在 subruns/ 下被
+                // 上面的段数解析跳过，这里按元数据再兜一层）。
+                if session.metadata.origin == Some(crate::domain::session::SessionOrigin::SubRun) {
+                    continue;
+                }
                 if segments.len() == 1 && !session_matches_project(&session, project) {
                     continue;
                 }

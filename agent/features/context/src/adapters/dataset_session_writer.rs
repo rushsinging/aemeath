@@ -157,7 +157,7 @@ impl DatasetCanonicalSessionWriter {
         expected_revision: u64,
         mut plan: SessionCommitPlan,
     ) -> Result<(), String> {
-        let dataset_key = dataset_key_for_plan(session_id, plan.project_dir())
+        let dataset_key = dataset_key_for_plan(session_id, plan.project_dir(), plan.origin())
             .map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
@@ -191,7 +191,7 @@ impl DatasetCanonicalSessionWriter {
     }
 
     async fn commit(&self, session_id: &str, changes: SessionCommitPlan) -> Result<(), String> {
-        let dataset_key = dataset_key_for_plan(session_id, changes.project_dir())
+        let dataset_key = dataset_key_for_plan(session_id, changes.project_dir(), changes.origin())
             .map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
@@ -255,9 +255,41 @@ pub(super) fn session_dataset_key_scoped(
     )
 }
 
+/// sub run 存档的 key（#2160 P2）：`<project-dir>/subruns/<sub-id>.dataset`。
+///
+/// 独立 dataset 保证 manifest 与父 session 解耦、可单独清理；`subruns` 段使
+/// `list_for_project` 的「按 project/session 两段解析」天然跳过它。
+pub(super) fn subrun_dataset_key_scoped(
+    project_dir: &SafePathSegmentData,
+    sub_run_id: &str,
+) -> Result<DatasetKeyData, StorageError> {
+    DatasetKeyData::new(
+        StorageNamespaceData::Session,
+        vec![
+            project_dir.clone(),
+            SafePathSegmentData::from_str("subruns")?,
+            SafePathSegmentData::from_str(&format!("{sub_run_id}.dataset"))?,
+        ],
+    )
+}
+
 /// session 写入位置的 key：workspace 捕获了 project identity 时落到
 /// project 目录段下，否则退回平铺（无归属信息的 session 维持旧布局）。
+///
+/// `origin = SubRun` 的存档改落 `subruns/` 子空间（#2160 P2）。
 fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKeyData, StorageError> {
+    if session.metadata.origin == Some(crate::domain::session::SessionOrigin::SubRun) {
+        return match session_project_dir(session) {
+            Some(project_dir) => subrun_dataset_key_scoped(&project_dir, &session.id),
+            None => DatasetKeyData::new(
+                StorageNamespaceData::Session,
+                vec![
+                    SafePathSegmentData::from_str("subruns")?,
+                    SafePathSegmentData::from_str(&format!("{}.dataset", session.id))?,
+                ],
+            ),
+        };
+    }
     match session_project_dir(session) {
         Some(project_dir) => session_dataset_key_scoped(&project_dir, &session.id),
         None => session_dataset_key(&session.id),
@@ -268,7 +300,20 @@ fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKeyData,
 fn dataset_key_for_plan(
     session_id: &str,
     project_dir: Option<&SafePathSegmentData>,
+    origin: Option<crate::domain::session::SessionOrigin>,
 ) -> Result<DatasetKeyData, StorageError> {
+    if origin == Some(crate::domain::session::SessionOrigin::SubRun) {
+        return match project_dir {
+            Some(project_dir) => subrun_dataset_key_scoped(project_dir, session_id),
+            None => DatasetKeyData::new(
+                StorageNamespaceData::Session,
+                vec![
+                    SafePathSegmentData::from_str("subruns")?,
+                    SafePathSegmentData::from_str(&format!("{session_id}.dataset"))?,
+                ],
+            ),
+        };
+    }
     match project_dir {
         Some(project_dir) => session_dataset_key_scoped(project_dir, session_id),
         None => session_dataset_key(session_id),

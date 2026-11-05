@@ -1673,6 +1673,8 @@
         "SessionRestoreStepData",
         "SessionResumeLoad",
         "SessionRevision",
+        "SubRunContextFactory",
+        "SubRunOriginData",
         "SystemBlock",
         "SystemPromptAssembly",
         "TaskProgressReminderData",

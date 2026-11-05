@@ -1044,3 +1044,98 @@ impl SessionRepository for CanonicalSessionRepository {
         Ok(())
     }
 }
+
+// ── Sub run 存档工厂（#2160 P2） ────────────────────────────────────
+
+/// 构建 sub run 的可持久化上下文。
+///
+/// 与 main 的唯一差异是**来源标记与落盘位置**：`origin = SubRun` 让 writer 把
+/// 存档写进 `<project>/subruns/<sub-id>.dataset`，从而与父 session 解耦、
+/// 不进 session 枚举。其余（append 契约、revision、receipts、终态 finalize）
+/// 完全复用 main 的 `CanonicalSessionRepository`，不新增第二套写入协议。
+pub struct SubRunContextFactory {
+    writer: Arc<dyn CanonicalSessionWriter>,
+    task_persist: Arc<dyn task::TaskPersist>,
+    workspace_persist: Arc<dyn project::WorkspaceWriter>,
+    skill_catalog: Option<Arc<dyn tools::published::skill::SkillCatalogPort>>,
+    query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
+    instructions_loaded: Option<Arc<dyn share::instructions::InstructionsLoadedNotifier>>,
+}
+
+/// sub run 存档的元数据（父归属 + P3 预留槽位）。
+#[derive(Debug, Clone, Default)]
+pub struct SubRunOriginData {
+    pub parent_session_id: String,
+    pub parent_run_id: String,
+    /// P3 由 workflow adaptor 填充；`None` 表示非 workflow 派发。
+    pub workflow_id: Option<String>,
+    pub node_id: Option<String>,
+    pub attempt: Option<u32>,
+}
+
+impl SubRunContextFactory {
+    pub fn new(
+        writer: Arc<dyn CanonicalSessionWriter>,
+        task_persist: Arc<dyn task::TaskPersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
+    ) -> Self {
+        Self {
+            writer,
+            task_persist,
+            workspace_persist,
+            skill_catalog: None,
+            query_factory: None,
+            instructions_loaded: None,
+        }
+    }
+
+    pub fn with_skill_catalog(
+        mut self,
+        catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
+        query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
+    ) -> Self {
+        self.skill_catalog = Some(catalog);
+        self.query_factory = Some(query_factory);
+        self
+    }
+
+    pub fn with_instructions_loaded(
+        mut self,
+        notifier: Arc<dyn share::instructions::InstructionsLoadedNotifier>,
+    ) -> Self {
+        self.instructions_loaded = Some(notifier);
+        self
+    }
+
+    /// 构建一个空的 sub session 上下文（后续 append 由 runtime 的 Step 提交驱动）。
+    pub fn build(
+        &self,
+        sub_session_id: &str,
+        origin: &SubRunOriginData,
+        workspace: crate::domain::session::PersistedWorkspaceContext,
+    ) -> ContextPorts {
+        let mut session = CanonicalSession::empty(sub_session_id.to_owned());
+        session.metadata.origin = Some(crate::domain::session::SessionOrigin::SubRun);
+        session.metadata.parent_session_id = Some(origin.parent_session_id.clone());
+        session.metadata.parent_run_id = Some(origin.parent_run_id.clone());
+        session.metadata.workflow_id = origin.workflow_id.clone();
+        session.metadata.node_id = origin.node_id.clone();
+        session.metadata.attempt = origin.attempt;
+        session.workspace = crate::domain::session::SessionSnapshotState::Captured(workspace);
+
+        let factory = MainContextFactory {
+            task_persist: Some(self.task_persist.clone()),
+            workspace_persist: Some(self.workspace_persist.clone()),
+            writer: self.writer.clone(),
+            skill_catalog: self.skill_catalog.clone(),
+            query_factory: self.query_factory.clone(),
+            instructions_loaded: self.instructions_loaded.clone(),
+        };
+        factory.build(
+            Arc::new(RwLock::new(Arc::new(session))),
+            // sub 不读写 Memory：与 #1385 的 NoOpMemory 口径一致。
+            Arc::new(RwLock::new(Arc::new(memory::api::NoOpMemory))),
+            Arc::new(tokio::sync::Mutex::new(())),
+        )
+    }
+}
