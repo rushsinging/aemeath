@@ -1139,3 +1139,14 @@ impl SubRunContextFactory {
         )
     }
 }
+
+impl crate::ports::SubRunContextFactoryPort for SubRunContextFactory {
+    fn build(
+        &self,
+        sub_session_id: &str,
+        origin: &SubRunOriginData,
+        workspace: share::session_types::PersistedWorkspaceContext,
+    ) -> ContextPorts {
+        SubRunContextFactory::build(self, sub_session_id, origin, workspace)
+    }
+}

@@ -230,6 +230,21 @@ pub(crate) async fn from_args_with_gateways(
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
     );
+    // #2160 P2：main 与 sub 存档共用同一 canonical writer（同一 append 契约），
+    // sub 由元数据 origin=SubRun 决定落 subruns/ 子空间。
+    let canonical_writer: Arc<context::DatasetCanonicalSessionWriter> =
+        Arc::new(context::DatasetCanonicalSessionWriter::new(session_dataset));
+    let sub_run_context_factory: Arc<dyn context::SubRunContextFactoryPort> = Arc::new(
+        context::SubRunContextFactory::new(
+            canonical_writer.clone(),
+            task_wiring.persist(),
+            workspace.persist(),
+        )
+        .with_skill_catalog(
+            skill_catalog.clone(),
+            Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
+        ),
+    );
     // 后台一次性迁移存量平铺 session 到 project 目录段布局：串行逐个加载
     // （内存峰值 = 单个 session），不阻塞装配与用户消息；失败由下次启动自愈。
     {}
@@ -354,21 +369,17 @@ pub(crate) async fn from_args_with_gateways(
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::MainContextFactory::new(Arc::new(
-                context::DatasetCanonicalSessionWriter::new(session_dataset),
-            ))
-            .with_skill_catalog(
-                skill_catalog.clone(),
-                Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
-            )
-            .with_persistence(task_wiring.persist(), workspace.persist())
-            // 指令加载通知端口：Context 组装系统提示时触发，Runtime 实现派发。
-            .with_instructions_loaded(Arc::new(
-                runtime::HookInstructionsNotifier::new(
+            context::MainContextFactory::new(canonical_writer.clone())
+                .with_skill_catalog(
+                    skill_catalog.clone(),
+                    Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
+                )
+                .with_persistence(task_wiring.persist(), workspace.persist())
+                // 指令加载通知端口：Context 组装系统提示时触发，Runtime 实现派发。
+                .with_instructions_loaded(Arc::new(runtime::HookInstructionsNotifier::new(
                     hook_runner.clone(),
                     workspace.read().current_workspace_root(),
-                ),
-            )),
+                ))),
         ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)
@@ -438,6 +449,8 @@ pub(crate) async fn from_args_with_gateways(
             tool_assembly.workflow_probe.clone(),
             tool_assembly.workflow_reset.clone(),
         )
+        // #2163 P2：sub run 全程 canonical 落盘（与 workflow 开关无关）。
+        .with_sub_run_context_factory(sub_run_context_factory)
         // #2142：装配 compact 模型解析器——主 Run 的 manual/自动压缩经它按轮
         // 解析 LLM 绑定（未配置跟随会话模型；解析失败回退本地压缩并 warn）。
         .with_compact_resolver(std::sync::Arc::new(runtime::CompactModelResolver::new(

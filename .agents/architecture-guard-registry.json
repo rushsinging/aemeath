@@ -1674,6 +1674,7 @@
         "SessionResumeLoad",
         "SessionRevision",
         "SubRunContextFactory",
+        "SubRunContextFactoryPort",
         "SubRunOriginData",
         "SystemBlock",
         "SystemPromptAssembly",

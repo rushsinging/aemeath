@@ -52,6 +52,7 @@ pub use domain::session::{
     SessionRestoreStepData,
 };
 pub use ports::SessionManagementPort;
+pub use ports::SubRunContextFactoryPort;
 
 // 跨 crate 测试支撑（cfg test / dev）。
 #[cfg(any(test, feature = "dev"))]
