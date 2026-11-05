@@ -84,3 +84,17 @@ pub trait SessionManagementPort: crate::sealed::Sealed + Send + Sync {
         project: &ProjectIdentityData,
     ) -> Result<(), SessionManagementError>;
 }
+
+/// Sub run 存档上下文工厂端口（#2160 P2）。
+///
+/// Runtime 只依赖本端口：`None` 时 sub run 走 in-memory 上下文（现状），
+/// `Some` 时由 context 侧构建带 canonical writer 的上下文，实现 sub 全程落盘。
+/// 与 `workflow.enabled` 无关——sub 落盘是默认行为。
+pub trait SubRunContextFactoryPort: Send + Sync {
+    fn build(
+        &self,
+        sub_session_id: &str,
+        origin: &crate::adapters::SubRunOriginData,
+        workspace: share::session_types::PersistedWorkspaceContext,
+    ) -> crate::ports::context_port::ContextPorts;
+}

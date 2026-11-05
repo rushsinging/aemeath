@@ -28,7 +28,9 @@ pub use atomic_blob_session_management::AtomicBlobSessionManagement;
 #[cfg(test)]
 pub(crate) use canonical_session::CanonicalSessionRepository;
 pub(crate) use canonical_session::CanonicalSessionWriter;
-pub use canonical_session::{MainContextFactory, NoOpCanonicalSessionWriter};
+pub use canonical_session::{
+    MainContextFactory, NoOpCanonicalSessionWriter, SubRunContextFactory, SubRunOriginData,
+};
 pub use dataset_session_management::DatasetSessionManagement;
 pub(crate) use dataset_session_reader::DatasetSessionReader;
 pub use dataset_session_writer::DatasetCanonicalSessionWriter;

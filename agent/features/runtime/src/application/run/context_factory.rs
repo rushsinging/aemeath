@@ -208,6 +208,7 @@ impl RuntimeContextFactory {
                 compact_model_resolver: None,
                 workflow_probe,
                 workflow_reset,
+                sub_run_context_factory: None,
             },
             provider_factory: None,
             skill_catalog: None,
@@ -219,6 +220,15 @@ impl RuntimeContextFactory {
     /// [`CompactModelResolver`](crate::application::client::CompactModelResolver)
     /// 后经本方法注入，主 Run 的 manual/自动压缩经它按轮解析 LLM 绑定。
     /// 消费型 builder：须在工厂被 `Arc` 共享前调用。
+    /// 装配 Sub run 存档工厂（#2163 P2）：sub run 全程 canonical 落盘。
+    pub fn with_sub_run_context_factory(
+        mut self,
+        factory: std::sync::Arc<dyn context::SubRunContextFactoryPort>,
+    ) -> Self {
+        self.services.sub_run_context_factory = Some(factory);
+        self
+    }
+
     pub fn with_compact_resolver(
         mut self,
         resolver: std::sync::Arc<crate::application::client::CompactModelResolver>,
@@ -491,7 +501,7 @@ impl RuntimeContextFactory {
 
     fn select_context(
         &self,
-        _request: &RunCreationRequest,
+        request: &RunCreationRequest,
         bindings: &RunCreationBindings,
         session: &SessionResolution,
         workspace: &WorkspaceSelection,
@@ -505,6 +515,28 @@ impl RuntimeContextFactory {
             .access
             .as_ref()
             .ok_or(RunCreationError::ContextAssembly)?;
+        // #2160 P2：装配了 Sub run 存档工厂时，sub run 复用 main 的 canonical
+        // append 契约落盘（子空间 dataset）；未装配时保持 in-memory。
+        if let Some(factory) = self.services.sub_run_context_factory.as_ref() {
+            let parent = bindings.parent().ok_or(RunCreationError::ContextAssembly)?;
+            let origin = context::SubRunOriginData {
+                parent_session_id: parent.context().skill_load_session_id().to_owned(),
+                parent_run_id: request
+                    .parent()
+                    .map(|facts| facts.run_id().to_string())
+                    .unwrap_or_default(),
+                workflow_id: None,
+                node_id: None,
+                attempt: None,
+            };
+            return Ok(ContextSelection {
+                ports: factory.build(
+                    session.snapshot.session_id(),
+                    &origin,
+                    workspace.persist().snapshot(),
+                ),
+            });
+        }
         let skill_catalog = self
             .skill_catalog
             .as_ref()

@@ -135,6 +135,11 @@ impl SessionManagementPort for DatasetSessionManagement {
                 continue;
             };
             if let Ok(session) = self.load_canonical(Some(&project_dir), &session_id).await {
+                // #2160 P2：sub run 存档不进 session 枚举（路径已在 subruns/ 下被
+                // 上面的段数解析跳过，这里按元数据再兜一层）。
+                if session.metadata.origin == Some(crate::domain::session::SessionOrigin::SubRun) {
+                    continue;
+                }
                 if segments.len() == 1 && !session_matches_project(&session, project) {
                     continue;
                 }
@@ -206,13 +211,29 @@ impl SessionManagementPort for DatasetSessionManagement {
         project: &share::session_types::ProjectIdentityData,
     ) -> Result<(), SessionManagementError> {
         self.load_for_project(id, project).await?;
-        let dataset_key = super::dataset_session_writer::session_dataset_key(id)
+        // 按 project 分目录布局与旧平铺布局都要尝试删除：既有会话可能落在任一种。
+        let project_dir = crate::domain::session::project_dir_segment(project);
+        let scoped_key =
+            super::dataset_session_writer::session_dataset_key_scoped(&project_dir, id)
+                .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        let flat_key = super::dataset_session_writer::session_dataset_key(id)
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
-        let outcome = self
+        let mut outcome = self
             .dataset
-            .delete_all_generations(&dataset_key, storage::DeleteOptionsData::default())
+            .delete_all_generations(&scoped_key, storage::DeleteOptionsData::default())
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        let flat_outcome = self
+            .dataset
+            .delete_all_generations(&flat_key, storage::DeleteOptionsData::default())
+            .await
+            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        if !outcome.deleted_primary() && !outcome.deleted_previous() {
+            outcome = flat_outcome;
+        }
+        // #2163 P2：级联删除该 session 名下的 sub run 存档（`subruns/<id>/…`）。
+        // 删除失败不静默吞掉：父 session 已删时返回错误，由调用方决定重试。
+        self.delete_subruns_for(id).await?;
         let legacy_outcome = self.legacy.delete_for_project(id, project).await.err();
         if !outcome.deleted_primary() && !outcome.deleted_previous() && legacy_outcome.is_some() {
             return Err(SessionManagementError::NotFound(id.to_string()));
@@ -223,3 +244,34 @@ impl SessionManagementPort for DatasetSessionManagement {
 
 // #2146 密封解锁。
 impl crate::sealed::Sealed for DatasetSessionManagement {}
+
+impl DatasetSessionManagement {
+    /// 删除 `subruns/<parent_session_id>/` 下的全部 sub run dataset。
+    ///
+    /// key 形态：`[<project>, "subruns", <parent_session_id>, "<sub>.dataset"]`。
+    /// 按段数（4）与第 3 段匹配父 session；幂等（无匹配即无操作）。
+    async fn delete_subruns_for(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<(), SessionManagementError> {
+        let dataset_keys = self
+            .dataset
+            .list_datasets(StorageNamespaceData::Session)
+            .await
+            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        for dataset_key in dataset_keys {
+            let segments = dataset_key.segments();
+            if segments.len() != 4
+                || segments[1].as_str() != "subruns"
+                || segments[2].as_str() != parent_session_id
+            {
+                continue;
+            }
+            self.dataset
+                .delete_all_generations(&dataset_key, storage::DeleteOptionsData::default())
+                .await
+                .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        }
+        Ok(())
+    }
+}

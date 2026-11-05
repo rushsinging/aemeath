@@ -44,4 +44,4 @@ pub use management::{session_matches_project, SessionManagementError, SessionRes
 pub(crate) use project_layout::project_dir_segment;
 pub use project_layout::session_project_dir;
 pub use restore::{SessionRestore, SessionRestoreStepData};
-pub use types::{extract_project_name, new_session_id, SessionMetadata};
+pub use types::{extract_project_name, new_session_id, SessionMetadata, SessionOrigin};
