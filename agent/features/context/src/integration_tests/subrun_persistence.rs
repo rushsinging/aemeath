@@ -74,7 +74,7 @@ async fn subrun_session_writes_into_subruns_subspace() {
 
     // 子空间 key 可读。
     dataset
-        .read_manifest(&key(&[&project, "subruns", "ses_sub1.dataset"]))
+        .read_manifest(&key(&[&project, "subruns", "ses_main", "ses_sub1.dataset"]))
         .await
         .expect("subrun manifest must exist under subruns/");
 
@@ -135,4 +135,32 @@ async fn subrun_session_excluded_from_project_list() {
         .expect("list for project");
     assert_eq!(listed.len(), 1, "sub run 不得出现在 session 枚举中");
     assert_eq!(listed[0].id, "ses_main");
+}
+
+#[tokio::test]
+async fn deleting_parent_session_cascades_to_subruns() {
+    use crate::SessionManagementPort;
+
+    let root = tempfile::tempdir().expect("temp root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let blob = storage::wire_file_system_blob(root.path()).expect("blob adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let main = main_session("ses_main");
+    let sub = sub_session("ses_sub", "ses_main");
+    let project = project_segment(&main);
+    writer.save_initial(&main).await.expect("main persists");
+    writer.save_initial(&sub).await.expect("sub persists");
+
+    let management = crate::DatasetSessionManagement::new(dataset.clone(), blob);
+    management
+        .delete_for_project("ses_main", &identity())
+        .await
+        .expect("delete main session");
+
+    let sub_key = key(&[&project, "subruns", "ses_main", "ses_sub.dataset"]);
+    let manifest = dataset.read_manifest(&sub_key).await.expect("read sub key");
+    assert!(
+        manifest.members().is_empty(),
+        "父 session 删除必须级联清理 sub run 存档"
+    );
 }
