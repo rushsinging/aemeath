@@ -4,9 +4,9 @@
 use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
+use config::ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 use config::{
-    ConfigChangeData, ConfigReader, ConfigSubscriptionData, ConfigUpdateData, ConfigWriter,
-    PreparedConfigUpdateData, ProjectConfigParticipant,
+    ConfigChangeData, ConfigSubscriptionData, ConfigUpdateData, PreparedConfigUpdateData,
 };
 use memory::api::{MemoryOpener, MemoryPort, ProjectMemoryKey};
 use project::WorkspaceReader;

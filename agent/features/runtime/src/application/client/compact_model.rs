@@ -121,7 +121,7 @@ struct CachedCompactBinding {
 
 /// Compact 模型解析器；见模块文档。
 pub struct CompactModelResolver {
-    config: Arc<dyn config::ConfigReader>,
+    config: Arc<dyn config::ports::ConfigReader>,
     factory: Arc<dyn ProviderFactory>,
     session_model: SessionModelSlotData,
     cache: Mutex<Option<CachedCompactBinding>>,
@@ -129,7 +129,7 @@ pub struct CompactModelResolver {
 
 impl CompactModelResolver {
     pub fn new(
-        config: Arc<dyn config::ConfigReader>,
+        config: Arc<dyn config::ports::ConfigReader>,
         factory: Arc<dyn ProviderFactory>,
         session_model: SessionModelSlotData,
     ) -> Self {

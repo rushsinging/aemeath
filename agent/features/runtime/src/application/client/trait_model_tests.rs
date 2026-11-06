@@ -1,5 +1,5 @@
 use super::*;
-use config::ConfigReader;
+use config::ports::ConfigReader;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;

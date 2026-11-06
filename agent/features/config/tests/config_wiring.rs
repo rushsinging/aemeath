@@ -1,4 +1,4 @@
-use config::{wire_config_override_store, ConfigWriter};
+use config::wire_config_override_store;
 
 #[tokio::test]
 async fn wiring_reads_runtime_override_from_injected_native_store() {
@@ -11,8 +11,9 @@ async fn wiring_reads_runtime_override_from_injected_native_store() {
     let first = config::wire_project_config(project.path(), store.clone())
         .await
         .expect("wire config with injected store");
+    // #1866 B3：service() 已删——测试经 writer() 行为面写入。
     first
-        .service()
+        .writer()
         .update(config::ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::AllowAll,
         })

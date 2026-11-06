@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, RwLock as StdRwLock};
 
-use config::{ConfigReader, ProjectConfigParticipant};
+use config::ports::{ConfigReader, ProjectConfigParticipant};
 use context::session::CanonicalSession;
 use context::MainContextFactory;
 use context::SessionManagementError;

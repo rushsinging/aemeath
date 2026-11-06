@@ -576,6 +576,19 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "Skill wiring is invoked only by the Composition Root (#1294)",
       "tracking_issue": 1067
+    },
+    {
+      "id": "construction.config.wire-connect",
+      "symbol": "wire_connect",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition",
+        "agent/testing/testkit"
+      ],
+      "guard": "construction.cross-bc",
+      "reason": "#1866 A1：Connect 域装配唯一入口（catalog/系统信息/全局 UA/版本 + commit/directory 适配器全内聚）。",
+      "tracking_issue": 1866
     }
   ],
   "entries": [],
@@ -1340,7 +1353,8 @@
         "runtime_resolution.rs",
         "runtime_resolution_tests.rs",
         "user_agent.rs",
-        "user_agent_tests.rs"
+        "user_agent_tests.rs",
+        "connect_wiring.rs"
       ],
       "reason": "F-3：config Hexagonal 层目录与顶层文件白名单（#1022 矩阵）；catalog/connect/core/gateway/runtime_resolution/user_agent 为 Connect 向导与 UA resolver 模块（#1457）",
       "profile": "fast"
@@ -1590,11 +1604,10 @@
         "ConfigChangeCauseData",
         "ConfigChangeData",
         "ConfigFieldData",
-        "ConfigReader",
         "ConfigRefreshOutcomeData",
         "ConfigSubscriptionData",
         "ConfigUpdateData",
-        "ConfigWriter",
+        "ConfigWiring",
         "GlobalConfigConnectStore",
         "GlobalConfigDocument",
         "GlobalConfigRevision",
@@ -1602,10 +1615,15 @@
         "PreparedConfigUpdateData",
         "PreparedProjectConfigData",
         "ProjectConfigLocationData",
-        "ProjectConfigParticipant",
         "is_persist_conflict",
         "resolve_provider_runtime",
-        "resolve_provider_runtime_for_selection"
+        "resolve_provider_runtime_for_selection",
+        "wire_config_override_store",
+        "wire_connect",
+        "wire_global_connect_store",
+        "wire_project_config",
+        "wire_project_config_with_agents_dir",
+        "wire_project_config_with_cli"
       ],
       "reason": "F-2：config crate 根窄 façade（#1706 DDD 五类判据：命令/事件/值对象/端口/工厂；协议模块 connect/form/catalog/ports 为子发布语言）",
       "profile": "fast"

@@ -6,7 +6,8 @@
 use crate::application::loop_engine::chat::config_reload::check_config_changes;
 use crate::application::loop_engine::chat::snapshot_registry::SourceSnapshotRegistry;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeStreamEvent};
-use config::{ConfigReader, ConfigRefreshOutcomeData};
+use config::ports::ConfigReader;
+use config::ConfigRefreshOutcomeData;
 
 /// Turn 边界配置与 Prompt source 变更检测结果。
 pub(crate) struct TurnBoundaryConfigOutcome {

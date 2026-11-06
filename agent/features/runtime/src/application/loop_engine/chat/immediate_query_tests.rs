@@ -3,7 +3,8 @@
 use super::*;
 use crate::application::loop_engine::chat::events::RuntimeStreamEvent;
 use crate::ports::SessionQueryPort;
-use config::{ConfigReader, ConfigRefreshOutcomeData};
+use config::ports::ConfigReader;
+use config::ConfigRefreshOutcomeData;
 use sdk::{ChatInputEvent, ModelSummary, ReflectionHistoryView, SdkError, SessionItemList};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::error::DomainError;

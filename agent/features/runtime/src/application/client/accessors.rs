@@ -139,8 +139,8 @@ pub struct SessionRuntime {
     pub session_switch: Arc<crate::application::client::session_switch::SessionSwitchCoordinator>,
 
     // ── Config ──
-    pub config_query: Arc<dyn config::ConfigReader>,
-    pub config_writer: Arc<dyn config::ConfigWriter>,
+    pub config_query: Arc<dyn config::ports::ConfigReader>,
+    pub config_writer: Arc<dyn config::ports::ConfigWriter>,
     pub session_management: Arc<dyn context::SessionManagementPort>,
 
     // ── Model switching ──
@@ -214,8 +214,8 @@ impl SessionRuntime {
         session_state: Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
         workspace: project::Workspace,
         session_switch: Arc<crate::application::client::session_switch::SessionSwitchCoordinator>,
-        config_query: Arc<dyn config::ConfigReader>,
-        config_writer: Arc<dyn config::ConfigWriter>,
+        config_query: Arc<dyn config::ports::ConfigReader>,
+        config_writer: Arc<dyn config::ports::ConfigWriter>,
         session_management: Arc<dyn context::SessionManagementPort>,
         provider_factory: Arc<dyn crate::ports::ProviderFactory>,
         model_state: SessionModelState,

@@ -4,11 +4,11 @@
 //!
 //! | 类别 | 实体 | 消费者 |
 //! |---|---|---|
-//! | 命令 | `ConfigUpdateData`（SetModel/SetPermissionMode/SetMemoryConfig）、`CliConfigInputData` | composition、context、runtime、sdk |
-//! | 事件 | `ConfigChangeData`、`ConfigChangeCauseData`、`ConfigSubscriptionData`、`ConfigRefreshOutcomeData` | cli、context、runtime、sdk |
-//! | 值对象 | `ConfigFieldData`、`ProjectConfigLocationData`、`PreparedConfigUpdateData`、`PreparedProjectConfigData`、`GlobalConfigDocument`、`GlobalConfigRevision`、`BootstrapConfigReceipt` | cli、composition、context、runtime、sdk |
-//! | 端口 | `ConfigReader`、`ConfigWriter`、`ProjectConfigParticipant`、`GlobalConfigConnectStore`、`NativeConfigStore`（注入式存储句柄，wire 签名载荷） | cli、composition、context、runtime、share |
-//! | 工厂 | `wire_project_config`、`wire_project_config_with_cli`、`wire_project_config_with_agents_dir`、`wire_config_override_store`、`wire_global_connect_store`、`ConfigWiring` | composition、context、runtime |
+//! | 命令 | `ConfigUpdateData`（SetModel/SetPermissionMode/SetMemoryConfig）、`CliConfigInputData` | composition、runtime |
+//! | 事件 | `ConfigChangeData`、`ConfigChangeCauseData`、`ConfigSubscriptionData`、`ConfigRefreshOutcomeData` | runtime |
+//! | 值对象 | `ConfigFieldData`、`ProjectConfigLocationData`、`PreparedConfigUpdateData`、`PreparedProjectConfigData`、`GlobalConfigDocument`、`GlobalConfigRevision`、`BootstrapConfigReceipt` | composition、runtime |
+//! | 端口 | `ConfigReader`、`ConfigWriter`、`ProjectConfigParticipant`、`GlobalConfigConnectStore`、`NativeConfigStore`（注入式存储句柄，wire 签名载荷） | composition、runtime |
+//! | 工厂 | `wire_connect`、`wire_project_config_with_cli`、`wire_project_config_with_agents_dir`、`wire_config_override_store`、`wire_global_connect_store`、`ConfigWiring` | composition |
 //!
 //! 子发布语言模块（模块即边界，跨界按模块=1 计数，不逐符号上根）：`catalog`、`connect`、`form`、
 //! `ports`。`runtime_resolution` 不整体发布，仅两个 free fn（`resolve_provider_runtime` /
@@ -77,7 +77,6 @@ pub use global_store::{
     is_persist_conflict, BootstrapConfigReceipt, GlobalConfigConnectStore, GlobalConfigDocument,
     GlobalConfigRevision,
 };
-pub use ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 pub use runtime_resolution::{resolve_provider_runtime, resolve_provider_runtime_for_selection};
 
 // ---------- composition-only wiring（crate 根装配点，06-code-organization 基线形态） ----------
@@ -88,19 +87,15 @@ pub struct ConfigWiring {
 }
 
 impl ConfigWiring {
-    pub fn service(&self) -> std::sync::Arc<ConfigAppService> {
+    pub fn reader(&self) -> std::sync::Arc<dyn crate::ports::ConfigReader> {
         self.service.clone()
     }
 
-    pub fn reader(&self) -> std::sync::Arc<dyn ConfigReader> {
+    pub fn writer(&self) -> std::sync::Arc<dyn crate::ports::ConfigWriter> {
         self.service.clone()
     }
 
-    pub fn writer(&self) -> std::sync::Arc<dyn ConfigWriter> {
-        self.service.clone()
-    }
-
-    pub fn participant(&self) -> std::sync::Arc<dyn ProjectConfigParticipant> {
+    pub fn participant(&self) -> std::sync::Arc<dyn crate::ports::ProjectConfigParticipant> {
         self.service.clone()
     }
 }
@@ -127,6 +122,24 @@ pub fn wire_global_connect_store(
     ))
 }
 
+pub async fn wire_project_config(
+    project_dir: &Path,
+    native_store: NativeConfigStore,
+) -> Result<ConfigWiring, share::error::DomainError> {
+    let service = std::sync::Arc::new(ConfigAppService::for_project(project_dir, native_store)?);
+    service
+        .load()
+        .await
+        .map_err(|message| share::error::DomainError::storage("config", message))?;
+    Ok(ConfigWiring { service })
+}
+
+/// Like [`wire_project_config_with_cli`], but the global config path is
+/// bounded to `agents_dir.join("aemeath.json")` instead of reading
+/// `share::config::paths::global_config_path()` (which reads process env vars
+/// via `AEMEATH_AGENTS_DIR`). Used by tests in `-p composition` to inject a
+/// temp `agents/` directory tree without env mutation; production callers
+/// pass `share::config::paths::global_agents_dir()` themselves — see #1385.
 pub async fn wire_project_config_with_cli(
     project_dir: &Path,
     native_store: NativeConfigStore,
@@ -161,25 +174,6 @@ pub async fn wire_project_config_with_cli(
     }
     result
 }
-
-pub async fn wire_project_config(
-    project_dir: &Path,
-    native_store: NativeConfigStore,
-) -> Result<ConfigWiring, share::error::DomainError> {
-    let service = std::sync::Arc::new(ConfigAppService::for_project(project_dir, native_store)?);
-    service
-        .load()
-        .await
-        .map_err(|message| share::error::DomainError::storage("config", message))?;
-    Ok(ConfigWiring { service })
-}
-
-/// Like [`wire_project_config_with_cli`], but the global config path is
-/// bounded to `agents_dir.join("aemeath.json")` instead of reading
-/// `share::config::paths::global_config_path()` (which reads process env vars
-/// via `AEMEATH_AGENTS_DIR`). Used by tests in `-p composition` to inject a
-/// temp `agents/` directory tree without env mutation; production callers
-/// pass `share::config::paths::global_agents_dir()` themselves — see #1385.
 pub async fn wire_project_config_with_agents_dir(
     project_dir: &Path,
     agents_dir: &Path,

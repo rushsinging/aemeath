@@ -31,7 +31,9 @@ impl GlobalConfigRevision {
         let mut hasher = Sha256::new();
         hasher.update(self.0.as_bytes());
         let digest = hasher.finalize();
-        bytes.copy_from_slice(&digest[..8]);
+        if let Some(prefix) = digest.get(..8) {
+            bytes.copy_from_slice(prefix);
+        }
         u64::from_be_bytes(bytes)
     }
 }

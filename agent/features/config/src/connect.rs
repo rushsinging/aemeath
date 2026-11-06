@@ -44,13 +44,14 @@ pub use commit::{
     ConnectCommitError, ConnectCommitPort, ConnectCommitReceipt, ConnectCommitRequest,
     ConnectProviderDirectory,
 };
-pub use draft::{ConnectDraft, DraftValidationError, ModelDraft};
-pub use error::{ConnectError, PersistErrorKind};
+pub use draft::{ConnectDraft, ModelDraft};
+pub use error::ConnectError;
+pub(crate) use error::PersistErrorKind;
 pub use outcome::ConnectOutcome;
 pub use service::{ConnectAppService, ConnectAppServiceBuilder};
 pub use states::{
-    ConnectOrigin, ConnectRevision, ConnectSessionId, ConnectStage, DriverIdOrString,
-    ExistingCredentialStatus, ExistingModelSnapshot, ExistingProviderSnapshot,
+    ConnectOrigin, ConnectRevision, ConnectSessionId, ConnectStage, ExistingCredentialStatus,
+    ExistingModelSnapshot, ExistingProviderSnapshot,
 };
 pub use view::{
     AvailableAction, ConnectDraftView, ConnectView, ExistingProviderSummary, ModelDraftView,

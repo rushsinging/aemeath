@@ -31,7 +31,7 @@ impl FakeConfigReader {
 }
 
 #[async_trait::async_trait]
-impl config::ConfigReader for FakeConfigReader {
+impl config::ports::ConfigReader for FakeConfigReader {
     fn committed_snapshot(&self) -> ConfigSnapshot {
         self.snapshot
             .lock()

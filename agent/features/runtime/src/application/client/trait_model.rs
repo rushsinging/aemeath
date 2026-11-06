@@ -2,7 +2,8 @@ use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::ports::{ProviderBuildSpecData, ProviderFactory};
-use config::{resolve_provider_runtime, ConfigReader};
+use config::ports::ConfigReader;
+use config::resolve_provider_runtime;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
