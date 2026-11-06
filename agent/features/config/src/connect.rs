@@ -56,3 +56,15 @@ pub use view::{
     AvailableAction, ConnectDraftView, ConnectView, ExistingProviderSummary, ModelDraftView,
     ProbeStatusView,
 };
+
+/// Connect 目录单点读取（#1866 A2）：全局配置文档 → 全部已有 Provider 快照。
+/// 类型化反序列化 + 单点投影，消费方（composition）NEVER 手拼 JSON 路径。
+pub fn provider_snapshots_from_document(
+    document: &crate::GlobalConfigDocument,
+) -> Result<Vec<ExistingProviderSnapshot>, share::error::DomainError> {
+    Ok(document
+        .provider_models()?
+        .iter()
+        .map(|(source, provider)| ExistingProviderSnapshot::from_provider_models(source, provider))
+        .collect())
+}

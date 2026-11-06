@@ -1,6 +1,4 @@
-use composition::app::{
-    build_connect_bootstrap_with_agents_dir, ConnectFacade, GlobalConnectCommitAdapter,
-};
+use composition::app::{build_connect_bootstrap_with_agents_dir, ConnectFacade};
 use config::connect::{ConnectAppService, ConnectOrigin};
 use std::sync::Arc;
 
@@ -316,7 +314,7 @@ async fn connect_facade_maps_identity_revision_origin_and_redacted_view() {
     let store: Arc<dyn config::GlobalConfigConnectStore> =
         config::wire_global_connect_store(temp.path());
     store.create_complete_default().await.unwrap();
-    let commit = GlobalConnectCommitAdapter::new(store.clone());
+    let commit = config::connect_wiring::GlobalConnectCommitAdapter::new(store.clone());
     let service = Arc::new(
         ConnectAppService::builder()
             .with_catalog(config::catalog::PROVIDER_CATALOG)
@@ -372,7 +370,7 @@ async fn commit_adapter_uses_session_start_revision_instead_of_reloading_latest(
         max_tokens: 4_096,
         reasoning_effort: None,
     }];
-    let adapter = GlobalConnectCommitAdapter::new(store.clone());
+    let adapter = config::connect_wiring::GlobalConnectCommitAdapter::new(store.clone());
     let error = config::connect::ConnectCommitPort::commit(
         adapter.as_ref(),
         config::connect::ConnectCommitRequest {

@@ -6,7 +6,7 @@ use crate::connect::outcome::ConnectOutcome;
 fn completed_label_distinguishes_from_cancelled() {
     assert_eq!(
         ConnectOutcome::Completed {
-            applied_revision: 1
+            applied_revision: crate::GlobalConfigRevision::from_digest("rev-1")
         }
         .kind_label(),
         "completed",

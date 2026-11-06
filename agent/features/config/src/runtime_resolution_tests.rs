@@ -39,6 +39,7 @@ fn snapshot_with_global_user_agent(
     config.models.providers.insert(
         source.to_string(),
         ProviderModelsConfig {
+            api_style: None,
             driver: driver.to_string(),
             base_url: base_url.to_string(),
             final_url: None,

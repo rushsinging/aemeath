@@ -36,6 +36,7 @@ fn provider_config(user_agent: Option<&str>) -> ProviderModelsConfig {
         driver: "anthropic".to_string(),
         models: vec![],
         user_agent: user_agent.map(str::to_string),
+        api_style: None,
     }
 }
 

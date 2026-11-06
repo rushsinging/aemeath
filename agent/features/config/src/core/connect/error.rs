@@ -36,7 +36,9 @@ pub enum ConnectError {
         message: String,
     },
     /// commit 端口返回的并发冲突；UI 应引导用户重载并重试。
-    PersistConflict { expected: u64 },
+    PersistConflict {
+        expected: Option<crate::GlobalConfigRevision>,
+    },
     /// commit 端口返回的非冲突持久化错误。
     PersistFailed {
         kind: PersistErrorKind,
@@ -82,6 +84,10 @@ impl ConnectError {
                 format!("连接探测失败：{kind:?}")
             }
             ConnectError::PersistConflict { expected } => {
+                let expected = expected
+                    .as_ref()
+                    .map(crate::GlobalConfigRevision::as_str)
+                    .unwrap_or("未知");
                 format!("全局配置已被其他进程修改（期望 revision {expected}）；请重载并重试")
             }
             ConnectError::PersistFailed { kind, message } => {

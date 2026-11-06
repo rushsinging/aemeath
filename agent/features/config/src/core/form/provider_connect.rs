@@ -45,7 +45,7 @@ pub fn provider_connect_form_view(
         busy: busy_for_connect(connect),
         terminal: connect.terminal.clone().map(|outcome| match outcome {
             ConnectOutcome::Completed { applied_revision } => ConfigFormTerminal::Completed {
-                applied_revision: Some(applied_revision),
+                applied_revision: Some(applied_revision.display_u64()),
             },
             ConnectOutcome::Cancelled => ConfigFormTerminal::Cancelled,
         }),

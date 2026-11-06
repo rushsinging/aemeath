@@ -84,20 +84,6 @@ pub struct SystemInformation {
     pub arch: String,
 }
 
-/// Config-owned 平台信息端口。
-///
-/// ## 设计约束
-///
-/// - `async_trait` 保持与其他 Config 端口一致；
-/// - 实现方必须**只**返回受控、非敏感字段；不得把 hostname、user、cwd、API key
-///   等敏感信息塞入 [`SystemInformation`]；
-/// - 实现方负责内部缓存与降级逻辑；调用方信任 `os_name` / `os_version` / `arch`
-///   是干净字符串，但 UA resolver 仍会做一次 HeaderValue 校验。
-#[async_trait]
-pub trait SystemInformationPort: Send + Sync {
-    async fn current(&self) -> SystemInformation;
-}
-
 /// Provider 探测的归一化请求。
 ///
 /// 由 Connect application 在调用 Provider adapter 之前构造：

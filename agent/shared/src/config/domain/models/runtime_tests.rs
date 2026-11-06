@@ -22,6 +22,7 @@ fn models_config(model_max_tokens: u32) -> ModelsConfig {
                 input: Vec::new(),
             }],
             user_agent: None,
+            ..Default::default()
         },
     );
     ModelsConfig {
