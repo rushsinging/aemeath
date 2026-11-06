@@ -1,0 +1,1928 @@
+{
+ "groups": {
+  "配置变更通知": [
+   "ConfigUpdateData",
+   "ConfigChangeData",
+   "ConfigChangeCauseData",
+   "ConfigSubscriptionData",
+   "ConfigRefreshOutcomeData",
+   "ConfigFieldData",
+   "ProjectConfigLocationData",
+   "PreparedConfigUpdateData",
+   "PreparedProjectConfigData"
+  ],
+  "全局配置与 Connect": [
+   "GlobalConfigDocument",
+   "GlobalConfigRevision",
+   "GlobalConfigConnectStore",
+   "BootstrapConfigReceipt",
+   "CliConfigInputData",
+   "is_persist_conflict",
+   "wire_connect",
+   "wire_global_connect_store"
+  ],
+  "Provider 运行时解析": [
+   "resolve_provider_runtime",
+   "resolve_provider_runtime_for_selection"
+  ],
+  "装配入口": [
+   "ConfigWiring",
+   "ConfigAppService",
+   "NativeConfigStore",
+   "wire_config_override_store",
+   "wire_project_config",
+   "wire_project_config_with_cli",
+   "wire_project_config_with_agents_dir"
+  ]
+ },
+ "nodeGroup": {
+  "ConfigUpdateData": "配置变更通知",
+  "ConfigChangeData": "配置变更通知",
+  "ConfigChangeCauseData": "配置变更通知",
+  "ConfigSubscriptionData": "配置变更通知",
+  "ConfigRefreshOutcomeData": "配置变更通知",
+  "ConfigFieldData": "配置变更通知",
+  "ProjectConfigLocationData": "配置变更通知",
+  "PreparedConfigUpdateData": "配置变更通知",
+  "PreparedProjectConfigData": "配置变更通知",
+  "GlobalConfigDocument": "全局配置与 Connect",
+  "GlobalConfigRevision": "全局配置与 Connect",
+  "GlobalConfigConnectStore": "全局配置与 Connect",
+  "BootstrapConfigReceipt": "全局配置与 Connect",
+  "CliConfigInputData": "全局配置与 Connect",
+  "is_persist_conflict": "全局配置与 Connect",
+  "wire_connect": "全局配置与 Connect",
+  "wire_global_connect_store": "全局配置与 Connect",
+  "resolve_provider_runtime": "Provider 运行时解析",
+  "resolve_provider_runtime_for_selection": "Provider 运行时解析",
+  "ConfigWiring": "装配入口",
+  "ConfigAppService": "装配入口",
+  "NativeConfigStore": "装配入口",
+  "wire_config_override_store": "装配入口",
+  "wire_project_config": "装配入口",
+  "wire_project_config_with_cli": "装配入口",
+  "wire_project_config_with_agents_dir": "装配入口"
+ },
+ "symbols": {
+  "BootstrapConfigReceipt": {
+   "kind": "struct",
+   "duty": "首启引导回执（路径 + 摘要）——rollback 的凭据",
+   "deep_path": null,
+   "def": "agent/features/config/src/gateway/global_store.rs",
+   "signature": "pub struct BootstrapConfigReceipt {",
+   "fields": [
+    "pub(crate) path: PathBuf",
+    "pub(crate) digest: GlobalConfigRevision"
+   ],
+   "methods": [],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 298,
+       "code": "receipt: config::BootstrapConfigReceipt,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "CliConfigInputData": {
+   "kind": "struct",
+   "duty": "CLI 输入载荷（api_key 等覆盖项）——wire_project_config_with_cli 的参数",
+   "deep_path": null,
+   "def": "agent/features/config/src/adapters.rs",
+   "signature": "pub struct CliConfigInputData {",
+   "fields": [
+    "pub api_key: Option < String >",
+    "pub base_url: Option < String >",
+    "pub model: Option < String >",
+    "pub max_tokens: Option < u32 >",
+    "pub context_size: Option < usize >",
+    "pub allow_all: bool",
+    "pub verbose: bool",
+    "pub no_markdown: bool",
+    "pub max_tool_concurrency: Option < usize >",
+    "pub max_agent_concurrency: Option < usize >"
+   ],
+   "methods": [],
+   "consumer_count": 2,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "构造",
+      "类型引用",
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 931,
+       "code": "fn cli_config_input(args: &AgentArgs) -> config::CliConfigInputData {",
+       "kind": "ctor",
+       "label": "构造"
+      },
+      {
+       "line": 931,
+       "code": "fn cli_config_input(args: &AgentArgs) -> config::CliConfigInputData {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 978,
+       "code": "config::CliConfigInputData::default(),",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/main_session_wiring.rs",
+     "module": "composition :: main_session_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "构造",
+      "类型引用",
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 66,
+       "code": "fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInputData {",
+       "kind": "ctor",
+       "label": "构造"
+      },
+      {
+       "line": 66,
+       "code": "fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInputData {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 254,
+       "code": "wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInputData::default())",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigAppService": {
+   "kind": "struct",
+   "duty": "配置服务实现体（ConfigReader/ConfigWriter/ProjectConfigParticipant 三端口实现）；owner-test-consumed（跨 crate 仅测试直连，登记判定）",
+   "deep_path": null,
+   "def": "agent/features/config/src/adapters/app_service.rs",
+   "signature": "pub struct ConfigAppService {",
+   "fields": [
+    "tx: watch :: Sender < ConfigSnapshot >",
+    "inner: AsyncRwLock < Inner >",
+    "active: RwLock < ActiveConfig >",
+    "source_fingerprints: RwLock < SourceFingerprints >",
+    "mutation_lock: tokio :: sync :: Mutex < () >",
+    "native_store: Option < NativeConfigStore >",
+    "env_source: std :: sync :: Arc < dyn EnvSource >"
+   ],
+   "methods": [
+    "fn for_project(project_dir : & Path, native_store : NativeConfigStore) -> Result < Self , share :: error :: DomainError >",
+    "pub fn with_global_path(project_dir : Option < & Path >, global_path : PathBuf) -> Self",
+    "fn with_env_source(mut self, env_source : std :: sync :: Arc < dyn EnvSource >) -> Self",
+    "pub fn with_native_store(mut self, native_store : NativeConfigStore) -> Self",
+    "fn set_project_location(& self, location : ProjectConfigLocationData)",
+    "pub fn set_cli_patch(& self, patch : ConfigPatch)",
+    "pub fn load(& self) -> Result < () , String >",
+    "fn snapshot(& self) -> Result < ConfigSnapshot , share :: error :: DomainError >",
+    "fn subscribe(& self) -> Result < ConfigSubscriptionData , share :: error :: DomainError >",
+    "fn committed_snapshot(& self) -> ConfigSnapshot",
+    "fn subscribe_committed(& self) -> watch :: Receiver < ConfigSnapshot >",
+    "fn refresh_if_sources_changed(& self) -> Result < ConfigRefreshOutcomeData , share :: error :: DomainError >",
+    "fn update(& self, command : ConfigUpdateData) -> Result < ConfigChangeData , share :: error :: DomainError >",
+    "fn prepare_for_project(& self, location : & ProjectConfigLocationData) -> Result < PreparedProjectConfigData , share :: error :: DomainError >",
+    "fn snapshot(& self) -> ConfigSnapshot",
+    "fn commit_project(& self, prepared : PreparedProjectConfigData)",
+    "fn prepare_update(& self, command : ConfigUpdateData) -> Result < PreparedConfigUpdateData , share :: error :: DomainError >",
+    "fn persist_update(& self, prepared : PreparedConfigUpdateData) -> Result < Box < ReadyConfigCommitData > , share :: error :: DomainError >",
+    "fn commit_update(& self, ready : ReadyConfigCommitData) -> ConfigChangeData"
+   ],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/resume_task_state_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/resume_task_state_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 82,
+       "code": "let config = Arc::new(config::ConfigAppService::with_global_path(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/session_driver_support_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/session_driver_support_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 172,
+       "code": "let config = Arc::new(config::ConfigAppService::with_global_path(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/run/tests/run_factory_support/session_run.rs",
+     "module": "runtime :: application/run/tests/run_factory_support/session_run.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 303,
+       "code": "let config_service = Arc::new(config::ConfigAppService::with_global_path(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigChangeCauseData": {
+   "kind": "enum",
+   "duty": "变更原因词汇（CLI/文件/Connect 等来源）——事件归因维度",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub enum ConfigChangeCauseData {",
+   "fields": [
+    "ClientUpdate",
+    "ProjectCommit",
+    "FileReload"
+   ],
+   "methods": [],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/mapping_tests.rs",
+     "module": "runtime :: application/client/mapping_tests.rs",
+     "is_test": true,
+     "forms": [
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 76,
+       "code": "cause: config::ConfigChangeCauseData::ClientUpdate,",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "apps/cli/src/tui/adapter/event_mapping.rs",
+     "module": "cli :: tui/adapter/event_mapping.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 1244,
+       "code": "fn config_cause(value: sdk::ConfigChangeCauseData) -> TuiConfigChangeCause {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1246,
+       "code": "sdk::ConfigChangeCauseData::ClientUpdate => TuiConfigChangeCause::ClientUpdate,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 1247,
+       "code": "sdk::ConfigChangeCauseData::ProjectCommit => TuiConfigChangeCause::ProjectCommit,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 1248,
+       "code": "sdk::ConfigChangeCauseData::FileReload => TuiConfigChangeCause::FileReload,",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "packages/sdk/src/config_view.rs",
+     "module": "sdk :: config_view.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 16,
+       "code": "pub enum ConfigChangeCauseData {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigChangeData": {
+   "kind": "struct",
+   "duty": "配置变更事件载荷（字段级变更）——turn 边界 config_reload 检测的领域事件",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub struct ConfigChangeData {",
+   "fields": [
+    "pub cause: ConfigChangeCauseData",
+    "pub fields: Vec < ConfigFieldData >",
+    "pub snapshot: ConfigSnapshot"
+   ],
+   "methods": [],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/mapping.rs",
+     "module": "runtime :: application/client/mapping.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 46,
+       "code": "pub(crate) fn config_change_to_sdk(change: config::ConfigChangeData) -> ConfigUpdateResult {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/mapping_tests.rs",
+     "module": "runtime :: application/client/mapping_tests.rs",
+     "is_test": true,
+     "forms": [
+      "构造"
+     ],
+     "snippets": [
+      {
+       "line": 75,
+       "code": "let result = config_change_to_sdk(config::ConfigChangeData {",
+       "kind": "ctor",
+       "label": "构造"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/config_gate.rs",
+     "module": "runtime :: application/client/session_switch/config_gate.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 119,
+       "code": ") -> Result<ConfigChangeData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigFieldData": {
+   "kind": "enum",
+   "duty": "字段标识枚举——变更事件与订阅的键空间",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub enum ConfigFieldData {",
+   "fields": [
+    "Model",
+    "PermissionMode",
+    "Memory"
+   ],
+   "methods": [],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/mapping.rs",
+     "module": "runtime :: application/client/mapping.rs",
+     "is_test": false,
+     "forms": [
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 52,
+       "code": "config::ConfigFieldData::Model => ConfigFieldData::Model,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 53,
+       "code": "config::ConfigFieldData::PermissionMode => ConfigFieldData::PermissionMode,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 54,
+       "code": "config::ConfigFieldData::Memory => ConfigFieldData::Memory,",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "apps/cli/src/tui/adapter/event_mapping.rs",
+     "module": "cli :: tui/adapter/event_mapping.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 1237,
+       "code": "fn config_field(value: sdk::ConfigFieldData) -> TuiConfigField {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1239,
+       "code": "sdk::ConfigFieldData::Model => TuiConfigField::Model,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 1240,
+       "code": "sdk::ConfigFieldData::PermissionMode => TuiConfigField::PermissionMode,",
+       "kind": "ref",
+       "label": "路径引用"
+      },
+      {
+       "line": 1241,
+       "code": "sdk::ConfigFieldData::Memory => TuiConfigField::Memory,",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "packages/sdk/src/config_view.rs",
+     "module": "sdk :: config_view.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 8,
+       "code": "pub enum ConfigFieldData {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 87,
+       "code": "pub changed_fields: Vec<ConfigFieldData>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigRefreshOutcomeData": {
+   "kind": "enum",
+   "duty": "刷新结果三态（Unchanged/Reloaded/…）——真领域状态，runtime turn 边界消费",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub enum ConfigRefreshOutcomeData {",
+   "fields": [
+    "Unchanged",
+    "Reloaded { snapshot: ConfigSnapshot, scopes: Vec < ConfigApplicationScope > }"
+   ],
+   "methods": [],
+   "consumer_count": 6,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/compact_model_tests.rs",
+     "module": "runtime :: application/client/compact_model_tests.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 48,
+       "code": ") -> std::result::Result<config::ConfigRefreshOutcomeData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 49,
+       "code": "Ok(config::ConfigRefreshOutcomeData::Unchanged)",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/config_gate.rs",
+     "module": "runtime :: application/client/session_switch/config_gate.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 64,
+       "code": ") -> Result<config::ConfigRefreshOutcomeData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/trait_model_tests.rs",
+     "module": "runtime :: application/client/trait_model_tests.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 28,
+       "code": ") -> std::result::Result<config::ConfigRefreshOutcomeData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 29,
+       "code": "Ok(config::ConfigRefreshOutcomeData::Unchanged)",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/immediate_query.rs",
+     "module": "runtime :: application/loop_engine/chat/immediate_query.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 81,
+       "code": "Ok(ConfigRefreshOutcomeData::Unchanged) => {}",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 81,
+       "code": "Ok(ConfigRefreshOutcomeData::Unchanged) => {}",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/immediate_query_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/immediate_query_tests.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 109,
+       "code": "async fn refresh_if_sources_changed(&self) -> Result<ConfigRefreshOutcomeData, DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 117,
+       "code": "Ok(ConfigRefreshOutcomeData::Unchanged)",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/loop_phases.rs",
+     "module": "runtime :: application/loop_engine/chat/loop_phases.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用",
+      "路径引用"
+     ],
+     "snippets": [
+      {
+       "line": 14,
+       "code": "pub refresh: Result<ConfigRefreshOutcomeData, share::error::DomainError>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 41,
+       "code": "Ok(ConfigRefreshOutcomeData::Unchanged) => {}",
+       "kind": "ref",
+       "label": "路径引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigSubscriptionData": {
+   "kind": "struct",
+   "duty": "订阅快照载荷（字段→值视图）——读者侧订阅与 diff 的输入",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub struct ConfigSubscriptionData {",
+   "fields": [
+    "pub initial: ConfigSnapshot",
+    "pub changes: watch :: Receiver < ConfigSnapshot >"
+   ],
+   "methods": [],
+   "consumer_count": 5,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/compact_model_tests.rs",
+     "module": "runtime :: application/client/compact_model_tests.rs",
+     "is_test": true,
+     "forms": [
+      "构造",
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 58,
+       "code": ") -> std::result::Result<config::ConfigSubscriptionData, share::error::DomainError> {",
+       "kind": "ctor",
+       "label": "构造"
+      },
+      {
+       "line": 58,
+       "code": ") -> std::result::Result<config::ConfigSubscriptionData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/config_gate.rs",
+     "module": "runtime :: application/client/session_switch/config_gate.rs",
+     "is_test": false,
+     "forms": [
+      "构造",
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 77,
+       "code": "async fn subscribe(&self) -> Result<ConfigSubscriptionData, share::error::DomainError> {",
+       "kind": "ctor",
+       "label": "构造"
+      },
+      {
+       "line": 77,
+       "code": "async fn subscribe(&self) -> Result<ConfigSubscriptionData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/trait_model_tests.rs",
+     "module": "runtime :: application/client/trait_model_tests.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 39,
+       "code": ") -> std::result::Result<config::ConfigSubscriptionData, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/immediate_query.rs",
+     "module": "runtime :: application/loop_engine/chat/immediate_query.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 164,
+       "code": "async fn subscribe(&self) -> Result<config::ConfigSubscriptionData, DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/immediate_query_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/immediate_query_tests.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 124,
+       "code": "async fn subscribe(&self) -> Result<config::ConfigSubscriptionData, DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigUpdateData": {
+   "kind": "enum",
+   "duty": "配置更新命令（SetModel/SetPermissionMode/SetMemoryConfig 等变体）——runtime/CLI 经 ConfigWriter 提交的唯一命令载体",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub enum ConfigUpdateData {",
+   "fields": [
+    "SetModel { model: String }",
+    "SetPermissionMode { mode: PermissionModeConfig }",
+    "SetMemoryConfig { config: MemoryConfig }"
+   ],
+   "methods": [],
+   "consumer_count": 4,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 897,
+       "code": "update: sdk::ConfigUpdateData,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/config_gate.rs",
+     "module": "runtime :: application/client/session_switch/config_gate.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 93,
+       "code": "/// 2. **Config prepare_update** —— 产出 [`PreparedConfigUpdateData`]，不提交。",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/trait_impl.rs",
+     "module": "runtime :: application/client/trait_impl.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 24,
+       "code": "update: sdk::ConfigUpdateData,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "packages/sdk/src/client.rs",
+     "module": "sdk :: client.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 8,
+       "code": "ConfigFormView, ConfigFormWorkflowId, ConfigUpdateData, ConfigUpdateResult, ConfigView,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ConfigWiring": {
+   "kind": "struct",
+   "duty": "项目配置装配结果（reader/writer/participant 三视图；#1866 B3 删 service() 直连）",
+   "deep_path": null,
+   "def": "agent/features/config/src/lib.rs",
+   "signature": "pub struct ConfigWiring {",
+   "fields": [
+    "service: std :: sync :: Arc < ConfigAppService >"
+   ],
+   "methods": [
+    "pub fn reader(& self) -> std :: sync :: Arc < dyn crate :: ports :: ConfigReader >",
+    "pub fn writer(& self) -> std :: sync :: Arc < dyn crate :: ports :: ConfigWriter >",
+    "pub fn participant(& self) -> std :: sync :: Arc < dyn crate :: ports :: ProjectConfigParticipant >"
+   ],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 926,
+       "code": "fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::Policy> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 1217,
+       "code": "config: &config::ConfigWiring,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/src/runtime.rs",
+     "module": "composition :: runtime.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 178,
+       "code": "config: config::ConfigWiring,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/main_session_wiring.rs",
+     "module": "composition :: main_session_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 89,
+       "code": ") -> Result<config::ConfigWiring, share::error::DomainError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "GlobalConfigConnectStore": {
+   "kind": "trait",
+   "duty": "全局配置存储端口（load/create_default/compare_and_swap/rollback）——Connect 提交的 CAS 语义载体",
+   "deep_path": null,
+   "def": "agent/features/config/src/gateway/global_store.rs",
+   "signature": "pub trait GlobalConfigConnectStore: Send + Sync {",
+   "fields": [],
+   "methods": [
+    "fn load_global_document(& self) -> Result < Option < GlobalConfigDocument > , share :: error :: DomainError >",
+    "fn create_complete_default(& self) -> Result < BootstrapConfigReceipt , share :: error :: DomainError >",
+    "fn compare_and_swap(& self, expected : GlobalConfigRevision, draft : ConnectDraft) -> Result < GlobalConfigRevision , share :: error :: DomainError >",
+    "fn rollback_bootstrap(& self, receipt : BootstrapConfigReceipt) -> Result < () , share :: error :: DomainError >"
+   ],
+   "consumer_count": 2,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 20,
+       "code": "store: Arc<dyn config::GlobalConfigConnectStore>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 321,
+       "code": "let store: Arc<dyn config::GlobalConfigConnectStore> =",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 362,
+       "code": "let store: Arc<dyn config::GlobalConfigConnectStore> =",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 383,
+       "code": "let store: Arc<dyn config::GlobalConfigConnectStore> =",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 391,
+       "code": "store: Arc<dyn config::GlobalConfigConnectStore>,",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/connect_wiring.rs",
+     "module": "composition :: connect_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 314,
+       "code": "let store: Arc<dyn config::GlobalConfigConnectStore> =",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 356,
+       "code": "let store: Arc<dyn config::GlobalConfigConnectStore> =",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 401,
+       "code": "let store: Arc<dyn config::GlobalConfigConnectStore> =",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "GlobalConfigDocument": {
+   "kind": "struct",
+   "duty": "全局配置文档（revision + 裸 JSON value）；#1866 A2 增 provider_models() 为 providers 段类型化读取唯一入口",
+   "deep_path": null,
+   "def": "agent/features/config/src/gateway/global_store.rs",
+   "signature": "pub struct GlobalConfigDocument {",
+   "fields": [
+    "pub revision: GlobalConfigRevision",
+    "pub value: Value"
+   ],
+   "methods": [
+    "pub fn provider_models(& self) -> Result < std :: collections :: BTreeMap < String , share :: config :: models :: ProviderModelsConfig > , share :: error :: DomainError , >"
+   ],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app_tests.rs",
+     "module": "composition :: app_tests.rs",
+     "is_test": true,
+     "forms": [
+      "构造",
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 5,
+       "code": "fn document_with_value(value: serde_json::Value) -> config::GlobalConfigDocument {",
+       "kind": "ctor",
+       "label": "构造"
+      },
+      {
+       "line": 5,
+       "code": "fn document_with_value(value: serde_json::Value) -> config::GlobalConfigDocument {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "GlobalConfigRevision": {
+   "kind": "struct",
+   "duty": "全局配置修订标识（内容摘要字符串）；#1866 A3 为跨界契约类型，display_u64() 为 SDK/表单视图数值化单点",
+   "deep_path": null,
+   "def": "agent/features/config/src/gateway/global_store.rs",
+   "signature": "pub struct GlobalConfigRevision(String);",
+   "fields": [
+    "String"
+   ],
+   "methods": [
+    "pub fn from_digest(value : impl Into < String >) -> Self",
+    "pub fn as_str(& self) -> & str",
+    "pub fn display_u64(& self) -> u64"
+   ],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app_tests.rs",
+     "module": "composition :: app_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 7,
+       "code": "revision: config::GlobalConfigRevision::from_digest(\"test-revision\"),",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "NativeConfigStore": {
+   "kind": "struct",
+   "duty": "注入式原生配置存储句柄（wire 签名载荷）",
+   "deep_path": null,
+   "def": "agent/features/config/src/adapters.rs",
+   "signature": "pub struct NativeConfigStore {",
+   "fields": [
+    "storage: Arc < dyn AtomicBlobPort >"
+   ],
+   "methods": [
+    "fn new(storage : Arc < dyn AtomicBlobPort >) -> Self",
+    "fn key(project_key : & str) -> Result < StorageKeyData , ConfigAdapterError >",
+    "pub fn read_override(& self, project_key : & str) -> Result < Option < ConfigPatch > , ConfigAdapterError >",
+    "pub fn write_override(& self, project_key : & str, bytes : & [u8]) -> Result < Option < CommitWarningData > , ConfigAdapterError >"
+   ],
+   "consumer_count": 2,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 946,
+       "code": "fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigStore, SdkError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/main_session_wiring.rs",
+     "module": "composition :: main_session_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 99,
+       "code": "fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "PreparedConfigUpdateData": {
+   "kind": "struct",
+   "duty": "预备提交载荷（校验后的更新计划）",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub struct PreparedConfigUpdateData {",
+   "fields": [
+    "pub(crate) project_key: String",
+    "pub(crate) config: Config",
+    "pub(crate) override_patch: ConfigPatch",
+    "pub(crate) snapshot: ConfigSnapshot",
+    "pub(crate) fields: Vec < ConfigFieldData >"
+   ],
+   "methods": [
+    "pub fn snapshot(& self) -> & ConfigSnapshot",
+    "pub fn memory_config(& self) -> & MemoryConfig"
+   ],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/config_gate.rs",
+     "module": "runtime :: application/client/session_switch/config_gate.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 126,
+       "code": "let prepared: PreparedConfigUpdateData =",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "PreparedProjectConfigData": {
+   "kind": "struct",
+   "duty": "预备项目配置载荷（分层合并结果，提交前态）",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub struct PreparedProjectConfigData {",
+   "fields": [
+    "pub(crate) location: ProjectConfigLocationData",
+    "pub(crate) config: Config",
+    "pub(crate) snapshot: ConfigSnapshot"
+   ],
+   "methods": [
+    "pub fn location(& self) -> & ProjectConfigLocationData",
+    "pub fn snapshot(& self) -> & ConfigSnapshot",
+    "pub fn memory_config(& self) -> & MemoryConfig"
+   ],
+   "consumer_count": 2,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/resume.rs",
+     "module": "runtime :: application/client/session_switch/resume.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 125,
+       "code": "let prepared_config: PreparedProjectConfigData = self",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch.rs",
+     "module": "runtime :: application/client/session_switch.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 48,
+       "code": "let prepared_config: PreparedProjectConfigData = deps",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "ProjectConfigLocationData": {
+   "kind": "struct",
+   "duty": "项目配置位置载荷（项目根 + 文件路径）",
+   "deep_path": null,
+   "def": "agent/features/config/src/domain.rs",
+   "signature": "pub struct ProjectConfigLocationData {",
+   "fields": [
+    "canonical_search_root: PathBuf",
+    "key: String"
+   ],
+   "methods": [
+    "pub fn try_from_project_identity(canonical_search_root : PathBuf, stable_identity : & [u8]) -> Result < Self , share :: error :: DomainError >",
+    "pub fn search_root(& self) -> & Path",
+    "pub fn key(& self) -> & str"
+   ],
+   "consumer_count": 2,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch/resume.rs",
+     "module": "runtime :: application/client/session_switch/resume.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用",
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 174,
+       "code": ") -> Result<ProjectConfigLocationData, MainSessionError> {",
+       "kind": "fnty",
+       "label": "类型引用"
+      },
+      {
+       "line": 191,
+       "code": "ProjectConfigLocationData::try_from_project_identity(search_root, stable_identity)",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/session_switch.rs",
+     "module": "runtime :: application/client/session_switch.rs",
+     "is_test": false,
+     "forms": [
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 47,
+       "code": "let config_location: ProjectConfigLocationData = resume::derive_config_location(&identity)?;",
+       "kind": "fnty",
+       "label": "类型引用"
+      }
+     ]
+    }
+   ]
+  },
+  "is_persist_conflict": {
+   "kind": "fn",
+   "duty": "持久化冲突判定辅助（DomainError 折叠后区分 CAS 冲突的语义谓词）；当前 crate 内 connect_wiring 消费",
+   "deep_path": null,
+   "def": "agent/features/config/src/gateway/global_store.rs",
+   "signature": "pub fn is_persist_conflict(error: &share::error::DomainError) -> bool {",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 0,
+   "consumers": []
+  },
+  "resolve_provider_runtime": {
+   "kind": "fn",
+   "duty": "Provider 运行时解析（endpoint 优先级 + UA 组装）——单一解析入口",
+   "deep_path": null,
+   "def": "agent/features/config/src/runtime_resolution.rs",
+   "signature": "pub fn resolve_provider_runtime(",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/trait_model.rs",
+     "module": "runtime :: application/client/trait_model.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 49,
+       "code": "let runtime_provider = resolve_provider_runtime(snapshot, &resolved_model, base_url_override);",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "resolve_provider_runtime_for_selection": {
+   "kind": "fn",
+   "duty": "按选中模型解析运行时配置（/model 切换路径）",
+   "deep_path": null,
+   "def": "agent/features/config/src/runtime_resolution.rs",
+   "signature": "pub fn resolve_provider_runtime_for_selection(",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs",
+     "module": "runtime :: application/loop_engine/chat/main_run_port.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 130,
+       "code": "let runtime_provider = config::resolve_provider_runtime_for_selection(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/run/context_factory.rs",
+     "module": "runtime :: application/run/context_factory.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 470,
+       "code": "let runtime_provider = config::resolve_provider_runtime_for_selection(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/run/derived/setup.rs",
+     "module": "runtime :: application/run/derived/setup.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 413,
+       "code": "let runtime_provider = config::resolve_provider_runtime_for_selection(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "wire_config_override_store": {
+   "kind": "fn",
+   "duty": "#1866 A1 相邻：overrides blob → NativeConfigStore（runtime override 存储工厂）",
+   "deep_path": null,
+   "def": "agent/features/config/src/lib.rs",
+   "signature": "pub fn wire_config_override_store(",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 7,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 949,
+       "code": "Ok(config::wire_config_override_store(blob))",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 977,
+       "code": "wire_config_override_store(&agents_dir).map_err(|error| error.to_string())?,",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1242,
+       "code": "wire_config_override_store(&agents_dir)?,",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1325,
+       "code": "wire_config_override_store(&agents_dir)?,",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1349,
+       "code": "wire_config_override_store(&agents_dir)?,",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1370,
+       "code": "wire_config_override_store(&agents_dir)?,",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1394,
+       "code": "wire_config_override_store(&agents_dir)?,",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/src/app_tests.rs",
+     "module": "composition :: app_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 315,
+       "code": "wire_config_override_store(&agents_dir).expect(\"override store\"),",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 657,
+       "code": "let native_store = wire_config_override_store(&agents_dir).expect(\"wire override store\");",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 784,
+       "code": "wire_config_override_store(&agents_dir).expect(\"override store\"),",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/main_session_wiring.rs",
+     "module": "composition :: main_session_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 100,
+       "code": "config::wire_config_override_store(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/client/from_args_tests.rs",
+     "module": "runtime :: application/client/from_args_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 243,
+       "code": "config::wire_config_override_store(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 568,
+       "code": "config::wire_config_override_store(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/bootstrap_dependencies.rs",
+     "module": "runtime :: tests/bootstrap_dependencies.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 166,
+       "code": "config::wire_config_override_store(storage::wire_file_system_blob(temp.path()).unwrap()),",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/main_session_wiring_integration.rs",
+     "module": "runtime :: tests/main_session_wiring_integration.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 71,
+       "code": "config::wire_config_override_store(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 242,
+       "code": "config::wire_config_override_store(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/session_switch_coordinator.rs",
+     "module": "runtime :: tests/session_switch_coordinator.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 76,
+       "code": "config::wire_config_override_store(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "wire_connect": {
+   "kind": "fn",
+   "duty": "Connect 域唯一装配入口（#1866 A1）：store+probe → ConnectAppService（catalog/系统信息/全局 UA/版本 + commit/directory 适配器全内聚）",
+   "deep_path": null,
+   "def": "agent/features/config/src/connect_wiring.rs",
+   "signature": "pub fn wire_connect",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 394,
+       "code": "let service = config::wire_connect(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1434,
+       "code": "let connect_facade = wire_connect(&agents_dir).await;",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "wire_global_connect_store": {
+   "kind": "fn",
+   "duty": "全局配置 store 工厂（agents_dir → GlobalConfigConnectStore 实现）",
+   "deep_path": null,
+   "def": "agent/features/config/src/lib.rs",
+   "signature": "pub fn wire_global_connect_store(",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 2,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 322,
+       "code": "config::wire_global_connect_store(agents_dir);",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 363,
+       "code": "config::wire_global_connect_store(agents_dir);",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 384,
+       "code": "config::wire_global_connect_store(agents_dir);",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/connect_wiring.rs",
+     "module": "composition :: connect_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 315,
+       "code": "config::wire_global_connect_store(temp.path());",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 357,
+       "code": "config::wire_global_connect_store(temp.path());",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 402,
+       "code": "config::wire_global_connect_store(temp.path());",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "wire_project_config": {
+   "kind": "fn",
+   "duty": "项目配置装配（无 CLI 变体）；跨 crate 测试用 wiring（登记判定，生产主入口为 _with_cli）",
+   "deep_path": null,
+   "def": "agent/features/config/src/lib.rs",
+   "signature": "pub fn wire_project_config",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 4,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/client/from_args_tests.rs",
+     "module": "runtime :: application/client/from_args_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 241,
+       "code": "let config = config::wire_project_config(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 566,
+       "code": "let config = config::wire_project_config(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/bootstrap_dependencies.rs",
+     "module": "runtime :: tests/bootstrap_dependencies.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 164,
+       "code": "let config = config::wire_project_config(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/main_session_wiring_integration.rs",
+     "module": "runtime :: tests/main_session_wiring_integration.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 69,
+       "code": "let config = config::wire_project_config(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 240,
+       "code": "let config = config::wire_project_config(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/tests/session_switch_coordinator.rs",
+     "module": "runtime :: tests/session_switch_coordinator.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 74,
+       "code": "let config = config::wire_project_config(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "wire_project_config_with_agents_dir": {
+   "kind": "fn",
+   "duty": "项目配置装配（agents_dir 限定全局路径，避免进程 env 读取）——composition 测试注入用",
+   "deep_path": null,
+   "def": "agent/features/config/src/lib.rs",
+   "signature": "pub fn wire_project_config_with_agents_dir",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 3,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 1281,
+       "code": "let config = config::wire_project_config_with_agents_dir(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/src/app_tests.rs",
+     "module": "composition :: app_tests.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 312,
+       "code": "let config = config::wire_project_config_with_agents_dir(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 588,
+       "code": "let config = config::wire_project_config_with_agents_dir(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 658,
+       "code": "let config = config::wire_project_config_with_agents_dir(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    },
+    {
+     "file": "agent/composition/tests/main_session_wiring.rs",
+     "module": "composition :: main_session_wiring.rs",
+     "is_test": true,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 90,
+       "code": "config::wire_project_config_with_agents_dir(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  },
+  "wire_project_config_with_cli": {
+   "kind": "fn",
+   "duty": "项目配置装配生产主入口（project_dir + native_store + CLI 输入）",
+   "deep_path": null,
+   "def": "agent/features/config/src/lib.rs",
+   "signature": "pub fn wire_project_config_with_cli",
+   "fields": [],
+   "methods": [],
+   "consumer_count": 1,
+   "consumers": [
+    {
+     "file": "agent/composition/src/app.rs",
+     "module": "composition :: app.rs",
+     "is_test": false,
+     "forms": [
+      "调用"
+     ],
+     "snippets": [
+      {
+       "line": 975,
+       "code": "let config = config::wire_project_config_with_cli(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1240,
+       "code": "let config = config::wire_project_config_with_cli(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1323,
+       "code": "let config = config::wire_project_config_with_cli(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1347,
+       "code": "let config = config::wire_project_config_with_cli(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1368,
+       "code": "let config = config::wire_project_config_with_cli(",
+       "kind": "call",
+       "label": "调用"
+      },
+      {
+       "line": 1392,
+       "code": "let config = config::wire_project_config_with_cli(",
+       "kind": "call",
+       "label": "调用"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "groupChains": {
+  "配置变更通知": {
+   "chain": "配置变更链（命令 → 服务 → 事件 → turn 边界消费）",
+   "path": [
+    "命令：ConfigUpdateData（SetModel/SetPermissionMode/…）经 ConfigWriter 提交",
+    "服务：ConfigAppService（三端口实现）→ 分层合并（prepared 载荷）→ 落盘",
+    "事件：ConfigChangeData + ConfigChangeCauseData（字段级变更与归因）",
+    "订阅：ConfigSubscriptionData（字段→值视图，读者 diff 输入）",
+    "turn 边界：runtime check_config_changes → ConfigRefreshOutcomeData（Unchanged/Reloaded）→ ConfigReloaded Remind 注入"
+   ]
+  },
+  "全局配置与 Connect": {
+   "chain": "全局配置与 Connect 链（store → 类型化读取 → 装配 → CAS 提交）",
+   "path": [
+    "存储：wire_global_connect_store(agents_dir) → GlobalConfigConnectStore",
+    "读取：GlobalConfigDocument → provider_models() 类型化反序列化（legacy camelCase 由 share 自定义反序列化单点兼容）",
+    "装配：wire_connect(store, probe) 单点（catalog/系统信息/全局 UA/版本 + commit/directory 适配器）",
+    "提交：ConnectAppService → ConnectCommitPort → store.compare_and_swap → GlobalConfigRevision（契约类型化，display_u64 为视图层单点）",
+    "冲突：is_persist_conflict（DomainError 折叠后的 CAS 冲突语义谓词）",
+    "首启：BootstrapConfigReceipt（create_complete_default 回执，支撑 rollback）"
+   ]
+  },
+  "Provider 运行时解析": {
+   "chain": "Provider 运行时解析链（配置 → endpoint/UA → runtime 消费）",
+   "path": [
+    "输入：share::config::Config（provider 条目 + 全局 api.user_agent + catalog 默认值）",
+    "解析：resolve_provider_runtime / _for_selection（endpoint 优先级：finalUrl > baseUrl+suffix；UA 回退链）",
+    "输出：ResolvedProviderRuntimeConfig { base_url, user_agent }（模块内值对象，节点外不发布）",
+    "消费：runtime provider 装配与 /model 切换"
+   ]
+  },
+  "装配入口": {
+   "chain": "项目配置装配链（wire → ConfigWiring → 三视图注入）",
+   "path": [
+    "wire_project_config_with_cli（生产主入口；composition 6 处调用）",
+    "wire_project_config_with_agents_dir（agents_dir 限定，避免进程 env）",
+    "wire_project_config（无 CLI 变体，跨 crate 测试 wiring）",
+    "wire_config_override_store（overrides blob → NativeConfigStore）",
+    "ConfigWiring → reader()/writer()/participant() 三视图（#1866 B3：service() 直连已删）",
+    "消费：runtime 经 config::ports:: 三端口注入（#1866 B1 双路径收口）"
+   ]
+  }
+ }
+}

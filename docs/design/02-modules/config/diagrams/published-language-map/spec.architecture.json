@@ -1,0 +1,190 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Config 根面 Published Language 设计图",
+  "subtitle": "终态设计 · 根符号 26 · 功能子域四分（变更通知 / 全局与 Connect / 运行时解析 / 装配）",
+  "quality_profile": "showcase",
+  "visual_preset": "blueprint",
+  "output": "index.html"
+ },
+ "layout": {
+  "mode": "grid",
+  "origin": [
+   80,
+   120
+  ],
+  "cols": 6,
+  "gapX": 55,
+  "gapY": 70,
+  "cellW": 200,
+  "cellH": 80
+ },
+ "components": [
+  {
+   "id": "cfg",
+   "type": "backend",
+   "label": "config crate",
+   "sublabel": "配置 BC · 四子域",
+   "row": 1,
+   "col": 2
+  },
+  {
+   "id": "w1",
+   "type": "messagebus",
+   "label": "配置变更通知",
+   "sublabel": "命令 · 事件 · 订阅",
+   "row": 2,
+   "col": 0
+  },
+  {
+   "id": "w2",
+   "type": "database",
+   "label": "全局配置与 Connect",
+   "sublabel": "store · 类型化读取 · CAS",
+   "row": 2,
+   "col": 1
+  },
+  {
+   "id": "w3",
+   "type": "cloud",
+   "label": "Provider 运行时解析",
+   "sublabel": "endpoint · UA 回退",
+   "row": 2,
+   "col": 2
+  },
+  {
+   "id": "w4",
+   "type": "security",
+   "label": "装配入口",
+   "sublabel": "wire 工厂 · ConfigWiring",
+   "row": 2,
+   "col": 3
+  },
+  {
+   "id": "runtime",
+   "type": "frontend",
+   "label": "runtime",
+   "sublabel": "三端口消费 · turn 边界",
+   "row": 0,
+   "col": 2
+  },
+  {
+   "id": "composition",
+   "type": "cloud",
+   "label": "composition",
+   "sublabel": "wire 装配",
+   "row": 0,
+   "col": 1
+  },
+  {
+   "id": "sdk",
+   "type": "frontend",
+   "label": "sdk / TUI",
+   "sublabel": "表单视图 · revision u64",
+   "row": 0,
+   "col": 4
+  },
+  {
+   "id": "share",
+   "type": "external",
+   "label": "share",
+   "sublabel": "config schema · driver_env",
+   "row": 3,
+   "col": 2
+  },
+  {
+   "id": "provider",
+   "type": "external",
+   "label": "provider",
+   "sublabel": "probe 实现",
+   "row": 3,
+   "col": 4
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "config 根面 PL（白名单 26）",
+   "wraps": [
+    "cfg",
+    "w1",
+    "w2",
+    "w3",
+    "w4"
+   ],
+   "pad": 40
+  }
+ ],
+ "connections": [
+  {
+   "id": "rt-cfg",
+   "from": "runtime",
+   "to": "cfg",
+   "label": "consume PL",
+   "labelDy": 20
+  },
+  {
+   "id": "comp-cfg",
+   "from": "composition",
+   "to": "cfg",
+   "label": "wire 装配",
+   "variant": "dashed"
+  },
+  {
+   "id": "sdk-rt",
+   "from": "sdk",
+   "to": "runtime",
+   "label": "视图映射"
+  },
+  {
+   "id": "cfg-share",
+   "from": "cfg",
+   "to": "share",
+   "label": "schema · driver_env",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelDy": 20,
+   "labelAt": [
+    615,
+    494
+   ]
+  },
+  {
+   "id": "cfg-provider",
+   "from": "cfg",
+   "to": "provider",
+   "label": "probe 注入",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "top"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "amber",
+   "title": "#1866 收口记录",
+   "items": [
+    "A1 wire_connect 单点装配（composition 7 项手拼清零）",
+    "A2 provider_models() 类型化读取（composition 92 行手拼 JSON 删除）",
+    "A3 revision 契约 GlobalConfigRevision（display_u64 为视图层单点）",
+    "A4 死端口 SystemInformationPort 删除",
+    "B1 双路径收口（ports 模块路径唯一）；B3 service() 删除",
+    "B5/B7 connect 零消费清理、driver 词表委托 share 真相源",
+    "B2/B4 登记判定：ConfigAppService / wire_project_config"
+   ]
+  },
+  {
+   "dot": "slate",
+   "title": "子发布模块（模块即边界）",
+   "items": [
+    "catalog：内置 Provider 默认值唯一集合（PROVIDER_CATALOG）",
+    "connect：Connect 域全量词汇（草稿聚合根 / 命令 / 视图 / 端口）",
+    "form：ConfigForm 交互流程",
+    "ports：ConfigReader / ConfigWriter / ProjectConfigParticipant（模块路径唯一，#1866 B1）",
+    "runtime_resolution：仅两个 free fn 上根，返回值类型不出模块"
+   ]
+  }
+ ]
+}
