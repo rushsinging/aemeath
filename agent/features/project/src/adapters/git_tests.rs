@@ -381,3 +381,85 @@ fn probe_rejects_malformed_success_output() {
         );
     }
 }
+
+/// L4 真实 git 全链路（#2181 根因回归）：主仓 enter worktree A → AllowAll
+/// cd 越界漂回主仓 → 再 enter worktree B。修复前此处压入 root=A、kind=
+/// Linked 的混合帧，snapshot 被 prepare_restore 判 InvalidStackShape，
+/// 会话永久无法 resume；修复后帧归一化为 Primary 主仓，全链路可恢复。
+#[test]
+fn real_git_enter_from_linked_with_drifted_cwd_yields_resumable_snapshot() {
+    use crate::domain::state::WorkspaceState;
+    use share::session_types::{ProjectIdentityData, WorktreeKind};
+
+    let repository = initialized_repository();
+    let root = repository.root.canonicalize().expect("canonical root");
+    let common = root.join(".git");
+    let worktrees_root = repository._temp.path().join("wts");
+    std::fs::create_dir_all(&worktrees_root).expect("create worktrees root");
+    let wt_a = worktrees_root.join("wt-a");
+    let wt_b = worktrees_root.join("wt-b");
+    let git = GitCli::with_runner(repository.git_environment.clone());
+
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        root.clone(),
+        root.clone(),
+        WorktreeKind::Primary,
+        worktrees_root.clone(),
+    );
+
+    // 1. 主仓正常进入 linked worktree A。
+    state
+        .enter(&git, Some(wt_a.clone()), Some("branch-a".to_string()), None)
+        .expect("enter worktree A");
+    assert_eq!(state.worktree_kind(), WorktreeKind::Linked);
+    assert_eq!(state.stack_depth(), 1);
+
+    // 2. AllowAll cd 越界漂回主仓：path_base 跟随、workspace_root 保持 A。
+    state
+        .change_directory(
+            root.clone(),
+            share::tools_vocab::AuthorizationContext::ALLOW_ALL,
+        )
+        .expect("authorized cd back to primary root");
+    assert_eq!(state.path_base(), root.as_path());
+    assert_eq!(
+        state.workspace_root(),
+        wt_a.canonicalize().expect("canonical wt-a")
+    );
+
+    // 3. 漂移后进入 worktree B（用户故障场景）。
+    state
+        .enter(&git, Some(wt_b.clone()), Some("branch-b".to_string()), None)
+        .expect("enter worktree B from drifted cwd");
+
+    // 4. 帧归一化断言：snapshot 栈唯一帧 = Primary 主仓，NEVER 是 Linked 混合帧。
+    let dto = state.snapshot();
+    assert_eq!(dto.context_stack.len(), 1);
+    assert_eq!(dto.context_stack[0].worktree_kind, WorktreeKind::Primary);
+    assert_eq!(
+        PathBuf::from(&dto.context_stack[0].workspace_root),
+        root,
+        "帧 root 必须归一化为 cwd 实际所在主仓：{dto:?}"
+    );
+
+    // 5. 端到端：enter 产出的 snapshot 必须能被 prepare_restore 接受。
+    let live = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        root.clone(),
+        root.clone(),
+        WorktreeKind::Primary,
+        worktrees_root.clone(),
+    );
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git);
+    assert!(
+        prepared.is_ok(),
+        "enter 产物必须可 resume：{prepared:?}（dto: {dto:?}）"
+    );
+}

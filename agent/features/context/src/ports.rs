@@ -16,7 +16,7 @@ pub(crate) use crate::domain::PromptMaterializationError;
 pub use context_port::{
     ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
 };
-pub use session_management::SessionManagementPort;
+pub use session_management::{SessionManagementPort, SubRunContextFactoryPort};
 pub(crate) use session_snapshot_store::{
     SessionGeneration, SessionSnapshotStore, SessionStoreError,
 };

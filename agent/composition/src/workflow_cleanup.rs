@@ -13,7 +13,7 @@ use workflow::FileWorkflowPersistence;
 
 /// Workflow 落盘根目录：`~/.agents/workflows`。
 pub fn workflow_root() -> PathBuf {
-    share::config::paths::global_agents_dir().join("workflows")
+    share::config::paths::global_workflows_dir()
 }
 
 /// 清理无引用 Workflow 实体。

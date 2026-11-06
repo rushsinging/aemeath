@@ -396,35 +396,94 @@ fn prepare_restore_path_not_found_keeps_live_state() {
 }
 
 #[test]
-fn prepare_restore_path_outside_root_keeps_live_state() {
-    // #894: path_base 越出 workspace_root 且无回退资格（Linked、栈非空）->
-    // PathOutsideWorkspaceRoot，live state 不变。
-    // 普通会话（Primary、空栈）的越界回退语义见
-    // restore_falls_back_to_workspace_root_when_primary_path_base_outside_root。
-    let root = unique_temp_dir("prep_outside_root");
-    let outside = unique_temp_dir("prep_outside_other"); // 真实存在但不在 root 内
+fn restore_falls_back_to_workspace_root_when_linked_path_base_outside_root() {
+    // #2177: Linked + 非空栈的 path_base 越界同样回退，不再 fail-closed。
+    // 根因：AllowAll 下 bash cd 出工作区会把 path_base 持久化成越界路径，而旧实现
+    // 只对 Primary + 空栈放开回退，导致 resume 在 bootstrap 阶段失败、用户无法进入
+    // 会话执行显式 exit 协议（永久死锁）。
+    let top = unique_temp_dir("fallback_linked_top");
+    let frame = unique_temp_dir("fallback_linked_frame");
+    let outside = unique_temp_dir("fallback_linked_outside");
     let common = "/repo/.git";
-    let mut dto = valid_git_dto(&root, &outside, common);
-    dto.worktree_kind = WorktreeKind::Linked;
-    dto.context_stack = vec![share::session_types::PersistedWorkspaceFrame {
-        workspace_root: root.display().to_string(),
-        path_base: root.display().to_string(),
-        worktree_kind: WorktreeKind::Primary,
-    }];
-    let git = git_ops_for(&root, common);
+    let identity = ProjectIdentityData {
+        initial_cwd: top.display().to_string(),
+        git_common_dir: Some(common.to_string()),
+    };
+    let dto = PersistedWorkspaceContext {
+        workspace_id: WorkspaceId::derive(&identity, &top.display().to_string()),
+        project_identity: identity,
+        path_base: outside.display().to_string(),
+        workspace_root: top.display().to_string(),
+        worktree_kind: WorktreeKind::Linked,
+        context_stack: vec![share::session_types::PersistedWorkspaceFrame {
+            path_base: frame.display().to_string(),
+            workspace_root: frame.display().to_string(),
+            worktree_kind: WorktreeKind::Primary,
+        }],
+    };
+    let mut git = FakeGit::default();
+    git.toplevel.insert(top.clone(), top.clone());
+    git.common_dir.insert(top.clone(), PathBuf::from(common));
+    git.toplevel.insert(frame.clone(), frame.clone());
+    git.common_dir.insert(frame.clone(), PathBuf::from(common));
+    git.worktrees.insert(top.clone());
 
-    let live = st("/repo");
-    let before = live.workspace_root.clone();
-    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
+    let mut live = st("/repo");
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git)
+        .expect("Linked 会话越界 path_base 必须回退 workspace_root 而非拒绝恢复");
+    live.commit_restore(prepared);
+    assert_eq!(live.path_base, top);
+    assert_eq!(live.workspace_root, top);
+    // 会话数据不在 workspace 里，回退不改变 step/摘要任何持久化内容。
+    let _ = std::fs::remove_dir_all(outside);
+}
 
-    assert!(
-        matches!(
-            result,
-            Err(crate::domain::types::WorkspaceRestoreError::PathOutsideWorkspaceRoot { .. })
-        ),
-        "expected PathOutsideWorkspaceRoot, got {result:?}"
+#[test]
+fn restore_falls_back_to_frame_root_when_stack_path_base_outside_frame_root() {
+    // #2177: 栈帧 path_base 同样是 cwd 语义，越界时回退到帧 workspace_root，
+    // 而不是让一个已失效的历史 cwd 卡死整个 resume。
+    let top = unique_temp_dir("fallback_frame_top");
+    let frame = unique_temp_dir("fallback_frame_primary");
+    let outside = unique_temp_dir("fallback_frame_outside");
+    let common = "/repo/.git";
+    let identity = ProjectIdentityData {
+        initial_cwd: top.display().to_string(),
+        git_common_dir: Some(common.to_string()),
+    };
+    let dto = PersistedWorkspaceContext {
+        workspace_id: WorkspaceId::derive(&identity, &top.display().to_string()),
+        project_identity: identity,
+        path_base: top.display().to_string(),
+        workspace_root: top.display().to_string(),
+        worktree_kind: WorktreeKind::Linked,
+        context_stack: vec![share::session_types::PersistedWorkspaceFrame {
+            path_base: outside.display().to_string(),
+            workspace_root: frame.display().to_string(),
+            worktree_kind: WorktreeKind::Primary,
+        }],
+    };
+    let mut git = FakeGit::default();
+    git.toplevel.insert(top.clone(), top.clone());
+    git.common_dir.insert(top.clone(), PathBuf::from(common));
+    git.toplevel.insert(frame.clone(), frame.clone());
+    git.common_dir.insert(frame.clone(), PathBuf::from(common));
+    git.worktrees.insert(top.clone());
+
+    let mut live = st("/repo");
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git)
+        .expect("帧 path_base 越界必须回退帧 workspace_root 而非拒绝恢复");
+    live.commit_restore(prepared);
+    let snapshot = live.snapshot();
+    assert_eq!(snapshot.context_stack.len(), 1);
+    assert_eq!(
+        snapshot.context_stack[0].path_base,
+        frame.display().to_string()
     );
-    assert_eq!(live.workspace_root, before);
+    assert_eq!(
+        snapshot.context_stack[0].workspace_root,
+        frame.display().to_string()
+    );
+    let _ = std::fs::remove_dir_all(outside);
 }
 
 #[test]
@@ -1064,6 +1123,208 @@ fn enter_promotes_worktree_kind_to_linked_and_captures_previous() {
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// 顶层 Linked + cwd 越界漂移回主仓后 `enter`：帧必须归一化为 cwd 实际
+/// 所在的同仓 Primary toplevel，NEVER 压入 root 与 cwd 脱节、kind=Linked
+/// 的混合帧（该形状 restore 必拒 InvalidStackShape，会话将永久无法 resume）。
+/// 端到端断言：`enter` 产出的 snapshot 必须能通过 `prepare_restore`。
+#[test]
+fn enter_from_linked_with_drifted_cwd_normalizes_frame_to_primary_toplevel() {
+    let root = unique_temp_dir("enter_drift_root");
+    let wt_a = unique_temp_dir("enter_drift_wt_a");
+    let target = unique_temp_dir("enter_drift_target");
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(root.clone(), root.clone());
+    git.common_dir.insert(root.clone(), common.clone());
+    git.toplevel.insert(wt_a.clone(), wt_a.clone());
+    git.common_dir.insert(wt_a.clone(), common.clone());
+    git.worktrees.insert(wt_a.clone());
+    git.toplevel.insert(target.clone(), target.clone());
+    git.common_dir.insert(target.clone(), common.clone());
+    git.worktrees.insert(target.clone());
+
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        wt_a.clone(),
+        root.clone(),
+        WorktreeKind::Linked,
+        root.join(".worktrees"),
+    );
+
+    state.enter(&git, Some(target.clone()), None, None).unwrap();
+
+    assert_eq!(state.stack.len(), 1, "漂移场景归一化后只压入一帧");
+    assert_eq!(state.stack[0].worktree_kind, WorktreeKind::Primary);
+    assert_eq!(state.stack[0].workspace_root, root);
+    assert_eq!(state.stack[0].path_base, root);
+
+    let dto = state.snapshot();
+    let live = st("/repo");
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git);
+    assert!(
+        prepared.is_ok(),
+        "enter 产物必须可 resume：{prepared:?}（dto: {dto:?}）"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&wt_a);
+    let _ = std::fs::remove_dir_all(&target);
+}
+
+/// 漂移场景栈为空时同样必须归一化：旧实现栈空不走清栈分支，直接压
+/// kind=Linked 的混合帧，一样产出 restore 必拒形状。
+#[test]
+fn enter_from_linked_with_empty_stack_and_drifted_cwd_also_normalizes() {
+    let root = unique_temp_dir("enter_drift_empty_root");
+    let wt_a = unique_temp_dir("enter_drift_empty_wt");
+    let target = unique_temp_dir("enter_drift_empty_target");
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(root.clone(), root.clone());
+    git.common_dir.insert(root.clone(), common.clone());
+    git.toplevel.insert(wt_a.clone(), wt_a.clone());
+    git.common_dir.insert(wt_a.clone(), common.clone());
+    git.worktrees.insert(wt_a.clone());
+    git.toplevel.insert(target.clone(), target.clone());
+    git.common_dir.insert(target.clone(), common.clone());
+    git.worktrees.insert(target.clone());
+
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        wt_a.clone(),
+        root.clone(),
+        WorktreeKind::Linked,
+        root.join(".worktrees"),
+    );
+    assert!(state.stack.is_empty());
+
+    state.enter(&git, Some(target.clone()), None, None).unwrap();
+
+    assert_eq!(state.stack.len(), 1);
+    assert_eq!(state.stack[0].worktree_kind, WorktreeKind::Primary);
+    assert_eq!(state.stack[0].workspace_root, root);
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&wt_a);
+    let _ = std::fs::remove_dir_all(&target);
+}
+
+/// 顶层 Linked + cwd 仍在当前 worktree 内 → Linked→Linked 嵌套拒绝（保持原语义）。
+#[test]
+fn enter_from_linked_with_cwd_inside_current_worktree_still_rejects_nested() {
+    let root = unique_temp_dir("enter_nested_inside_root");
+    let wt_a = unique_temp_dir("enter_nested_inside_wt");
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(wt_a.clone(), wt_a.clone());
+    git.common_dir.insert(wt_a.clone(), common.clone());
+    git.worktrees.insert(wt_a.clone());
+
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        wt_a.clone(),
+        wt_a.clone(),
+        WorktreeKind::Linked,
+        root.join(".worktrees"),
+    );
+
+    let error = state
+        .enter(&git, Some(root.join("wt-b")), None, None)
+        .unwrap_err();
+    assert!(
+        error.message().contains("已在 worktree 中"),
+        "unexpected: {}",
+        error.message()
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&wt_a);
+}
+
+/// 顶层 Linked + cwd 漂到同仓的另一个 linked worktree → 同属嵌套，拒绝。
+#[test]
+fn enter_from_linked_with_cwd_in_sibling_worktree_rejects_nested() {
+    let root = unique_temp_dir("enter_sibling_root");
+    let wt_a = unique_temp_dir("enter_sibling_wt_a");
+    let wt_c = unique_temp_dir("enter_sibling_wt_c");
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(wt_c.clone(), wt_c.clone());
+    git.common_dir.insert(wt_c.clone(), common.clone());
+    git.worktrees.insert(wt_c.clone());
+
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        wt_a.clone(),
+        wt_c.clone(),
+        WorktreeKind::Linked,
+        root.join(".worktrees"),
+    );
+
+    let error = state
+        .enter(&git, Some(root.join("wt-b")), None, None)
+        .unwrap_err();
+    assert!(
+        error.message().contains("已在 worktree 中"),
+        "unexpected: {}",
+        error.message()
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&wt_a);
+    let _ = std::fs::remove_dir_all(&wt_c);
+}
+
+/// 顶层 Linked + cwd 漂到无关仓库 → RepoMismatch，不允许从脱节位置 enter。
+#[test]
+fn enter_from_linked_with_cwd_in_foreign_repo_reports_repo_mismatch() {
+    let root = unique_temp_dir("enter_foreign_root");
+    let wt_a = unique_temp_dir("enter_foreign_wt_a");
+    let foreign = unique_temp_dir("enter_foreign_dir");
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(foreign.clone(), foreign.clone());
+    git.common_dir.insert(foreign.clone(), foreign.join(".git"));
+
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentityData {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        wt_a.clone(),
+        foreign.clone(),
+        WorktreeKind::Linked,
+        root.join(".worktrees"),
+    );
+
+    let result = state.enter(&git, Some(root.join("wt-b")), None, None);
+    assert!(
+        matches!(
+            &result,
+            Err(error) if error.message().contains("仓库") || error.message().contains("mismatch")
+                || error.message().contains("不匹配")
+        ),
+        "expected repo mismatch, got: {:?}",
+        result.map(|_: WorkspaceData| ()).err()
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&wt_a);
+    let _ = std::fs::remove_dir_all(&foreign);
 }
 
 #[test]

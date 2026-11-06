@@ -111,23 +111,25 @@ pub enum RsiRunExit {
 struct ProductionRsiLlm {
     client: LlmClient,
     model: ModelInfo,
+    reasoning: ReasoningLevel,
+    max_tokens: u32,
 }
 
 impl ProductionRsiLlm {
     async fn invoke_text(&self, prompt: &str) -> Result<RsiLlmCompletion, HarnessError> {
-        // 结构化 JSON 输出任务显式低思考档（对齐反思链路教训：高思考
-        // 档会把输出预算耗在 thinking 上导致正文为空）——取模型阶梯
-        // 最低档；空阶梯 fallback Off。
-        let reasoning = self
-            .model
-            .supported_reasoning
-            .first()
-            .copied()
-            .unwrap_or(ReasoningLevel::Off);
+        let reasoning = self.reasoning;
+        log::info!(
+            target: crate::LOG_TARGET,
+            "RSI LLM request: model={} reasoning={:?} max_tokens={} prompt_chars={}",
+            self.model.model,
+            reasoning,
+            self.max_tokens,
+            prompt.chars().count()
+        );
         let request = ProviderRequestData::new(
             self.model.model.clone(),
             [share::message::Message::user(prompt.to_string())],
-            16384,
+            self.max_tokens,
             reasoning,
         );
         let response = self
@@ -145,6 +147,19 @@ impl ProductionRsiLlm {
                 _ => None,
             })
             .collect::<String>();
+        if text.trim().is_empty() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "RSI LLM empty text: model={} ok={} stop_reason={:?} effective_reasoning={:?} usage={:?} blocks={} prompt_chars={}",
+                self.model.model,
+                response.ok,
+                response.stop_reason,
+                response.effective_reasoning,
+                response.token_usage,
+                response.output.len(),
+                prompt.chars().count()
+            );
+        }
         let usage = response
             .token_usage
             .map(|usage| RsiLlmUsage {
@@ -204,9 +219,8 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
             Some(resolved.source_config.base_url.clone())
         },
         model: resolved.model.id.clone(),
-        max_tokens: resolved.model.max_tokens,
-        // #2032 阶梯装配：requested=false 会被连续化档位判为 effective 超
-        // 限；声明支持并按模型阶梯取最低档请求（结构化输出低思考）。
+        max_tokens: config.harness.rsi.max_tokens,
+        // 结构化 JSON 输出使用 RSI 独立思考档与输出预算。
         reasoning: true,
         reasoning_config: None,
         timeout_secs: 300,
@@ -227,12 +241,17 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        supported_reasoning: vec![ReasoningLevel::Off],
+        supported_reasoning: ReasoningLevel::ALL.to_vec(),
         server_effort_map: Vec::new(),
         context_limit: Some(128 * 1024),
-        output_limit: Some(4096),
+        output_limit: Some(config.harness.rsi.max_tokens as usize),
     };
-    Ok(Arc::new(ProductionRsiLlm { client, model }))
+    Ok(Arc::new(ProductionRsiLlm {
+        client,
+        model,
+        reasoning: config.harness.rsi.reasoning,
+        max_tokens: config.harness.rsi.max_tokens,
+    }))
 }
 
 #[cfg(test)]
@@ -269,12 +288,13 @@ struct ProjectWorkspaceValue {
 /// 从 `<agents>/session/<project-segment>/` 反解项目 overlay 落点。
 ///
 /// 项目段本身是单向哈希，NEVER 从路径猜测项目根；权威来源是同目录 canonical
-/// session 的 workspace 快照。每个项目根按运行时注入优先级选择：
-/// `AGENTS.md` 存在则优先，否则 `CLAUDE.md`；两者都缺失时不注册项目组件，
-/// NEVER 自动创建项目说明文件。
+/// session 的 workspace 快照。每个项目根按统一写入目标解析：
+/// `AGENTS.md` 存在则优先，否则 `CLAUDE.md`；两者都缺失时注册待创建的
+/// `AGENTS.md`，实际文件只在采纳写入时创建。
 fn project_overlay_component_paths_under(
     agents_dir: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
+    // #2179：session dataset 已迁到运行时状态根，参数即该根（测试可注入）。
     let session_root = agents_dir.join("session");
     let mut paths = HashMap::new();
     let Ok(project_entries) = std::fs::read_dir(&session_root) else {
@@ -295,15 +315,8 @@ fn project_overlay_component_paths_under(
         let Some(root) = resolve_project_root_from_snapshots(&project_dir) else {
             continue;
         };
-        let agents_md = root.join("AGENTS.md");
-        let claude_md = root.join("CLAUDE.md");
-        let target = if agents_md.is_file() {
-            agents_md
-        } else if claude_md.is_file() {
-            claude_md
-        } else {
-            continue;
-        };
+        // #2179：AGENTS.md 优先、CLAUDE.md fallback、都缺失时待创建 AGENTS.md。
+        let target = share::config::paths::project_instruction_write_target(&root);
         paths.insert(
             harness::ComponentId {
                 kind: harness::ComponentKind::SystemPromptOverlay,
@@ -313,6 +326,31 @@ fn project_overlay_component_paths_under(
         );
     }
     paths
+}
+
+/// 缺失项目 overlay 的虚拟骨架：只让 registry 可见，不写盘。
+///
+/// 实际 `AGENTS.md` 仅在 RSI 采纳并调用 registry.write 时创建。
+fn project_overlay_bootstrap_defaults(
+    component_paths: &HashMap<harness::ComponentId, std::path::PathBuf>,
+) -> HashMap<harness::ComponentId, harness::ComponentContent> {
+    component_paths
+        .iter()
+        .filter(|(id, path)| {
+            id.kind == harness::ComponentKind::SystemPromptOverlay
+                && id.name.as_str() != "global"
+                && !path.exists()
+        })
+        .map(|(id, _)| {
+            (
+                id.clone(),
+                harness::ComponentContent {
+                    frontmatter: None,
+                    body: "# Project\n".to_string(),
+                },
+            )
+        })
+        .collect()
 }
 
 fn resolve_project_root_from_snapshots(project_dir: &Path) -> Option<std::path::PathBuf> {
@@ -361,6 +399,7 @@ fn resolve_project_root_from_snapshots(project_dir: &Path) -> Option<std::path::
 
 fn builtin_prose_component_paths_under(
     agents_dir: &Path,
+    aemeath_home: &Path,
 ) -> HashMap<harness::ComponentId, std::path::PathBuf> {
     let mut component_paths = HashMap::new();
     component_paths.insert(
@@ -375,7 +414,7 @@ fn builtin_prose_component_paths_under(
             kind: harness::ComponentKind::ToolGuidance,
             name: harness::ComponentName::new("default"),
         },
-        agents_dir.join("tool_guidance.md"),
+        aemeath_home.join(share::config::paths::TOOL_GUIDANCE_FILE_NAME),
     );
     component_paths.insert(
         harness::ComponentId {
@@ -415,8 +454,9 @@ fn builtin_prose_bootstrap_defaults() -> HashMap<harness::ComponentId, harness::
 /// 正式装配前补齐内建 prose 职责面：只创建缺失骨架，NEVER 覆盖用户文件。
 fn ensure_builtin_prose_components_at(
     agents_dir: &Path,
+    aemeath_home: &Path,
 ) -> Result<Vec<harness::ComponentId>, HarnessError> {
-    let component_paths = builtin_prose_component_paths_under(agents_dir);
+    let component_paths = builtin_prose_component_paths_under(agents_dir, aemeath_home);
     let defaults = builtin_prose_bootstrap_defaults();
     let mut ids: Vec<_> = defaults.keys().cloned().collect();
     ids.sort();
@@ -445,21 +485,28 @@ fn ensure_builtin_prose_components_at(
 
 fn wire_component_registry_under(
     agents_dir: &Path,
+    aemeath_home: &Path,
     mode: ComponentBootstrapMode,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     if mode == ComponentBootstrapMode::Formal {
-        ensure_builtin_prose_components_at(agents_dir)?;
+        ensure_builtin_prose_components_at(agents_dir, aemeath_home)?;
     }
-    let mut component_paths = builtin_prose_component_paths_under(agents_dir);
-    component_paths.extend(project_overlay_component_paths_under(agents_dir));
+    let mut component_paths = builtin_prose_component_paths_under(agents_dir, aemeath_home);
+    // #2179：项目 overlay 的项目段来自运行时状态根（~/.aemeath/state/session），
+    // 而 guardrails/AGENTS.md/skills 仍在 ~/.agents。
+    let state_root = crate::state_layout_migration::state_root_for(agents_dir);
+    component_paths.extend(project_overlay_component_paths_under(&state_root));
+    let project_defaults = project_overlay_bootstrap_defaults(&component_paths);
+    let mut bootstrap_defaults = builtin_prose_bootstrap_defaults();
+    bootstrap_defaults.extend(project_defaults);
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> = match mode {
-        ComponentBootstrapMode::DryRun => Box::new(
+        ComponentBootstrapMode::DryRun | ComponentBootstrapMode::Formal => Box::new(
             harness::adapters::filesystem::FilesystemComponentRegistry::with_bootstrap_defaults(
                 component_paths,
-                builtin_prose_bootstrap_defaults(),
+                bootstrap_defaults,
             ),
         ),
-        ComponentBootstrapMode::None | ComponentBootstrapMode::Formal => Box::new(
+        ComponentBootstrapMode::None => Box::new(
             harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths),
         ),
     };
@@ -483,6 +530,7 @@ pub fn wire_component_registry(
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
         &share::config::paths::global_agents_dir(),
+        &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::None,
     )
 }
@@ -493,6 +541,7 @@ pub fn wire_bootstrapped_component_registry(
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
         &share::config::paths::global_agents_dir(),
+        &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::Formal,
     )
 }
@@ -503,6 +552,7 @@ pub fn wire_dry_run_component_registry(
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
     wire_component_registry_under(
         &share::config::paths::global_agents_dir(),
+        &share::config::paths::aemeath_home_dir(),
         ComponentBootstrapMode::DryRun,
     )
 }
@@ -510,7 +560,7 @@ pub fn wire_dry_run_component_registry(
 /// 经验库路径（`{agents_dir}/harness/library.jsonl`，独立于 memory corpus）。
 pub fn wire_lesson_store() -> Arc<LessonStore> {
     Arc::new(LessonStore::new(
-        share::config::paths::global_agents_dir().join("harness/library.jsonl"),
+        share::config::paths::global_harness_dir().join("library.jsonl"),
     ))
 }
 
@@ -598,7 +648,7 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
     let lesson_store = wire_lesson_store();
     let stream = ProductionEvidenceStream {
         datasets_root: share::config::paths::global_session_datasets_dir(),
-        harness_dir: share::config::paths::global_agents_dir().join("harness"),
+        harness_dir: share::config::paths::global_harness_dir(),
     };
     let task = harness::domain::cycle_task::HarnessRsiCycleTask::new(
         registry,
@@ -610,17 +660,15 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
     // #2070：过程事件记录器（fail-open；GC 由 recorder 自管）
     .with_event_recorder(std::sync::Arc::new(
         harness::domain::events::RsiEventRecorder::new(
-            share::config::paths::global_agents_dir().join("harness/events"),
+            share::config::paths::global_harness_dir().join("events"),
         ),
     ))
     .with_version_store(std::sync::Arc::new(
         harness::domain::versioning::ComponentVersionStore::new(
-            share::config::paths::global_agents_dir().join("harness/versions"),
+            share::config::paths::global_harness_dir().join("versions"),
         ),
     ))
-    .with_history_path(
-        share::config::paths::global_agents_dir().join("harness/signal-history.json"),
-    );
+    .with_history_path(share::config::paths::global_harness_dir().join("signal-history.json"));
     let mut task = task;
     if dry_run {
         task = task.with_dry_run();
@@ -748,10 +796,17 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
             let all_runs = harness::adapters::session_scanner::dataset_run_ids(
                 &self.datasets_root.join(&session_key),
             );
+            let source_updated_at_secs = std::fs::metadata(self.datasets_root.join(&session_key))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
             if let Some(progress) = state.sessions.get_mut(&session_key) {
                 progress.session_complete = all_runs
                     .iter()
                     .all(|run_id| progress.processed_run_ids.contains(run_id));
+                progress.source_updated_at_secs = source_updated_at_secs;
             }
         }
         let live: std::collections::BTreeSet<String> =
@@ -860,7 +915,7 @@ fn load_global_config_layered() -> Result<share::config::Config, String> {
 
 /// dry-run 预览落盘（ALWAYS 覆盖写，NEVER 累积；#2050）。
 fn write_dry_run_preview(summary: &str) {
-    let harness_dir = share::config::paths::global_agents_dir().join("harness");
+    let harness_dir = share::config::paths::global_harness_dir();
     if let Err(error) = std::fs::create_dir_all(&harness_dir) {
         log::warn!(target: crate::LOG_TARGET, "创建 harness 目录失败：{error}");
         return;
@@ -892,7 +947,7 @@ pub fn run_rsi_history(component: Option<&str>) -> RsiRunExit {
         }
     };
     let store = harness::domain::versioning::ComponentVersionStore::new(
-        share::config::paths::global_agents_dir().join("harness/versions"),
+        share::config::paths::global_harness_dir().join("versions"),
     );
     let ids: Vec<harness::ComponentId> = match component {
         Some(raw) => match harness::parse_component_id(raw) {
@@ -983,7 +1038,7 @@ pub fn run_rsi_rollback(component: &str, cycle: Option<&str>) -> RsiRunExit {
         };
     };
     let store = harness::domain::versioning::ComponentVersionStore::new(
-        share::config::paths::global_agents_dir().join("harness/versions"),
+        share::config::paths::global_harness_dir().join("versions"),
     );
     let snapshot = match store.load(&id, cycle) {
         Ok(snapshot) => snapshot,

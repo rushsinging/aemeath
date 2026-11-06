@@ -60,6 +60,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub audit: Option<AuditConfigPatch>,
     #[serde(default)]
+    pub cleanup: Option<crate::config::cleanup::CleanupConfig>,
+    #[serde(default)]
     pub storage: Option<StorageConfigPatch>,
     #[serde(default)]
     pub scoring: Option<ScoringConfigPatch>,
@@ -100,6 +102,7 @@ impl ConfigPatch {
             && self.permissions.is_none()
             && self.skills.is_none()
             && self.audit.is_none()
+            && self.cleanup.is_none()
             && self.storage.is_none()
             && self.scoring.is_none()
             && self.workflow.is_none()
@@ -353,6 +356,10 @@ pub struct RsiConfigPatch {
     pub evidence_block_runs: Option<usize>,
     #[serde(default)]
     pub execution_mode: Option<crate::config::RsiExecutionMode>,
+    #[serde(default)]
+    pub reasoning: Option<crate::reasoning::ReasoningLevel>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -480,6 +487,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(audit) = patch.audit {
         base.audit = apply_audit_patch(base.audit, audit);
+    }
+    if let Some(cleanup) = patch.cleanup {
+        base.cleanup = cleanup;
     }
     if let Some(storage) = patch.storage {
         base.storage = apply_storage_patch(base.storage, storage);
@@ -1009,6 +1019,12 @@ pub(crate) fn apply_harness_patch(
         }
         if let Some(v) = rsi.execution_mode {
             base.rsi.execution_mode = v;
+        }
+        if let Some(v) = rsi.reasoning {
+            base.rsi.reasoning = v;
+        }
+        if let Some(v) = rsi.max_tokens {
+            base.rsi.max_tokens = v;
         }
     }
     base

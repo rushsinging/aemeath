@@ -28,6 +28,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
         compact_model_resolver: None,
         workflow_probe: None,
         workflow_reset: None,
+        sub_run_context_factory: None,
         tool_catalog: tool_ports.catalog_port(),
         tool_execution: tool_ports.execution(),
         policy: policy::allow_all(),

@@ -19,7 +19,8 @@ fn tool_guidance_id() -> ComponentId {
 #[test]
 fn builtin_prose_bootstrap_creates_missing_skeletons_atomically_and_idempotently() {
     let root = tempfile::tempdir().expect("tempdir");
-    let created = super::ensure_builtin_prose_components_at(root.path()).expect("bootstrap");
+    let created =
+        super::ensure_builtin_prose_components_at(root.path(), root.path()).expect("bootstrap");
     assert_eq!(created, vec![guardrails_id(), tool_guidance_id()]);
     assert_eq!(
         std::fs::read_to_string(root.path().join("guardrails.md")).expect("guardrails"),
@@ -32,8 +33,8 @@ fn builtin_prose_bootstrap_creates_missing_skeletons_atomically_and_idempotently
 
     // 第二次运行不覆盖用户内容。
     std::fs::write(root.path().join("guardrails.md"), "# 用户规则").unwrap();
-    let created_again =
-        super::ensure_builtin_prose_components_at(root.path()).expect("bootstrap again");
+    let created_again = super::ensure_builtin_prose_components_at(root.path(), root.path())
+        .expect("bootstrap again");
     assert!(created_again.is_empty());
     assert_eq!(
         std::fs::read_to_string(root.path().join("guardrails.md")).unwrap(),
@@ -44,9 +45,12 @@ fn builtin_prose_bootstrap_creates_missing_skeletons_atomically_and_idempotently
 #[test]
 fn synthetic_bootstrap_registry_lists_missing_builtin_components_for_dry_run() {
     let root = tempfile::tempdir().expect("tempdir");
-    let registry =
-        super::wire_component_registry_under(root.path(), super::ComponentBootstrapMode::DryRun)
-            .expect("dry registry");
+    let registry = super::wire_component_registry_under(
+        root.path(),
+        root.path(),
+        super::ComponentBootstrapMode::DryRun,
+    )
+    .expect("dry registry");
     let guard = registry.try_lock().expect("lock");
     assert!(guard.list().contains(&guardrails_id()));
     assert!(guard.list().contains(&tool_guidance_id()));
@@ -74,10 +78,16 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
     let agents_root = tempfile::tempdir().expect("agents tempdir");
     let project_a = tempfile::tempdir().expect("project a");
     let project_b = tempfile::tempdir().expect("project b");
+    let project_c = tempfile::tempdir().expect("project c");
     let segment_a = "0123456789abcdef";
     let segment_b = "fedcba9876543210";
+    let segment_c = "aaaaaaaaaaaaaaaa";
     let session_dir = agents_root.path().join("session");
-    for (segment, root) in [(segment_a, project_a.path()), (segment_b, project_b.path())] {
+    for (segment, root) in [
+        (segment_a, project_a.path()),
+        (segment_b, project_b.path()),
+        (segment_c, project_c.path()),
+    ] {
         std::fs::create_dir_all(session_dir.join(segment)).unwrap();
         let canonical = serde_json::json!({
             "workspace": {
@@ -113,10 +123,16 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
         kind: ComponentKind::SystemPromptOverlay,
         name: harness::ComponentName::new(segment_b),
     };
+    let overlay_c = harness::ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: harness::ComponentName::new(segment_c),
+    };
     assert_eq!(paths[&overlay_a], project_a.path().join("AGENTS.md"));
     assert_eq!(paths[&overlay_b], project_b.path().join("CLAUDE.md"));
+    assert_eq!(paths[&overlay_c], project_c.path().join("AGENTS.md"));
 
     let registry = super::wire_component_registry_under(
+        agents_root.path(),
         agents_root.path(),
         super::ComponentBootstrapMode::DryRun,
     )
@@ -124,6 +140,7 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
     let registry = registry.try_lock().expect("lock");
     assert!(registry.list().contains(&overlay_a));
     assert!(registry.list().contains(&overlay_b));
+    assert!(registry.list().contains(&overlay_c));
     assert_eq!(
         registry
             .read(&overlay_a)
@@ -140,14 +157,54 @@ fn project_overlay_registry_prefers_agents_md_and_falls_back_to_claude_md() {
             .trim(),
         "# B CLAUDE"
     );
+    assert_eq!(
+        registry
+            .read(&overlay_c)
+            .expect("read missing project C")
+            .body
+            .trim(),
+        "# Project"
+    );
+    assert!(
+        !project_c.path().join("AGENTS.md").exists(),
+        "虚拟项目 overlay NEVER 在读取时写盘"
+    );
 }
 
 #[test]
 fn component_path_map_contains_builtin_prose_components() {
     let root = Path::new("/agents");
-    let paths = super::builtin_prose_component_paths_under(root);
+    let paths = super::builtin_prose_component_paths_under(root, root);
     let keys: Vec<ComponentId> = paths.keys().cloned().collect();
     assert!(keys.contains(&guardrails_id()));
     assert!(keys.contains(&tool_guidance_id()));
     assert_eq!(paths.len(), 3);
+}
+
+#[test]
+fn builtin_component_paths_split_agents_knowledge_from_aemeath_home() {
+    // #2179：tool_guidance 落 ~/.aemeath，guardrails 与全局 overlay 落 ~/.agents。
+    let agents = tempfile::tempdir().expect("agents root");
+    let home = tempfile::tempdir().expect("aemeath home");
+    let paths = super::builtin_prose_component_paths_under(agents.path(), home.path());
+
+    assert_eq!(
+        paths[&tool_guidance_id()],
+        home.path().join("tool_guidance.md"),
+        "tool_guidance 属于 aemeath 专属知识"
+    );
+    assert_eq!(
+        paths[&guardrails_id()],
+        agents.path().join("guardrails.md"),
+        "guardrails 属于用户通用知识"
+    );
+    let overlay_global = harness::ComponentId {
+        kind: ComponentKind::SystemPromptOverlay,
+        name: ComponentName::new("global"),
+    };
+    assert_eq!(
+        paths[&overlay_global],
+        agents.path().join("AGENTS.md"),
+        "全局 overlay 属于用户通用知识"
+    );
 }

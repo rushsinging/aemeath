@@ -622,18 +622,33 @@ fn guardrails_section_wraps_content_with_source_tag() {
 
 #[test]
 fn guardrails_section_truncates_at_budget_with_marker() {
-    let oversized = "规则".repeat(crate::constants::GUARDRAILS_SECTION_MAX_CHARS);
+    let oversized = "规则".repeat(crate::constants::GUARDRAILS_SECTION_MAX_TOKENS * 2);
     let section = render_guardrails_section("p", &oversized);
     assert!(section.contains("（截断）"), "超预算必须带截断标记");
-    let content_len = section
+    let body = section
         .strip_prefix("<guardrails source=\"p\">\n")
         .and_then(|s| s.strip_suffix("\n</guardrails>"))
-        .expect("标签结构")
-        .chars()
-        .count();
+        .expect("标签结构");
     assert!(
-        content_len <= crate::constants::GUARDRAILS_SECTION_MAX_CHARS + 10,
-        "正文必须受预算约束：{content_len}"
+        share::token_budget::estimate_tokens(body)
+            <= crate::constants::GUARDRAILS_SECTION_MAX_TOKENS,
+        "正文必须受 token 预算约束：{}",
+        share::token_budget::estimate_tokens(body)
+    );
+}
+
+#[test]
+fn guardrails_section_truncates_mixed_cjk_latin_by_token_budget() {
+    let oversized = "规则abc".repeat(crate::constants::GUARDRAILS_SECTION_MAX_TOKENS);
+    let section = render_guardrails_section("p", &oversized);
+    let body = section
+        .strip_prefix("<guardrails source=\"p\">\n")
+        .and_then(|s| s.strip_suffix("\n</guardrails>"))
+        .expect("标签结构");
+    assert!(body.ends_with("…（截断）"));
+    assert!(
+        share::token_budget::estimate_tokens(body)
+            <= crate::constants::GUARDRAILS_SECTION_MAX_TOKENS
     );
 }
 
@@ -665,18 +680,28 @@ fn tool_guidance_section_wraps_content_with_source_tag() {
 
 #[test]
 fn tool_guidance_section_truncates_at_budget_with_marker() {
-    let oversized = "指南".repeat(crate::constants::TOOL_GUIDANCE_SECTION_MAX_CHARS);
+    let oversized = "指南".repeat(crate::constants::TOOL_GUIDANCE_SECTION_MAX_TOKENS * 2);
     let section = render_tool_guidance_section("p", &oversized);
-    assert!(section.contains("（截断）"), "超预算必须带截断标记");
+    let body = section
+        .strip_prefix("<tool_guidance source=\"p\">\n")
+        .and_then(|s| s.strip_suffix("\n</tool_guidance>"))
+        .expect("标签结构");
+    assert!(body.ends_with("…（截断）"), "超预算必须带截断标记");
+    assert!(
+        share::token_budget::estimate_tokens(body)
+            <= crate::constants::TOOL_GUIDANCE_SECTION_MAX_TOKENS
+    );
 }
 
 #[tokio::test]
 async fn tool_guidance_missing_file_yields_none() {
     let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
-    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    // #2179：canonical 落点已迁到 ~/.aemeath（AEMEATH_HOME_DIR），
+    // 不做运行时 fallback。
+    std::env::set_var("AEMEATH_HOME_DIR", cwd.path());
     let section = load_tool_guidance_section().await;
-    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    std::env::remove_var("AEMEATH_HOME_DIR");
     assert!(section.is_none(), "缺文件 NEVER 产生空段");
 }
 
@@ -684,14 +709,14 @@ async fn tool_guidance_missing_file_yields_none() {
 async fn claude_md_message_appends_tool_guidance_section() {
     let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
-    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    std::env::set_var("AEMEATH_HOME_DIR", cwd.path());
     std::fs::write(
         cwd.path().join("tool_guidance.md"),
         "# 工具指南\n优先并行派发",
     )
     .unwrap();
     let section = load_tool_guidance_section().await;
-    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    std::env::remove_var("AEMEATH_HOME_DIR");
     let section = section.expect("tool_guidance 必须加载");
     assert!(section.contains("优先并行派发"));
 }
@@ -700,7 +725,7 @@ async fn claude_md_message_appends_tool_guidance_section() {
 
 #[test]
 fn guidance_content_replaced_with_read_hint_when_over_budget() {
-    let oversized = "行".repeat(crate::constants::GUIDANCE_FILE_MAX_CHARS + 500);
+    let oversized = "行".repeat(crate::constants::GUIDANCE_FILE_MAX_TOKENS * 2);
     let replaced = truncate_guidance_content(&oversized, "/p/AGENTS.md");
     // NEVER 腰斩：超预算正文零注入，只留引导（语义完整 + 常驻 O(1)）
     assert!(replaced.contains("超过注入预算"));
@@ -713,4 +738,20 @@ fn guidance_content_replaced_with_read_hint_when_over_budget() {
         normal,
         "预算内直过"
     );
+}
+
+#[test]
+fn guidance_content_mixed_language_uses_token_budget() {
+    // 中文 2400 字 ≈ 1440 tokens，低于 8000 预算，MUST 原样注入。
+    let within = format!("{}abc", "规".repeat(2400));
+    assert_eq!(truncate_guidance_content(&within, "/p/AGENTS.md"), within);
+
+    // 中文 16000 字 ≈ 9600 tokens，超过 8000 预算，MUST 只留 Read 引导。
+    let oversized = format!(
+        "{}abc",
+        "规".repeat(crate::constants::GUIDANCE_FILE_MAX_TOKENS * 2)
+    );
+    let replaced = truncate_guidance_content(&oversized, "/p/AGENTS.md");
+    assert!(replaced.contains("超过注入预算"));
+    assert!(!replaced.contains("规规"));
 }

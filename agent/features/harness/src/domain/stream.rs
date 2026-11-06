@@ -18,6 +18,9 @@ pub struct SessionProgress {
     pub processed_run_ids: Vec<String>,
     /// 本 session 是否已完整处理（块边界没被步长切断）。
     pub session_complete: bool,
+    /// session 源数据最近更新时间（Unix 秒）；用于按源新旧保留完整条目。
+    #[serde(default)]
+    pub source_updated_at_secs: u64,
 }
 
 /// checkpoint 状态：per-session 进度。
@@ -80,19 +83,21 @@ pub fn prune_stream_state(
     live_session_keys: &std::collections::BTreeSet<String>,
 ) -> EvidenceStreamState {
     let mut pruned = BTreeMap::new();
-    let complete_keys: Vec<&String> = state
+    let mut complete_keys: Vec<(&String, &SessionProgress)> = state
         .sessions
         .iter()
         .filter(|(_, progress)| progress.session_complete)
-        .map(|(key, _)| key)
         .collect();
-    // BTreeMap key 升序；保留最近 N 条完整 = 升序尾部 N 条
+    // 按源 session 更新时间升序，时间相同再用 key 稳定排序；保留最新 N 条。
+    complete_keys.sort_by_key(|(key, progress)| (progress.source_updated_at_secs, *key));
     let complete_keep: std::collections::BTreeSet<&String> =
         if complete_keys.len() > COMPLETE_SESSION_RETENTION {
-            let cutoff = complete_keys.len() - COMPLETE_SESSION_RETENTION;
-            complete_keys[cutoff..].iter().copied().collect()
+            complete_keys[complete_keys.len() - COMPLETE_SESSION_RETENTION..]
+                .iter()
+                .map(|(key, _)| *key)
+                .collect()
         } else {
-            complete_keys.iter().copied().collect()
+            complete_keys.iter().map(|(key, _)| *key).collect()
         };
     for (key, progress) in &state.sessions {
         if !live_session_keys.contains(key) {

@@ -203,7 +203,11 @@ fn read_step_context_includes_neighbor_steps_and_tool_facts() {
     assert!(excerpt.text.contains("cargo test"));
     assert!(excerpt.text.contains("修复 x.rs 的重复匹配错误"));
     assert!(excerpt.text.contains("old_string found 2 times"));
-    assert!(excerpt.text.chars().count() <= 1200, "单来源上下文必须有界");
+    assert!(
+        share::token_budget::estimate_tokens(&excerpt.text)
+            <= crate::constants::SESSION_CONTEXT_SOURCE_TOKENS,
+        "单来源上下文必须有界"
+    );
 }
 
 /// 来源 step 不存在或 run 不匹配时返回 None，NEVER 拼凑无关上下文。
@@ -241,7 +245,7 @@ fn read_step_context_is_bounded_for_large_steps() {
                     "committed_revision": step_index,
                     "messages": [
                         {"role": "assistant", "content": [
-                            {"type": "text", "text": "长".repeat(2000)}
+                            {"type": "text", "text": "长A".repeat(2000)}
                         ]}
                     ]
                 }
@@ -260,7 +264,10 @@ fn read_step_context_is_bounded_for_large_steps() {
     };
     let excerpt =
         SessionDatasetScanner::read_step_context(&dataset, &source).expect("上下文必须可回读");
-    assert!(excerpt.text.chars().count() <= 1200);
+    assert!(
+        share::token_budget::estimate_tokens(&excerpt.text)
+            <= crate::constants::SESSION_CONTEXT_SOURCE_TOKENS
+    );
     assert!(excerpt.text.contains("[step-1]"), "目标 step MUST 保留");
     assert!(excerpt.text.ends_with('…'));
 }
@@ -432,7 +439,10 @@ fn read_real_session_context_smoke() {
     let excerpt = SessionDatasetScanner::read_step_context(&dataset, &source)
         .expect("真实来源必须可回读上下文");
     assert!(!excerpt.text.trim().is_empty());
-    assert!(excerpt.text.chars().count() <= 1200);
+    assert!(
+        share::token_budget::estimate_tokens(&excerpt.text)
+            <= crate::constants::SESSION_CONTEXT_SOURCE_TOKENS
+    );
 }
 
 fn find_dataset_with_members(root: &std::path::Path, depth: usize) -> Option<std::path::PathBuf> {

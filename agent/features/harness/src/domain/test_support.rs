@@ -13,6 +13,8 @@ pub struct FakeRegistry {
     /// write/delete 是否发生过（断言「整份作废」时无写入）。
     pub writes: Vec<ComponentId>,
     pub deletes: Vec<ComponentId>,
+    /// 命中这些 id 时 write 返回失败（模拟落盘中途失败，用于事务回滚测试）。
+    pub fail_write_ids: Vec<ComponentId>,
 }
 
 impl FakeRegistry {
@@ -22,6 +24,7 @@ impl FakeRegistry {
             invalid_ids: Vec::new(),
             writes: Vec::new(),
             deletes: Vec::new(),
+            fail_write_ids: Vec::new(),
         }
     }
 
@@ -55,6 +58,12 @@ impl ComponentRegistry for FakeRegistry {
 
     fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError> {
         self.writes.push(id.clone());
+        if self.fail_write_ids.contains(id) {
+            return Err(HarnessError::invalid(
+                crate::constants::ERROR_DOMAIN,
+                format!("模拟写入失败：{id}"),
+            ));
+        }
         self.entries.insert(id.clone(), content.clone());
         Ok(())
     }

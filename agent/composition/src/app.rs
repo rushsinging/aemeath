@@ -1166,6 +1166,9 @@ pub struct EvalCompactOutcome {
     /// `LocalFallback`/`PartialMapFallback`/`LocalOnly` 表示发生了降级，
     /// 评测结果 MUST 标注降级，不得当作纯 LLM 基线。
     pub quality: String,
+    /// 压缩管线指标（#2132 `CompactMetricsData` 的 JSON 投影）：形状、阶段耗时、
+    /// 降级块数。序列化失败时降级为 `None`，不影响压缩结果本身。
+    pub metrics: Option<serde_json::Value>,
 }
 
 /// 评测装配（#2133）：加载配置并构建与生产同源的 compact 模型解析器。
@@ -1186,7 +1189,7 @@ async fn eval_compact_resolver() -> Result<runtime::CompactModelResolver, String
         &config.reader().committed_snapshot(),
         sdk::LoggingOutputMode::File,
         sdk::NativeStderrMode::default(),
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     );
     Ok(runtime::CompactModelResolver::new(
         config.reader(),
@@ -1304,12 +1307,14 @@ pub async fn run_compact_for_eval(
     )
     .await
     .ok_or_else(|| "压缩返回 None（消息过少或被取消）".to_string())?;
+    let metrics = serde_json::to_value(&outcome.metrics).ok();
     Ok(EvalCompactOutcome {
         model,
         context_size,
         summary: outcome.summary,
         recent_message_count: outcome.recent_messages.len(),
         quality: format!("{:?}", outcome.quality),
+        metrics,
     })
 }
 
@@ -1428,6 +1433,7 @@ fn wire_workspace_with_config(
 }
 
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
+    // #2179：运行时状态迁移统一在 runtime 装配层执行（所有入口共用）。
     let cwd = args
         .cwd
         .clone()
@@ -1449,7 +1455,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         &config.reader().committed_snapshot(),
         logging_output,
         native_stderr,
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
@@ -1490,7 +1496,7 @@ async fn build_agent_client_with_gateways(
         &config.reader().committed_snapshot(),
         logging_output,
         native_stderr,
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
@@ -1531,6 +1537,29 @@ pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> 
         .committed_snapshot()
         .user_agent()
         .to_string())
+}
+
+/// `aemeath cleanup` 的过期清理保留天数（读分层配置 `cleanup.retention_days`）。
+pub async fn configured_cleanup_retention(
+    args: AgentArgs,
+) -> Result<share::config::cleanup::CleanupRetentionDaysConfig, SdkError> {
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let agents_dir = share::config::paths::global_agents_dir();
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store(&agents_dir)?,
+        cli_config_input(&args),
+    )
+    .await
+    .map_err(|error| SdkError::Init(error.to_string()))?;
+    Ok(config
+        .reader()
+        .committed_snapshot()
+        .cleanup_retention_days())
 }
 
 /// `systemone serve` 的 HTTP 监听地址（读分层配置 `scoring.http_listen`）。
@@ -1578,7 +1607,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         &config.reader().committed_snapshot(),
         logging_output,
         native_stderr,
-        &agents_dir.join("logs"),
+        &share::config::paths::global_logs_dir(),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let user_agent = config

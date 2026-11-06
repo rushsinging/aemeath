@@ -468,10 +468,10 @@ async fn recall_preview_trims_overlong_entry_at_sentence_boundary_with_marker() 
         context::InvocationReminderData::MemoryRecall { entries } => {
             let preview = &entries[0].content_preview;
             assert!(
-                preview.chars().count()
-                    <= crate::application::constants::MEMORY_RECALL_PREVIEW_CHARS,
-                "兜底预览不得超过预览上限：{}",
-                preview.chars().count()
+                share::token_budget::estimate_tokens(preview)
+                    <= crate::application::constants::MEMORY_RECALL_PREVIEW_TOKENS,
+                "兜底预览不得超过预览 token 上限：{}",
+                share::token_budget::estimate_tokens(preview)
             );
             assert!(
                 preview.contains("第一句结论完整保留"),

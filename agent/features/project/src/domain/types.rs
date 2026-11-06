@@ -207,7 +207,10 @@ impl std::fmt::Display for WorkspaceRestoreError {
             Self::PathOutsideWorkspaceRoot { path, root } => {
                 write!(f, "恢复工作区失败：路径 {path} 位于工作区根 {root} 之外")
             }
-            Self::InvalidStackShape => write!(f, "恢复工作区失败：上下文栈形状无效"),
+            Self::InvalidStackShape => write!(
+                f,
+                "恢复工作区失败：上下文栈形状无效（栈含非 Primary 帧，属嵌套 worktree 损坏形状；需修复会话数据后 resume）"
+            ),
             Self::RepositoryMismatch => write!(f, "恢复工作区失败：仓库身份或类型不匹配"),
             Self::WorkspaceIdMismatch => write!(f, "恢复工作区失败：workspace ID 不匹配"),
             Self::GitProbeFailed(error) => {

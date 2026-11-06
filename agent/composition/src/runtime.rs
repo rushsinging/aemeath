@@ -102,7 +102,7 @@ fn wire_runtime_tool_assembly(
     // 持久化的 backend（#2083：Session 索引 + 实体快照 write-through）。
     let workflow_wiring = snapshot.to_config().workflow.enabled.then(|| {
         let persistence = std::sync::Arc::new(workflow::FileWorkflowPersistence::new(
-            agents_dir.join("workflows"),
+            share::config::paths::global_workflows_dir(),
         ));
         let store = std::sync::Arc::new(workflow::InMemoryWorkflowStore::with_persistence(
             persistence,
@@ -178,6 +178,12 @@ pub(crate) async fn from_args_with_gateways(
     config: config::ConfigWiring,
     agents_dir: &std::path::Path,
 ) -> Result<SessionRuntimeAssembly, sdk::SdkError> {
+    // #2179：所有生产入口（TUI / chat / sessions / eval）都经过这里，迁移在此
+    // 一次执行；测试与嵌入式调用传入临时 agents_dir 时跳过，避免触碰真实 home。
+    if agents_dir == share::config::paths::global_agents_dir() {
+        crate::state_layout_migration::ensure_state_layout()
+            .map_err(|error| sdk::SdkError::Init(format!("运行时状态迁移失败：{error}")))?;
+    }
     let identity = workspace.read().project_identity();
     let project_key = memory_api::ProjectMemoryKey::derive(
         &identity.initial_cwd,
@@ -215,12 +221,29 @@ pub(crate) async fn from_args_with_gateways(
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
-    let session_dataset = storage::wire_file_system_dataset(agents_dir)
+    // #2179：运行时状态根为 ~/.aemeath/state（启动期迁移未完成时回退旧 ~/.agents）。
+    let state_root = crate::state_layout_migration::state_root_for(agents_dir);
+    let session_dataset = storage::wire_file_system_dataset(&state_root)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_blob = storage::wire_file_system_blob(agents_dir)
+    let session_blob = storage::wire_file_system_blob(&state_root)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
+    );
+    // #2160 P2：main 与 sub 存档共用同一 canonical writer（同一 append 契约），
+    // sub 由元数据 origin=SubRun 决定落 subruns/ 子空间。
+    let canonical_writer: Arc<context::DatasetCanonicalSessionWriter> =
+        Arc::new(context::DatasetCanonicalSessionWriter::new(session_dataset));
+    let sub_run_context_factory: Arc<dyn context::SubRunContextFactoryPort> = Arc::new(
+        context::SubRunContextFactory::new(
+            canonical_writer.clone(),
+            task_wiring.persist(),
+            workspace.persist(),
+        )
+        .with_skill_catalog(
+            skill_catalog.clone(),
+            Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
+        ),
     );
     // 后台一次性迁移存量平铺 session 到 project 目录段布局：串行逐个加载
     // （内存峰值 = 单个 session），不阻塞装配与用户消息；失败由下次启动自愈。
@@ -314,7 +337,6 @@ pub(crate) async fn from_args_with_gateways(
     // #1486/#1621：compact 走 LLM 语义压缩，并按 `context.compact_model`
     // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
     // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
-    let agents_dir_buf = agents_dir.to_path_buf();
     // System One 评分端口：全场景开关关闭时零成本（不读模型、不解析 manifest、
     // 不启动 worker）；开启时经 embedded 链装配并取 typed startup outcome——
     // 本 runtime 只消费该 outcome（日志），启动提醒透传由后续任务接手。
@@ -336,32 +358,28 @@ pub(crate) async fn from_args_with_gateways(
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: memory::wire_memory_opener(
-            storage::wire_file_system_dataset(agents_dir_buf.clone())
+            storage::wire_file_system_dataset(state_root.clone())
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
             scoring_ports.for_memory_rerank.clone(),
-            // 事件 jsonl 根与 dataset 根同为 agents_dir（memory/{project}/events/…）；
+            // 事件 jsonl 根与 dataset 根同为新状态根（memory/{project}/events/…）；
             // retention 在 open_memory 时取 candidate `MemoryConfig`。
-            storage::SafeStorageRoot::open(agents_dir)
+            storage::SafeStorageRoot::open(&state_root)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::MainContextFactory::new(Arc::new(
-                context::DatasetCanonicalSessionWriter::new(session_dataset),
-            ))
-            .with_skill_catalog(
-                skill_catalog.clone(),
-                Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
-            )
-            .with_persistence(task_wiring.persist(), workspace.persist())
-            // 指令加载通知端口：Context 组装系统提示时触发，Runtime 实现派发。
-            .with_instructions_loaded(Arc::new(
-                runtime::HookInstructionsNotifier::new(
+            context::MainContextFactory::new(canonical_writer.clone())
+                .with_skill_catalog(
+                    skill_catalog.clone(),
+                    Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
+                )
+                .with_persistence(task_wiring.persist(), workspace.persist())
+                // 指令加载通知端口：Context 组装系统提示时触发，Runtime 实现派发。
+                .with_instructions_loaded(Arc::new(runtime::HookInstructionsNotifier::new(
                     hook_runner.clone(),
                     workspace.read().current_workspace_root(),
-                ),
-            )),
+                ))),
         ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)
@@ -397,7 +415,10 @@ pub(crate) async fn from_args_with_gateways(
     let (usage_sink, session_audit): (
         Arc<dyn runtime::UsageSink>,
         Option<crate::audit::SessionAudit>,
-    ) = match crate::audit::wire_session_audit(agents_dir, &snapshot) {
+    ) = match crate::audit::wire_session_audit(
+        &crate::state_layout_migration::state_root_for(agents_dir),
+        &snapshot,
+    ) {
         Ok(session_audit) => (session_audit.usage_sink(), Some(session_audit)),
         Err(error) => {
             log::warn!(
@@ -428,6 +449,8 @@ pub(crate) async fn from_args_with_gateways(
             tool_assembly.workflow_probe.clone(),
             tool_assembly.workflow_reset.clone(),
         )
+        // #2163 P2：sub run 全程 canonical 落盘（与 workflow 开关无关）。
+        .with_sub_run_context_factory(sub_run_context_factory)
         // #2142：装配 compact 模型解析器——主 Run 的 manual/自动压缩经它按轮
         // 解析 LLM 绑定（未配置跟随会话模型；解析失败回退本地压缩并 warn）。
         .with_compact_resolver(std::sync::Arc::new(runtime::CompactModelResolver::new(

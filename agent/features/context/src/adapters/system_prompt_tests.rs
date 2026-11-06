@@ -292,15 +292,15 @@ struct GuidanceFixture {
 impl GuidanceFixture {
     fn new(tag: &str) -> Self {
         // 与 guidance resolver 测试共用同一把全局 env 锁：两者都改
-        // AEMEATH_AGENTS_DIR，独立锁会导致交叉污染。
+        // AEMEATH_HOME_DIR，独立锁会导致交叉污染。
         let lock = crate::adapters::prompt::GUIDANCE_ENV_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let previous = std::env::var_os("AEMEATH_AGENTS_DIR");
+        let previous = std::env::var_os("AEMEATH_HOME_DIR");
         let root = std::env::temp_dir().join(format!("aemeath-system-prompt-{tag}"));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("guidance")).unwrap();
-        std::env::set_var("AEMEATH_AGENTS_DIR", &root);
+        std::env::set_var("AEMEATH_HOME_DIR", &root);
         Self {
             _lock: lock,
             root,
@@ -321,8 +321,8 @@ impl GuidanceFixture {
 impl Drop for GuidanceFixture {
     fn drop(&mut self) {
         match &self.previous {
-            Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
-            None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
+            Some(value) => std::env::set_var("AEMEATH_HOME_DIR", value),
+            None => std::env::remove_var("AEMEATH_HOME_DIR"),
         }
         let _ = std::fs::remove_dir_all(&self.root);
     }

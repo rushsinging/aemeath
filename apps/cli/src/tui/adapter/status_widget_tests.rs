@@ -73,6 +73,7 @@ fn test_status_view_projects_runtime_usage_and_context() {
         Some(&model.session),
         &model.diagnostic,
         "ask",
+        false,
     );
 
     assert_eq!(view.runtime.model.as_deref(), Some("glm-5.1"));
@@ -113,6 +114,7 @@ fn test_status_view_projects_status_notice() {
         None,
         &model.diagnostic,
         "ask",
+        false,
     );
 
     assert_eq!(view.notice.text, "Interrupted");
@@ -157,6 +159,7 @@ fn permission_modes_project_to_controlled_status_labels() {
             None,
             &model.diagnostic,
             wire,
+            false,
         );
         assert_eq!(view.runtime.context.permission_mode, expected);
     }
@@ -177,6 +180,7 @@ fn test_status_view_projects_diagnostic_severity() {
         None,
         &model.diagnostic,
         "ask",
+        false,
     );
 
     assert_eq!(view.line.severity, StatusSeverity::Error);

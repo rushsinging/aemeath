@@ -71,7 +71,7 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
     let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
     let lesson_store_for_assert = Arc::clone(&lesson_store);
     let source = EvidenceSourceRef {
-        session_id: "s1.dataset".into(),
+        session_id: "0123456789abcdef/s1.dataset".into(),
         run_id: "run-1".into(),
         step_id: "step-2".into(),
     };
@@ -96,7 +96,7 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
     let stream = FakeEvidenceStream::default();
     stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
         runs: vec![RunRef {
-            session_key: "s1.dataset".into(),
+            session_key: "0123456789abcdef/s1.dataset".into(),
             run_id: "run-1".into(),
         }],
     });
@@ -108,17 +108,24 @@ async fn dry_run_runs_compose_against_virtual_final_components() {
             summary: "Edit 重复失败 ×2".into(),
             excerpt: Some("old_string mismatch".into()),
             occurrences: 2,
-            sources: vec![EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
-                run_id: "run-1".into(),
-                step_id: "step-1".into(),
-            }],
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     stream.contexts.lock().expect("contexts").extend([
         SessionContextExcerpt {
             source: EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
+                session_id: "0123456789abcdef/s1.dataset".into(),
                 run_id: "run-1".into(),
                 step_id: "step-1".into(),
             },
@@ -211,13 +218,13 @@ async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
     for run_id in ["run-1", "run-2"] {
         stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
             runs: vec![RunRef {
-                session_key: "s1.dataset".into(),
+                session_key: "0123456789abcdef/s1.dataset".into(),
                 run_id: run_id.into(),
             }],
         });
     }
     let source = EvidenceSourceRef {
-        session_id: "s1.dataset".into(),
+        session_id: "0123456789abcdef/s1.dataset".into(),
         run_id: "run-1".into(),
         step_id: "step-1".into(),
     };
@@ -229,7 +236,14 @@ async fn dry_run_compose_resolves_conflicting_adoptions_to_final_preview() {
             summary: "Bash 同参数失败后重复调用 ×2".into(),
             excerpt: Some("exit code 1: unchanged retry".into()),
             occurrences: 2,
-            sources: vec![source.clone()],
+            sources: vec![
+                source.clone(),
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     stream
@@ -319,7 +333,7 @@ async fn two_phase_cycle_uses_router_and_fixed_execution() {
     let stream = FakeEvidenceStream::default();
     stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
         runs: vec![RunRef {
-            session_key: "s1.dataset".into(),
+            session_key: "0123456789abcdef/s1.dataset".into(),
             run_id: "run-1".into(),
         }],
     });
@@ -331,7 +345,18 @@ async fn two_phase_cycle_uses_router_and_fixed_execution() {
             summary: "Bash 连续失败 ×3".into(),
             excerpt: Some("exit code 1".into()),
             occurrences: 3,
-            sources: Vec::new(),
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     let llm = PromptRecordingLlm::new(vec![
@@ -387,7 +412,7 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
     let lesson_dir = tempfile::tempdir().expect("tempdir");
     let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
     let source = EvidenceSourceRef {
-        session_id: "s1.dataset".into(),
+        session_id: "0123456789abcdef/s1.dataset".into(),
         run_id: "run-1".into(),
         step_id: "step-2".into(),
     };
@@ -412,7 +437,7 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
     let stream = FakeEvidenceStream::default();
     stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
         runs: vec![RunRef {
-            session_key: "s1.dataset".into(),
+            session_key: "0123456789abcdef/s1.dataset".into(),
             run_id: "run-1".into(),
         }],
     });
@@ -424,17 +449,24 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
             summary: "Edit 重复失败 ×2".into(),
             excerpt: Some("old_string mismatch".into()),
             occurrences: 2,
-            sources: vec![EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
-                run_id: "run-1".into(),
-                step_id: "step-1".into(),
-            }],
+            sources: vec![
+                EvidenceSourceRef {
+                    session_id: "0123456789abcdef/s1.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+                EvidenceSourceRef {
+                    session_id: "fedcba9876543210/s2.dataset".into(),
+                    run_id: "run-1".into(),
+                    step_id: "step-1".into(),
+                },
+            ],
         }],
     };
     stream.contexts.lock().expect("contexts").extend([
         SessionContextExcerpt {
             source: EvidenceSourceRef {
-                session_id: "s1.dataset".into(),
+                session_id: "0123456789abcdef/s1.dataset".into(),
                 run_id: "run-1".into(),
                 step_id: "step-1".into(),
             },
@@ -482,4 +514,173 @@ async fn compose_uses_active_lesson_snapshot_before_block_adoptions() {
         !compose_prompt.contains("cycle-"),
         "Compose Active lesson 快照不得混入本周期自身派生 lesson：{compose_prompt}"
     );
+}
+
+fn guardrails_id() -> ComponentId {
+    ComponentId {
+        kind: ComponentKind::Guardrails,
+        name: ComponentName::new("default"),
+    }
+}
+
+#[tokio::test]
+async fn zero_adoption_cycle_still_runs_maintenance_compose() {
+    let bloated = format!("# Guardrails\n\n- {}\n", "规则".repeat(1200));
+    let compacted =
+        "# Guardrails\n\n- 读取错误与输出后再重试，未诊断前禁止原样重复调用。\n".to_string();
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
+        FakeRegistry::with_entries(vec![(guardrails_id(), body_content(&bloated))]),
+    );
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+    let response = serde_json::json!({
+        "decision": "compact",
+        "reason": "压缩超长规则",
+        "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
+    })
+    .to_string();
+    let llm = PromptRecordingLlm::new(vec![response]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry.clone(),
+        llm.clone(),
+        lesson_store,
+        RsiConfig::default(),
+    )
+    .with_evidence_stream(Box::new(FakeEvidenceStream::default()));
+
+    let outcome = task.run_cycle().await.expect("maintenance cycle");
+    assert!(
+        outcome.summary.contains("维护 Compose"),
+        "0 采纳但有膨胀时 MUST 触发维护：{}",
+        outcome.summary
+    );
+    let prompts = llm.prompts.lock().expect("prompts").clone();
+    assert_eq!(prompts.len(), 1, "无证据块时只应调用维护 Compose");
+    assert!(prompts[0].contains("当前正文已超过预算") || prompts[0].contains("[R0]"));
+    let guardrails = registry
+        .lock()
+        .await
+        .read(&guardrails_id())
+        .expect("read guardrails");
+    assert_eq!(guardrails.body, compacted);
+}
+
+#[tokio::test]
+async fn dry_run_maintenance_keeps_underlying_component_unchanged() {
+    let bloated = format!("# Guardrails\n\n- {}\n", "规则".repeat(1200));
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
+        FakeRegistry::with_entries(vec![(guardrails_id(), body_content(&bloated))]),
+    );
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+    let response = serde_json::json!({
+        "decision": "compact",
+        "reason": "压缩超长规则",
+        "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
+    })
+    .to_string();
+    let llm = PromptRecordingLlm::new(vec![response]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry.clone(),
+        llm,
+        lesson_store.clone(),
+        RsiConfig::default(),
+    )
+    .with_dry_run()
+    .with_evidence_stream(Box::new(FakeEvidenceStream::default()));
+
+    let outcome = task.run_cycle().await.expect("dry-run maintenance");
+    assert!(
+        outcome.summary.contains("维护 Compose"),
+        "{}",
+        outcome.summary
+    );
+    let guardrails = registry
+        .lock()
+        .await
+        .read(&guardrails_id())
+        .expect("read guardrails");
+    assert_eq!(guardrails.body, bloated, "dry-run NEVER 写底层组件");
+    assert!(
+        lesson_store.load_active().expect("lessons").is_empty(),
+        "dry-run NEVER 写 lesson"
+    );
+}
+
+#[tokio::test]
+async fn dry_run_write_gate_rejects_duplicate_evidence_edit() {
+    let original = "# Guardrails\n\n- alpha rule\n- beta rule\n".to_string();
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
+        FakeRegistry::with_entries(vec![(guardrails_id(), body_content(&original))]),
+    );
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+    let source = EvidenceSourceRef {
+        session_id: "0123456789abcdef/s1.dataset".into(),
+        run_id: "run-1".into(),
+        step_id: "step-1".into(),
+    };
+    let stream = FakeEvidenceStream::default();
+    stream.plans.lock().expect("plans").push(EvidenceBlockPlan {
+        runs: vec![RunRef {
+            session_key: "0123456789abcdef/s1.dataset".into(),
+            run_id: "run-1".into(),
+        }],
+    });
+    *stream.evidence.lock().expect("evidence") = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RetryPattern,
+            signal_id: "retry_pattern:Bash:demo".into(),
+            summary: "Bash 重复调用".into(),
+            excerpt: Some("same command".into()),
+            occurrences: 2,
+            sources: vec![source],
+        }],
+    };
+    let response = serde_json::json!({
+        "decision": "propose",
+        "reason": "补充重复规则（故意触发门禁）",
+        "signal_ids": ["retry_pattern:Bash:demo"],
+        "change_set": {
+            "edits": [{
+                "action": "upsert",
+                "id": {"kind": "guardrails", "name": "default"},
+                "content": {
+                    "frontmatter": null,
+                    "body": "# Guardrails\n\n- alpha rule\n- beta rule\n- alpha rule\n"
+                }
+            }]
+        }
+    })
+    .to_string();
+    let llm = PromptRecordingLlm::new(vec![response]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry.clone(),
+        llm,
+        lesson_store,
+        RsiConfig {
+            execution_mode: share::config::RsiExecutionMode::SinglePhase,
+            chunk_max_components: 4,
+            ..RsiConfig::default()
+        },
+    )
+    .with_dry_run()
+    .with_evidence_stream(Box::new(stream));
+
+    let outcome = task.run_cycle().await.expect("dry-run cycle");
+    assert!(
+        outcome.summary.contains("写入门禁") || outcome.summary.contains("作废"),
+        "重复规则必须被写入门禁拒绝：{}",
+        outcome.summary
+    );
+    let guardrails = registry
+        .lock()
+        .await
+        .read(&guardrails_id())
+        .expect("read guardrails");
+    assert_eq!(guardrails.body, original, "dry-run 拒绝后不得写入");
 }

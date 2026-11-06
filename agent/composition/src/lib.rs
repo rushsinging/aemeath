@@ -7,11 +7,13 @@ pub(crate) use constants::LOG_TARGET;
 pub mod app;
 pub mod audit;
 pub mod delivery_logging;
+pub mod disk_cleanup;
 pub mod harness;
 pub mod memory;
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub mod provider;
 pub mod runtime;
+pub mod state_layout_migration;
 pub mod systemone;
 pub mod tools;
 pub mod update;

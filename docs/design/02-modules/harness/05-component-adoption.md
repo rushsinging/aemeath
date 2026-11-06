@@ -43,6 +43,7 @@
   - 通道 B：user-context 消息（与 AGENTS.md 同通道；改动不破缓存）
 - 注入内容：跨工具使用技巧 prose（工具选择、超时策略、分段读取、大结果处理）——RSI 证据最丰富（工具误用/重试信号）的槽位。
 - **落点隔离**：证据来源只来自项目布局 `<project>/<session>.dataset`；`scope=global` 只承接跨项目通用规律，单项目经验与项目 A → 项目 B 写入均被宿主路由与 prompt 契约双重禁止。
+- **跨 scope 去重**：global tool-guidance/guardrails/overlay 与 project overlay 的规则单元先做词法召回，再结构化判定 duplicate/specialization/conflict/distinct；duplicate/conflict 提案由宿主拒绝，specialization 只保留项目差异。周期开始自动收敛存量重复，并把单项目 global 专属规则下沉到 project overlay。
 - **项目 overlay 映射**：宿主从同项目 canonical session workspace 快照反解项目根；项目根存在 `AGENTS.md` 时优先映射它，否则映射 `CLAUDE.md`（与运行时注入优先级一致）。两者都缺失时不注册组件，NEVER 自动创建项目说明文件。
 - **schema 隔离**：参数类改进 NEVER 在 prose 中复述工具 schema 或枚举字段必填性；只写按错误与当前 schema 修正 payload 的通用纪律，避免 schema 漂移。
 - **正文预算**：RSI 产出超过注入预算时先追加一次 LLM 压缩；仍超预算整份作废，NEVER 硬截断。

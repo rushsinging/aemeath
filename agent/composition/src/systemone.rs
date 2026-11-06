@@ -281,7 +281,7 @@ impl ProductionEmbeddedFactory {
 
 /// `~/.agents/scoring/`：校准 artifact 与评分审计的落盘目录（设计 §观察回路）。
 fn scoring_dir() -> std::path::PathBuf {
-    share::config::paths::global_agents_dir().join("scoring")
+    share::config::paths::global_scoring_dir()
 }
 
 /// 生产装配入口：场景全关零成本；开启时装配 daemon 客户端（惰性拉起 serve）。

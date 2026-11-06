@@ -27,6 +27,8 @@ pub(crate) struct CaseRun {
     estimated_input_tokens: Option<u64>,
     /// 速度指标：毫秒 / 1K 输入 token（消除输入规模差异，跨 session 可比）。
     ms_per_1k_input_tokens: Option<f64>,
+    /// 压缩管线指标（#2132 CompactMetricsData）：形状/阶段耗时/降级块数。
+    metrics: Option<serde_json::Value>,
     error: Option<String>,
 }
 
@@ -44,6 +46,8 @@ pub(crate) struct RunReport {
     elapsed_ms_max: Option<u64>,
     /// 速度归一化均值：ms / 1K 输入 token。
     ms_per_1k_input_tokens_mean: Option<f64>,
+    /// 跨 case 的降级块数合计（metrics 缺失的 case 计 0）。
+    degraded_chunks_total: u64,
     cases: Vec<CaseRun>,
 }
 
@@ -172,6 +176,7 @@ pub(crate) async fn run(
                     elapsed_ms: Some(elapsed_ms),
                     estimated_input_tokens: Some(estimated_input_tokens),
                     ms_per_1k_input_tokens: speed,
+                    metrics: outcome.metrics.clone(),
                     error: None,
                 });
                 println!(
@@ -193,6 +198,7 @@ pub(crate) async fn run(
                     elapsed_ms: Some(started.elapsed().as_millis() as u64),
                     estimated_input_tokens: Some(estimated_input_tokens),
                     ms_per_1k_input_tokens: None,
+                    metrics: None,
                     error: Some(error),
                 });
             }
@@ -207,6 +213,16 @@ pub(crate) async fn run(
     report.elapsed_ms_p50 = percentile_u64(&durations, 0.50);
     report.elapsed_ms_p95 = percentile_u64(&durations, 0.95);
     report.elapsed_ms_max = durations.iter().copied().max();
+    report.degraded_chunks_total = report
+        .cases
+        .iter()
+        .filter_map(|case| case.metrics.as_ref())
+        .filter_map(|metrics| {
+            metrics
+                .get("degraded_chunks")
+                .and_then(|value| value.as_u64())
+        })
+        .sum();
     report.ms_per_1k_input_tokens_mean = mean(
         &report
             .cases

@@ -35,7 +35,9 @@ pub(crate) use adapters::wire_isolated_context_with_skill;
 pub use adapters::{
     wire_isolated_context, wire_isolated_context_with_workspace_skills, wire_session_management,
 };
-pub use adapters::{MainContextFactory, NoOpCanonicalSessionWriter};
+pub use adapters::{
+    MainContextFactory, NoOpCanonicalSessionWriter, SubRunContextFactory, SubRunOriginData,
+};
 pub use domain::reminder::{
     render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
     ReminderDedup, ReminderEnqueue, ReminderEventSource, ReminderFactData, ReminderFactLifetime,
@@ -46,6 +48,7 @@ pub use domain::session::{
     SessionRestoreStepData,
 };
 pub use ports::SessionManagementPort;
+pub use ports::SubRunContextFactoryPort;
 
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
 #[cfg(test)]
@@ -176,5 +179,6 @@ mod integration_tests {
     mod session_snapshot_store_contract;
     mod skill_prompt_pipeline;
     mod structured_context_candidate;
+    mod subrun_persistence;
     mod tool_receipt_persistence_contract;
 }

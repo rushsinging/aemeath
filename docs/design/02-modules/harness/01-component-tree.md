@@ -19,7 +19,7 @@
 
 ### 1.1 AlwaysOnProse 组件族：机制一份，语义分槽
 
-c1 overlay、c2 guardrails、c4 tool_guidance 的**机制高度一致**（markdown 文件、frontmatter、原子写、watch、热载、注入管线），MUST 共享同一个 `AlwaysOnProse` adapter 实现（DRY，对齐 Constitution 4）——三者只是该族的**语义槽**（同 skills/ 下多个 SKILL.md 之于 skill 机制）。语义槽差异（也是不合并成一个文件的理由）：
+c1 overlay、c2 guardrails、c4 tool_guidance 的**机制高度一致**（markdown 文件、frontmatter、symlink 安全写、watch、热载、注入管线），MUST 共享同一个 `AlwaysOnProse` adapter 实现（DRY，对齐 Constitution 4）——三者只是该族的**语义槽**（同 skills/ 下多个 SKILL.md 之于 skill 机制）。语义槽差异（也是不合并成一个文件的理由）：
 
 | 维度 | c1 overlay | c2 guardrails | c4 tool_guidance |
 |---|---|---|---|
@@ -40,7 +40,7 @@ trait ComponentRegistry {
     fn list(&self) -> Vec<ComponentId>;
     fn read(&self, id: &ComponentId) -> Result<ComponentContent>;
     fn validate(&self, id: &ComponentId, content: &ComponentContent) -> Result<()>;
-    fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<()>;  // 内建原子写
+    fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<()>;  // symlink 安全写
     fn diff(&self, old: &ComponentContent, new: &ComponentContent) -> ComponentDiff;
 }
 ```
@@ -53,17 +53,27 @@ trait ComponentRegistry {
 
 ```rust
 struct ChangeSet { edits: Vec<ComponentEdit> }   // 提案只携带变更项
-enum ComponentEdit { Upsert { id, content }, Delete { id } }
+enum ComponentEdit {
+    Upsert { id, content },
+    Patch { id, operations },   // ReplaceExact / InsertAfterAnchor / DeleteExact
+    Delete { id },
+}
 ```
 
 - **未列出的组件自动继承当前版本**——提案 NEVER 要求携带全量组件树。
 - **校验失败整份 ChangeSet 作废**：任一 edit 的 validate 失败，全部 edit 拒绝（对齐 harness2「THREE RULES THAT DISCARD THE WHOLE PROPOSAL」），NEVER 部分采纳。
-- 写入顺序：全部 edit 先 validate，再统一 write（见 02 分片热载生效）。
+- 写入顺序：全部 edit 先 validate，再统一 write；写前捕获原始快照，任一条目中
+  途失败按逆序恢复，NEVER 部分采纳（见 02 分片热载生效）。
+- 大 AGENTS.md/CLAUDE.md 使用 Patch，NEVER 要求模型输出完整 body；host 只校验
+  old_string/anchor 唯一性，不解析渐进披露格式。
 
-## 4. 原子写
+## 4. symlink 安全写
 
-- `write` 实现：临时文件 + rename（tmp+rename），NEVER 直接覆写在线文件，防热载读到半写状态。
-- rename 前完成 validate；rename 后即对下一次 run 边界检测可见。
+- `write` 实现：先递归解析 symlink 链，写最终普通文件；`AGENTS.md -> CLAUDE.md` 时 NEVER 替换 `AGENTS.md` 这个 link。
+- 写入前 MUST 捕获 component version snapshot；checkpoint 记录已处理 run，不承担组件内容备份职责。
+- 相对/绝对 link、多级 link 链均递归解析；循环、dangling、目录目标与逃出允许根的目标 MUST fail-closed。
+- 写入完成后即对下一次 run 边界检测可见。
+- 项目 overlay 缺失时注册待创建的 `AGENTS.md` 虚拟候选；实际文件只在采纳写入时创建。
 
 ## 5. 不变量
 

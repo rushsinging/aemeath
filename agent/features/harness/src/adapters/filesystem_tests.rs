@@ -1,4 +1,4 @@
-//! 文件 adapter 契约测试：frontmatter 往返、原子写、校验拦截、删除语义。
+//! 文件 adapter 契约测试：frontmatter 往返、直接写、校验拦截、删除语义。
 
 use crate::adapters::filesystem::FilesystemComponentRegistry;
 use crate::application::ComponentRegistry;
@@ -150,9 +150,9 @@ fn invalid_frontmatter_never_reaches_disk() {
     );
 }
 
-/// 原子写契约：写入目录不存在时自动创建父目录并成功落盘。
+/// 直接写契约：写入目录不存在时自动创建父目录并成功落盘。
 #[test]
-fn atomic_write_creates_missing_parent_directories() {
+fn write_creates_missing_parent_directories() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let nested = temp_dir.path().join("skills/nested");
     let mut component_paths = HashMap::new();
@@ -165,6 +165,40 @@ fn atomic_write_creates_missing_parent_directories() {
     };
     registry.write(&id("deep"), &content).expect("写入成功");
     assert!(nested.join("deep.md").exists());
+}
+
+/// symlink 契约：AGENTS.md -> CLAUDE.md 时写最终文件，link 必须保留。
+#[cfg(unix)]
+#[test]
+fn write_follows_symlink_without_replacing_it() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let target = temp_dir.path().join("CLAUDE.md");
+    let link = temp_dir.path().join("AGENTS.md");
+    std::fs::write(&target, "old").expect("seed");
+    std::os::unix::fs::symlink("CLAUDE.md", &link).expect("symlink");
+
+    let mut component_paths = HashMap::new();
+    component_paths.insert(id("AGENTS"), link.clone());
+    let mut registry = FilesystemComponentRegistry::new(component_paths);
+    registry
+        .write(
+            &id("AGENTS"),
+            &ComponentContent {
+                frontmatter: None,
+                body: "new".to_string(),
+            },
+        )
+        .expect("写入成功");
+
+    assert!(std::fs::symlink_metadata(&link)
+        .expect("metadata")
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        std::fs::read_link(&link).expect("readlink"),
+        std::path::Path::new("CLAUDE.md")
+    );
+    assert_eq!(std::fs::read_to_string(&target).expect("read"), "new");
 }
 
 /// 删除语义：移除文件并从 list 消失；重复删除幂等成功。

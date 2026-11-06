@@ -4,6 +4,7 @@ pub mod changeset;
 #[cfg(test)]
 mod changeset_tests;
 pub mod component;
+pub mod component_audit;
 #[cfg(test)]
 mod component_tests;
 pub mod cycle_task;
@@ -23,12 +24,16 @@ mod improvement_tests;
 pub mod lesson;
 #[cfg(test)]
 mod lesson_tests;
+pub mod maintenance;
 pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
 pub mod routing;
 #[cfg(test)]
 mod routing_tests;
+pub mod scope_dedup;
+#[cfg(test)]
+mod scope_dedup_tests;
 pub mod stream;
 pub mod stream_port;
 #[cfg(test)]

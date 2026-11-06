@@ -364,6 +364,9 @@ pub struct RuntimeServices {
     /// Workflow Session reset 端口（#2089）：`/clear` 时清空本 Session 的
     /// Workflow 可见性（索引 + 内存表；实体保留）。关闭为 None。
     pub workflow_reset: Option<Arc<dyn workflow::WorkflowSessionReset>>,
+    /// Sub run 存档上下文工厂（#2163 P2）：装配后 sub run 全程 canonical 落盘；
+    /// `None` 时保持 in-memory（测试 / 未装配）。与 workflow 开关无关。
+    pub sub_run_context_factory: Option<Arc<dyn context::SubRunContextFactoryPort>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。

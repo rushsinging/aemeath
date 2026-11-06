@@ -85,6 +85,10 @@ pub struct StatusRuntimeViewModel {
     pub tps: f64,
     /// #1895：后台进程活动数（0 不显示；status bar runtime 行尾部）。
     pub background_processes_active: usize,
+    /// 当前运行进程版本（如 `0.0.0-abc12345`，渲染为 `v<version>`）。
+    pub app_version: String,
+    /// 本地二进制已被替换，状态栏显示 `restart to update`（重启后消失）。
+    pub restart_to_update: bool,
     pub reflecting: bool,
     pub context: StatusContextViewModel,
 }

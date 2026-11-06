@@ -148,6 +148,24 @@ fn source_project_label(session_id: &str) -> String {
     project
 }
 
+/// 内置工具信号的职责面只有工具纪律/硬约束：
+/// - tool-guidance/default
+/// - guardrails/default
+///
+/// 项目 overlay 不承接工具行为；项目业务知识由未来的 project signal 路由。
+fn builtin_tool_candidates(candidates: &[ComponentId]) -> Vec<ComponentId> {
+    candidates
+        .iter()
+        .filter(|id| {
+            matches!(
+                id.kind,
+                ComponentKind::ToolGuidance | ComponentKind::Guardrails
+            )
+        })
+        .cloned()
+        .collect()
+}
+
 fn profile_for(id: &ComponentId) -> ComponentRouteProfile {
     match id.kind {
         ComponentKind::ToolGuidance => ComponentRouteProfile {
@@ -205,13 +223,19 @@ fn profile_allows(
     signal: &EvidenceSignal,
     context: &RouteContext,
 ) -> bool {
+    let tool = signal_tool(signal);
+    if is_builtin_tool(tool) {
+        return matches!(
+            profile.id.kind,
+            ComponentKind::ToolGuidance | ComponentKind::Guardrails
+        );
+    }
     if profile.id.kind == ComponentKind::SystemPromptOverlay
         && profile.id.name.as_str() != "global"
         && !project_overlay_matches_signal(&profile.id, signal)
     {
         return false;
     }
-    let tool = signal_tool(signal);
     profile.allowed_signals.iter().any(|pattern| match pattern {
         SignalRoutePattern::BuiltinTool(expected_kind) => {
             *expected_kind == signal.kind && is_builtin_tool(tool)
@@ -246,22 +270,20 @@ pub fn route_signal(
     }
 
     let tool = signal_tool(signal).to_string();
-    // 内置工具纪律的主职责面是 tool-guidance/guardrails；overlay 只能在
-    // 主候选存在时作为低优先级全局候选参与选择。主候选缺失时 MUST
-    // unresolved，NEVER 让 always-on overlay 独自兜底而持续膨胀。
-    if is_builtin_tool(&tool)
-        && !candidates.iter().any(|candidate| {
-            matches!(
-                candidate.kind,
-                ComponentKind::ToolGuidance | ComponentKind::Guardrails
-            )
-        })
-    {
-        return RouteDecision::Unresolved {
-            reason: "缺少 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 兜底到 overlay"
-                .to_string(),
-        };
-    }
+    // 工具行为属于 aemeath 用户级工具纪律，NEVER 写项目 overlay。
+    // 旧 #2168 的“单项目工具信号进同名 project overlay”已废止。
+    let candidates: Vec<ComponentId> = if is_builtin_tool(&tool) {
+        let scoped = builtin_tool_candidates(candidates);
+        if scoped.is_empty() {
+            return RouteDecision::Unresolved {
+                reason: "缺少 tool-guidance/guardrails 主候选，内置工具纪律 NEVER 写项目 overlay"
+                    .to_string(),
+            };
+        }
+        scoped
+    } else {
+        candidates.to_vec()
+    };
     let mut routed: Vec<(ComponentRouteProfile, String)> = candidates
         .iter()
         .filter_map(|id| {
@@ -334,7 +356,8 @@ pub fn validate_change_set_routes(
 ) -> Result<(), crate::domain::errors::HarnessError> {
     for edit in &change_set.edits {
         let id = match edit {
-            crate::domain::changeset::ComponentEdit::Upsert { id, .. } => id,
+            crate::domain::changeset::ComponentEdit::Upsert { id, .. }
+            | crate::domain::changeset::ComponentEdit::Patch { id, .. } => id,
             crate::domain::changeset::ComponentEdit::Delete { id } => {
                 return Err(crate::domain::errors::HarnessError::invalid(
                     crate::constants::ERROR_DOMAIN,
