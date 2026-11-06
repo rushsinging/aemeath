@@ -1584,14 +1584,16 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
 
     release_sender.send(()).await.unwrap();
     let compact_result = compact_task.await.unwrap();
+    // 生成期间仅有尾部追加（concurrent-run/concurrent-step）：compact 写回
+    // rebase 到最新状态提交，不再因 revision 前进整段拒绝；新 step 位于
+    // marker 保留窗口之后、不丢失。
     assert!(matches!(
         compact_result,
-        Err(crate::ContextPortError::Compact(ref message))
-            if message.contains("Session revision 冲突")
+        Ok(crate::CompactOutcome::Committed(_))
     ));
     let session = holder.read().unwrap();
-    assert_eq!(session.revision, 1);
-    assert!(session.compact.is_none());
+    assert_eq!(session.revision, 2);
+    assert!(session.compact.is_some());
     assert!(session
         .structured_messages()
         .iter()
@@ -1821,12 +1823,13 @@ async fn second_compact_advances_single_marker() {
 }
 
 #[tokio::test]
-async fn compaction_rejects_stale_source_revision() {
+async fn compaction_with_stale_source_revision_rebases_onto_current() {
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("session");
     let (repository, holder) =
         repository_with_session(writer, ten_step_session(&session_id, vec![], 2));
-    let request = compact_request(session_id);
+    let mut request = compact_request(session_id);
+    request.context_size = 100_000;
 
     let result = repository
         .commit_compaction(&CompactRequestData {
@@ -1841,8 +1844,134 @@ async fn compaction_rejects_stale_source_revision() {
         })
         .await;
 
-    assert!(matches!(result, Err(crate::ContextPortError::Compact(_))));
-    assert_eq!(holder.read().unwrap().revision, 2);
+    // 决策修订号落后不再整段拒绝：压缩决策对追加后的状态只会更成立，
+    // 按当前快照继续压缩并提交；结构性冲突由写回侧前缀验证兜底。
+    assert!(matches!(result, Ok(crate::CompactOutcome::Committed(_))));
+    assert_eq!(holder.read().unwrap().revision, 3);
+}
+
+/// 生成期间发生 `/clear`（可见历史结构性清空）：前缀关系破坏，写回必须
+/// 维持冲突拒绝，不得把 marker 安装到已清空的会话上。
+#[tokio::test]
+async fn compact_conflicts_when_history_cleared_during_generation() {
+    use tokio::sync::{mpsc, oneshot};
+
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("cleared-during-generation-session");
+    let (repository, holder) =
+        repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+    let (started_sender, started_receiver) = oneshot::channel();
+    let (release_sender, release_receiver) = mpsc::channel(1);
+    let llm = test_llm_binding(
+        FixedTextInvoker {
+            text: valid_fact_batch("cleared"),
+            started: Arc::new(Mutex::new(Some(started_sender))),
+            release: Arc::new(tokio::sync::Mutex::new(release_receiver)),
+            fail_with_cancel: false,
+        }
+        .port(),
+    );
+    let repository = Arc::new(repository);
+    let mut request = compact_request(session_id.clone());
+    request.context_size = 100_000;
+    let compact_task = {
+        let repository = Arc::clone(&repository);
+        let run_id = request.run_id.clone();
+        tokio::spawn(async move {
+            repository
+                .commit_compaction(&CompactRequestData {
+                    run_id,
+                    source_revision: SessionRevision::new(0),
+                    source: request,
+                    trigger: CompactTrigger::Automatic,
+                    progress: None,
+                    task_snapshot: None,
+                    llm,
+                    cancellation: tokio_util::sync::CancellationToken::new(),
+                })
+                .await
+        })
+    };
+
+    started_receiver
+        .await
+        .expect("compact generator should begin before clearing");
+    repository
+        .clear(&session_id)
+        .await
+        .expect("clear should commit during generation");
+
+    release_sender.send(()).await.unwrap();
+    let compact_result = compact_task.await.unwrap();
+    assert!(matches!(
+        compact_result,
+        Err(crate::ContextPortError::Compact(ref message))
+            if message.contains("Session revision 冲突")
+    ));
+    let session = holder.read().unwrap();
+    assert!(session.compact.is_none());
+}
+
+/// 生成期间另一路 compact 已提交（marker 前移、可见前缀缩短）：前缀关系
+/// 破坏，晚到的写回必须拒绝，避免把旧窗口 summary 安装到新 marker 之上。
+#[tokio::test]
+async fn compact_conflicts_when_second_compact_commits_during_generation() {
+    use tokio::sync::{mpsc, oneshot};
+
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("double-compact-session");
+    let (repository, holder) =
+        repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+    let (started_sender, started_receiver) = oneshot::channel();
+    let (release_sender, release_receiver) = mpsc::channel(1);
+    let llm = test_llm_binding(
+        FixedTextInvoker {
+            text: valid_fact_batch("first"),
+            started: Arc::new(Mutex::new(Some(started_sender))),
+            release: Arc::new(tokio::sync::Mutex::new(release_receiver)),
+            fail_with_cancel: false,
+        }
+        .port(),
+    );
+    let repository = Arc::new(repository);
+    let mut request = compact_request(session_id.clone());
+    request.context_size = 100_000;
+    let first_task = {
+        let repository = Arc::clone(&repository);
+        let run_id = request.run_id.clone();
+        tokio::spawn(async move {
+            repository
+                .commit_compaction(&CompactRequestData {
+                    run_id,
+                    source_revision: SessionRevision::new(0),
+                    source: request,
+                    trigger: CompactTrigger::Automatic,
+                    progress: None,
+                    task_snapshot: None,
+                    llm,
+                    cancellation: tokio_util::sync::CancellationToken::new(),
+                })
+                .await
+        })
+    };
+
+    started_receiver
+        .await
+        .expect("first compact generator should begin before second compact");
+    // 第二路压缩（本地路径）在生成期间完整提交，marker 前移。
+    compact(&repository, session_id.clone(), 0).await;
+
+    release_sender.send(()).await.unwrap();
+    let first_result = first_task.await.unwrap();
+    assert!(matches!(
+        first_result,
+        Err(crate::ContextPortError::Compact(ref message))
+            if message.contains("Session revision 冲突")
+    ));
+    let session = holder.read().unwrap();
+    // 会话保留第二路压缩的结果，未被晚到的写回覆盖。
+    assert!(session.compact.is_some());
+    assert_eq!(session.revision, 1);
 }
 
 #[tokio::test]
