@@ -317,7 +317,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 ));
             }
             let mut history = load_signal_history(&self.history_path);
-            let run = crate::domain::improvement::run_two_phase_cycle(
+            let run = crate::domain::improvement::run_two_phase_cycle_with_candidates(
                 registry,
                 self.llm.as_ref(),
                 &self.lesson_store,
@@ -330,6 +330,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 self.version_store.as_deref(),
                 &mut history,
                 &cycle_id,
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await?;
             if !self.dry_run {
@@ -362,7 +363,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
-                self.candidate_store.as_deref(),
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await;
             if !maintenance.is_empty() {
@@ -464,6 +465,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await?;
             if self.dry_run {
@@ -507,7 +509,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
-                self.candidate_store.as_deref(),
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await,
         );

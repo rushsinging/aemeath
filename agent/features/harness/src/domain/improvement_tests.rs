@@ -216,6 +216,7 @@ async fn lesson_is_persisted_when_signal_summary_is_long() {
         &mut Vec::new(),
         None,
         None,
+        None,
     )
     .await
     .expect("周期必须成功");
@@ -356,6 +357,7 @@ async fn cycle_adopts_and_summarizes_per_block() {
         &mut Vec::new(),
         None,
         None,
+        None,
     )
     .await
     .expect("周期必须成功");
@@ -427,6 +429,7 @@ async fn builtin_tool_signal_cannot_route_to_unrelated_skill() {
         false,
         &mut Vec::new(),
         Some(&recorder),
+        None,
         None,
     )
     .await
@@ -500,6 +503,7 @@ async fn malformed_block_discarded_without_blocking_others() {
         &mut Vec::new(),
         None,
         None,
+        None,
     )
     .await
     .expect("周期必须成功");
@@ -532,6 +536,7 @@ async fn empty_registry_yields_empty_cycle() {
         Default::default(),
         false,
         &mut Vec::new(),
+        None,
         None,
         None,
     )
@@ -626,6 +631,7 @@ async fn unknown_signal_reference_discards_whole_proposal() {
         evidence_with_signal(),
         false,
         &mut Vec::new(),
+        None,
         None,
         None,
     )
@@ -1105,4 +1111,49 @@ fn dry_run_edit_summary_carries_scale_and_highlights() {
         summary.contains("依据：回应 repeated_failure"),
         "依据：{summary}"
     );
+}
+
+#[tokio::test]
+async fn evidence_proposal_for_global_component_becomes_pending_candidate() {
+    let mentioned = id("mentioned");
+    let mut registry = FakeRegistry::with_entries(vec![(mentioned.clone(), body_content("old"))]);
+    let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+    ]);
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let candidate_dir = tempfile::tempdir().expect("candidate dir");
+    let candidate_store = crate::domain::candidate::RsiCandidateStore::new(
+        candidate_dir.path().join("candidates.jsonl"),
+    );
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(1),
+        evidence_with_signal(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        Some(&candidate_store),
+    )
+    .await
+    .expect("周期必须成功");
+
+    assert!(outcome.summary.contains("待确认 1"), "{}", outcome.summary);
+    assert!(outcome.adopted.is_empty());
+    assert_eq!(
+        registry.content_of(&mentioned).unwrap().body,
+        "old",
+        "候选不能直写组件"
+    );
+    let pending = candidate_store.pending().expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].target_component, mentioned.to_string());
+    assert_eq!(pending[0].proposed_body, "new");
 }

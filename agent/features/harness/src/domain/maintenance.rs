@@ -593,28 +593,33 @@ pub async fn run_maintenance_compose_phase(
             ));
             continue;
         }
-        if let Some(candidate_store) = candidate_store {
-            let candidate = RsiCandidate::new_pending(
-                CandidateScope::Global,
-                finding.component.to_string(),
-                current.body.clone(),
-                body.clone(),
-                finding
-                    .triggers
-                    .iter()
-                    .map(|trigger| trigger_name(*trigger).to_string())
-                    .collect(),
-                Vec::new(),
-                CandidateRisk::Medium,
-            );
-            candidate_store.append(&candidate).map_err(|error| {
-                HarnessError::storage(ERROR_DOMAIN, format!("候选写入失败：{}", error.message()))
-            })?;
-            summaries.push(format!(
-                "维护 Compose：{} 待确认（{}）",
-                finding.component, candidate.id
-            ));
-            continue;
+        if !dry_run {
+            if let Some(candidate_store) = candidate_store {
+                let candidate = RsiCandidate::new_pending(
+                    CandidateScope::Global,
+                    finding.component.to_string(),
+                    current.body.clone(),
+                    body.clone(),
+                    finding
+                        .triggers
+                        .iter()
+                        .map(|trigger| trigger_name(*trigger).to_string())
+                        .collect(),
+                    Vec::new(),
+                    CandidateRisk::Medium,
+                );
+                candidate_store.append(&candidate).map_err(|error| {
+                    HarnessError::storage(
+                        ERROR_DOMAIN,
+                        format!("候选写入失败：{}", error.message()),
+                    )
+                })?;
+                summaries.push(format!(
+                    "维护 Compose：{} 待确认（{}）",
+                    finding.component, candidate.id
+                ));
+                continue;
+            }
         }
         let new_content = ComponentContent {
             frontmatter: current.frontmatter.clone(),

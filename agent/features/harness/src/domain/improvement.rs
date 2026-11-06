@@ -9,8 +9,12 @@ use crate::constants::{
     ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS,
     RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS,
 };
-use crate::domain::changeset::{apply_change_set_with_policy, AppliedEdit, ChangeSet, WritePolicy};
+use crate::domain::candidate::{CandidateRisk, CandidateScope, RsiCandidate, RsiCandidateStore};
+use crate::domain::changeset::{
+    apply_change_set_with_policy, AppliedEdit, ChangeSet, ComponentEdit, WritePolicy,
+};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
+use crate::domain::component_audit::is_user_level_component;
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
@@ -1437,6 +1441,85 @@ async fn compact_block_proposal_budgets(
 
 /// 单块执行：LLM 提案 → 解析 → registry 预检/落盘。
 /// 返回 (applied, outcome_label)；解析失败或校验作废都只作废该块。
+fn candidate_projects_for(
+    signal_ids: &[String],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Vec<String> {
+    let mut projects = Vec::new();
+    for signal in &evidence.signals {
+        if !signal_ids.contains(&signal.signal_id) {
+            continue;
+        }
+        for source in &signal.sources {
+            let project = source
+                .session_id
+                .split('/')
+                .next()
+                .unwrap_or("unknown")
+                .to_string();
+            if project != "unknown" && !projects.contains(&project) {
+                projects.push(project);
+            }
+        }
+    }
+    projects
+}
+
+/// 全局组件提案进入待审候选；返回 true 表示已排队、NEVER 直写。
+fn enqueue_global_candidates(
+    store: &RsiCandidateStore,
+    registry: &dyn ComponentRegistry,
+    change_set: &ChangeSet,
+    signal_ids: &[String],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Result<bool, HarnessError> {
+    if !change_set
+        .edits
+        .iter()
+        .any(|edit| is_user_level_component(edit.id()))
+    {
+        return Ok(false);
+    }
+    if !change_set
+        .edits
+        .iter()
+        .all(|edit| is_user_level_component(edit.id()))
+    {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            "全局候选与项目编辑混合，MUST 拆分后才能 review",
+        ));
+    }
+    let projects = candidate_projects_for(signal_ids, evidence);
+    for edit in &change_set.edits {
+        let id = edit.id();
+        let current = registry.read(id)?;
+        let proposed = match edit {
+            ComponentEdit::Upsert { content, .. } => content.body.clone(),
+            ComponentEdit::Patch { operations, .. } => {
+                crate::domain::changeset::apply_patch_operations(&current.body, operations)?
+            }
+            ComponentEdit::Delete { .. } => {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    "全局组件删除不能进入候选",
+                ))
+            }
+        };
+        let candidate = RsiCandidate::new_pending(
+            CandidateScope::Global,
+            id.to_string(),
+            current.body,
+            proposed,
+            signal_ids.to_vec(),
+            projects.clone(),
+            CandidateRisk::Medium,
+        );
+        store.append(&candidate)?;
+    }
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_block(
     registry: &mut dyn ComponentRegistry,
@@ -1451,6 +1534,7 @@ async fn run_block(
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     block_index: usize,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> (Option<AcceptedBlock>, &'static str) {
     // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
     // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
@@ -1631,6 +1715,33 @@ async fn run_block(
                 } else {
                     (None, "预演（将作废）")
                 };
+            }
+            if let Some(candidate_store) = candidate_store {
+                match enqueue_global_candidates(
+                    candidate_store,
+                    registry,
+                    &change_set,
+                    &signal_ids,
+                    evidence,
+                ) {
+                    Ok(true) => {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::ProposalParsed {
+                                    block_index,
+                                    reason: reason.clone(),
+                                    edits: change_set.edits.len(),
+                                },
+                            );
+                        }
+                        return (None, "待确认");
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        log::warn!(target: crate::LOG_TARGET, "候选入队失败：{}", error.message());
+                        return (None, "作废（候选入队失败）");
+                    }
+                }
             }
             // #2074：采纳前逐 edit 快照旧内容（回滚依据；失败仅 warn——NEVER
             // 阻断采纳，但会丢失该次回滚能力）
@@ -2031,6 +2142,74 @@ pub async fn run_two_phase_cycle(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
     lesson_store: &LessonStore,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    run_two_phase_cycle_inner(
+        registry,
+        llm,
+        lesson_store,
+        config,
+        evidence,
+        context_reader,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        history,
+        cycle_id,
+        None,
+    )
+    .await
+}
+
+/// 带候选库的 TwoPhase 入口：全局执行提案进入 pending review。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_two_phase_cycle_with_candidates(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+    candidate_store: Option<&RsiCandidateStore>,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    run_two_phase_cycle_inner(
+        registry,
+        llm,
+        lesson_store,
+        config,
+        evidence,
+        context_reader,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        history,
+        cycle_id,
+        candidate_store,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_two_phase_cycle_inner(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
     _config: &RsiConfig,
     evidence: crate::domain::evidence::EvidenceBundle,
     context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
@@ -2040,6 +2219,7 @@ pub async fn run_two_phase_cycle(
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
     history: &mut crate::domain::strength::SignalHistory,
     cycle_id: &str,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<RunTwoPhaseOutcome, HarnessError> {
     let cycle_ref = cycle_id.to_string();
     let lessons = lesson_store.load_active()?;
@@ -2399,6 +2579,7 @@ pub async fn run_two_phase_cycle(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut pending = 0usize;
     let mut adoption_records = Vec::new();
     let mut grouped: std::collections::BTreeMap<
         ComponentId,
@@ -2810,6 +2991,18 @@ pub async fn run_two_phase_cycle(
             continue;
         }
 
+        if let Some(candidate_store) = candidate_store {
+            if enqueue_global_candidates(
+                candidate_store,
+                registry,
+                &change_set,
+                &signal_ids,
+                &evidence,
+            )? {
+                pending += 1;
+                continue;
+            }
+        }
         if let Some(version_store) = version_store {
             if let Err(error) =
                 version_store.capture(registry, &component_id, &cycle_ref, edit.action())
@@ -2857,7 +3050,10 @@ pub async fn run_two_phase_cycle(
     }
 
     let prefix = if dry_run { "（dry-run）" } else { "" };
-    let summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    let mut summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    if pending > 0 {
+        summary.push_str(&format!(" / 待确认 {pending}"));
+    }
     Ok(RunTwoPhaseOutcome {
         outcome: CycleOutcome {
             summary,
@@ -2921,6 +3117,7 @@ pub async fn run_improvement_cycle(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -2951,6 +3148,7 @@ pub async fn run_improvement_cycle(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut pending = 0usize;
     let mut adoption_records: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
     for (block_index, chunk) in chunks.iter().enumerate() {
         let (block_adoptions, label) = run_block(
@@ -2966,6 +3164,7 @@ pub async fn run_improvement_cycle(
             recorder,
             block_index,
             version_store,
+            candidate_store,
         )
         .await;
         if let Some(accepted) = block_adoptions {
@@ -2984,6 +3183,7 @@ pub async fn run_improvement_cycle(
         match label {
             "采纳" => adopted += 1,
             "无变更" => no_change += 1,
+            "待确认" => pending += 1,
             // 预演 label（将采纳/将作废）由 preview_lines 呈现详情，
             // 计数只归入对应桶（#2050）
             "预演（将采纳）" => adopted += 1,
@@ -2993,8 +3193,12 @@ pub async fn run_improvement_cycle(
         log::info!(target: crate::LOG_TARGET, "改进块完成：{label}");
     }
     let prefix = if dry_run { "（dry-run）" } else { "" };
+    let mut summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    if pending > 0 {
+        summary.push_str(&format!(" / 待确认 {pending}"));
+    }
     Ok(CycleOutcome {
-        summary: format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
+        summary,
         adopted: adoption_records,
     })
 }
