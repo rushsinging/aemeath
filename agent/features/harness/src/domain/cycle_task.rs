@@ -343,6 +343,18 @@ impl RsiTask for HarnessRsiCycleTask {
                     outcome.summary = format!("{} | {}", outcome.summary, compose_outcome.summary);
                 }
             }
+            let maintenance = maintain_final_components(
+                registry,
+                self.llm.as_ref(),
+                self.dry_run,
+                &mut preview_lines,
+                self.recorder.as_deref(),
+                self.version_store.as_deref(),
+            )
+            .await;
+            if !maintenance.is_empty() {
+                outcome.summary = format!("{} | {}", outcome.summary, maintenance.join(" | "));
+            }
             if self.dry_run {
                 report_lines.push(format!("    TwoPhase：{}", outcome.summary));
                 outcome.summary.push_str("\n（dry-run 报告）\n");
@@ -471,6 +483,18 @@ impl RsiTask for HarnessRsiCycleTask {
                 summary_parts.push(compose_outcome.summary);
             }
         }
+        // 组件维护：确定性审计触发后，即使本周期无采纳也清理已有膨胀。
+        summary_parts.extend(
+            maintain_final_components(
+                registry,
+                self.llm.as_ref(),
+                self.dry_run,
+                &mut preview_lines,
+                self.recorder.as_deref(),
+                self.version_store.as_deref(),
+            )
+            .await,
+        );
         if summary_parts.is_empty() {
             return Ok(crate::domain::task::CycleOutcome {
                 summary: "无待处理证据块".to_string(),
@@ -555,6 +579,69 @@ fn save_signal_history(path: &std::path::Path, history: &crate::domain::strength
             log::warn!(target: crate::LOG_TARGET, "信号累计写回失败：{error}");
         }
     }
+}
+
+/// 对最终组件做确定性审计并执行维护 Compose；返回摘要（无命中为空）。
+async fn maintain_final_components(
+    registry: &mut dyn crate::application::ComponentRegistry,
+    llm: &dyn crate::domain::improvement::RsiLlmPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+) -> Vec<String> {
+    let mut findings = Vec::new();
+    for id in registry.list() {
+        let Ok(content) = registry.read(&id) else {
+            continue;
+        };
+        if let Some(finding) = crate::domain::component_audit::audit_component(&id, &content) {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ComponentAudit {
+                    component: id.to_string(),
+                    triggers: finding
+                        .triggers
+                        .iter()
+                        .map(|trigger| match trigger {
+                            crate::domain::component_audit::AuditTrigger::RuleCount => "rule_count",
+                            crate::domain::component_audit::AuditTrigger::OversizedRule => {
+                                "oversized_rule"
+                            }
+                            crate::domain::component_audit::AuditTrigger::BodyBudget => {
+                                "body_budget"
+                            }
+                            crate::domain::component_audit::AuditTrigger::DuplicateRule => {
+                                "duplicate_rule"
+                            }
+                        })
+                        .map(str::to_string)
+                        .collect(),
+                    rule_count: finding.rule_count,
+                    body_tokens: finding.body_tokens,
+                    oversized_rules: finding.oversized_rules.len(),
+                    duplicate_rules: finding.duplicate_rules,
+                });
+            }
+            findings.push(finding);
+        }
+    }
+    if findings.is_empty() {
+        return Vec::new();
+    }
+    crate::domain::maintenance::run_maintenance_compose_phase(
+        registry,
+        llm,
+        &findings,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+    )
+    .await
+    .unwrap_or_else(|error| {
+        log::warn!(target: crate::LOG_TARGET, "维护 Compose 失败（跳过）：{error}");
+        vec!["维护 Compose：执行失败（跳过）".to_string()]
+    })
 }
 
 // #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
