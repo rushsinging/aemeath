@@ -610,12 +610,16 @@ async fn maintain_final_components(
                             crate::domain::component_audit::AuditTrigger::BodyBudget => {
                                 "body_budget"
                             }
+                            crate::domain::component_audit::AuditTrigger::DuplicateRule => {
+                                "duplicate_rule"
+                            }
                         })
                         .map(str::to_string)
                         .collect(),
                     rule_count: finding.rule_count,
                     body_tokens: finding.body_tokens,
                     oversized_rules: finding.oversized_rules.len(),
+                    duplicate_rules: finding.duplicate_rules,
                 });
             }
             findings.push(finding);

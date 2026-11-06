@@ -129,6 +129,7 @@ pub enum RsiCycleEvent {
         rule_count: usize,
         body_tokens: usize,
         oversized_rules: usize,
+        duplicate_rules: usize,
     },
     MaintenanceComposeResult {
         component: String,

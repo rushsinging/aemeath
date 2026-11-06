@@ -9,7 +9,7 @@ use crate::constants::{
     ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS,
     RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS,
 };
-use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet};
+use crate::domain::changeset::{apply_change_set_with_policy, AppliedEdit, ChangeSet, WritePolicy};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
@@ -1613,7 +1613,11 @@ async fn run_block(
                 return if valid {
                     // dry-run 的 registry 是内存 overlay：这里应用虚拟编辑，
                     // 让后续块与 Compose 看到叠加后的终态；真实 registry 不写。
-                    match apply_change_set(registry, &change_set) {
+                    match apply_change_set_with_policy(
+                        registry,
+                        &change_set,
+                        WritePolicy::ProseEvidence,
+                    ) {
                         Ok(applied) => (
                             Some(AcceptedBlock {
                                 edits: applied,
@@ -1638,7 +1642,7 @@ async fn run_block(
                     }
                 }
             }
-            match apply_change_set(registry, &change_set) {
+            match apply_change_set_with_policy(registry, &change_set, WritePolicy::ProseEvidence) {
                 Ok(applied) => {
                     if let Some(recorder) = recorder {
                         for edit in &change_set.edits {
@@ -2773,7 +2777,9 @@ pub async fn run_two_phase_cycle(
                 "[dry-run][two-phase] upsert {component_id}：{}",
                 reason
             ));
-            if let Err(error) = apply_change_set(registry, &change_set) {
+            if let Err(error) =
+                apply_change_set_with_policy(registry, &change_set, WritePolicy::ProseEvidence)
+            {
                 discarded += issues.len();
                 if let Some(recorder) = recorder {
                     recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
@@ -2800,7 +2806,7 @@ pub async fn run_two_phase_cycle(
                 log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");
             }
         }
-        match apply_change_set(registry, &change_set) {
+        match apply_change_set_with_policy(registry, &change_set, WritePolicy::ProseEvidence) {
             Ok(applied) => {
                 if let Some(recorder) = recorder {
                     let new_chars = registry
@@ -3522,7 +3528,11 @@ pub async fn run_compose_phase(
                         }
                     }
                 }
-                match apply_change_set(registry, &change_set) {
+                match apply_change_set_with_policy(
+                    registry,
+                    &change_set,
+                    WritePolicy::ProseEvidence,
+                ) {
                     Ok(_) => {
                         // Compose 修正继承被仲裁采纳的真实证据；NEVER 用空绑定
                         // 抹掉 lesson 的 signal/source。

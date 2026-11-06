@@ -2,7 +2,8 @@
 
 use crate::application::ComponentRegistry;
 use crate::domain::changeset::{
-    apply_change_set, AppliedEdit, ChangeSet, ComponentEdit, PatchOperation,
+    apply_change_set, apply_change_set_with_policy, AppliedEdit, ChangeSet, ComponentEdit,
+    PatchOperation, WritePolicy,
 };
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::test_support::FakeRegistry;
@@ -240,4 +241,90 @@ fn apply_rolls_back_written_edits_when_later_write_fails() {
         Some(&"old".to_string()),
         "已有组件必须恢复旧内容"
     );
+}
+
+#[test]
+fn evidence_gate_rejects_duplicate_rule_increase() {
+    let id = id(ComponentKind::Guardrails, "default");
+    let mut registry = FakeRegistry::with_entries(vec![(
+        id.clone(),
+        body_content("# Guardrails\n\n- alpha rule\n- beta rule\n"),
+    )]);
+    let change_set = ChangeSet {
+        edits: vec![ComponentEdit::Upsert {
+            id: id.clone(),
+            content: body_content("# Guardrails\n\n- alpha rule\n- alpha rule\n"),
+        }],
+    };
+    let error =
+        apply_change_set_with_policy(&mut registry, &change_set, WritePolicy::ProseEvidence)
+            .expect_err("重复规则增加必须拒绝");
+    assert!(
+        error.message().contains("重复规则数增加"),
+        "{}",
+        error.message()
+    );
+}
+
+#[test]
+fn evidence_gate_allows_new_distinct_rule() {
+    let id = id(ComponentKind::ToolGuidance, "default");
+    let mut registry = FakeRegistry::with_entries(vec![(
+        id.clone(),
+        body_content("# Tool Guidance\n\n- alpha rule\n"),
+    )]);
+    let change_set = ChangeSet {
+        edits: vec![ComponentEdit::Upsert {
+            id: id.clone(),
+            content: body_content("# Tool Guidance\n\n- alpha rule\n- beta rule\n"),
+        }],
+    };
+    apply_change_set_with_policy(&mut registry, &change_set, WritePolicy::ProseEvidence)
+        .expect("新增不重复规则应允许");
+}
+
+#[test]
+fn maintenance_gate_rejects_token_increase() {
+    let id = id(ComponentKind::Guardrails, "default");
+    let mut registry = FakeRegistry::with_entries(vec![(
+        id.clone(),
+        body_content("# Guardrails\n\n- alpha rule\n"),
+    )]);
+    let change_set = ChangeSet {
+        edits: vec![ComponentEdit::Upsert {
+            id: id.clone(),
+            content: body_content(
+                "# Guardrails\n\n- alpha rule\n- a much longer rule that increases tokens\n",
+            ),
+        }],
+    };
+    let error =
+        apply_change_set_with_policy(&mut registry, &change_set, WritePolicy::ProseMaintenance)
+            .expect_err("维护 token 增加必须拒绝");
+    assert!(error.message().contains("维护"), "{}", error.message());
+}
+
+#[test]
+fn evidence_gate_rejects_body_over_budget() {
+    let id = id(ComponentKind::Guardrails, "default");
+    let mut registry = FakeRegistry::with_entries(vec![(
+        id.clone(),
+        body_content("# Guardrails\n\n- alpha rule\n"),
+    )]);
+    let change_set = ChangeSet {
+        edits: vec![ComponentEdit::Upsert {
+            id: id.clone(),
+            content: body_content(&format!(
+                "# Guardrails\n\n{}\n",
+                (0..120)
+                    .map(|index| format!("- {} rule {index}", "长".repeat(60)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )),
+        }],
+    };
+    let error =
+        apply_change_set_with_policy(&mut registry, &change_set, WritePolicy::ProseEvidence)
+            .expect_err("超预算必须拒绝");
+    assert!(error.message().contains("超预算"), "{}", error.message());
 }

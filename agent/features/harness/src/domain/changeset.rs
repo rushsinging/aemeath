@@ -7,7 +7,9 @@
 use crate::application::ComponentRegistry;
 use crate::constants::ERROR_DOMAIN;
 use crate::domain::component::{ComponentContent, ComponentId};
+use crate::domain::component_audit::{is_auditable_kind, AuditSnapshot};
 use crate::domain::errors::HarnessError;
+use crate::domain::improvement::component_body_budget_tokens;
 
 /// 单条组件编辑。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -158,6 +160,96 @@ fn precheck_edit(
     }
 }
 
+/// 写入策略：prose 组件是否执行规则/ token / 重复回归门禁。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritePolicy {
+    /// 既有调用面（非 RSI）保持原语义。
+    Unrestricted,
+    /// RSI 证据编辑：允许新增规则，但不得新增重复/超长规则，且不得超预算。
+    ProseEvidence,
+    /// 维护编辑：rule/token/oversized/duplicate 均不得增加。
+    ProseMaintenance,
+}
+
+fn content_after_edit(
+    registry: &dyn ComponentRegistry,
+    edit: &ComponentEdit,
+) -> Result<Option<ComponentContent>, HarnessError> {
+    match edit {
+        ComponentEdit::Upsert { content, .. } => Ok(Some(content.clone())),
+        ComponentEdit::Patch { id, operations } => {
+            let content = registry.read(id)?;
+            Ok(Some(ComponentContent {
+                frontmatter: content.frontmatter,
+                body: apply_patch_operations(&content.body, operations)?,
+            }))
+        }
+        ComponentEdit::Delete { .. } => Ok(None),
+    }
+}
+
+fn validate_no_regression(
+    id: &ComponentId,
+    before_body: &str,
+    after_body: &str,
+    policy: WritePolicy,
+) -> Result<(), HarnessError> {
+    let before = AuditSnapshot::from_body(before_body);
+    let after = AuditSnapshot::from_body(after_body);
+    if after.empty_rules > 0 {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!("写入门禁拒绝 {id}：出现空规则"),
+        ));
+    }
+    let budget = component_body_budget_tokens(id);
+    if after.body_tokens > budget {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!(
+                "写入门禁拒绝 {id}：body 超预算 {} > {} tokens",
+                after.body_tokens, budget
+            ),
+        ));
+    }
+    if after.oversized_rules.len() > before.oversized_rules.len() {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!("写入门禁拒绝 {id}：超长规则数增加"),
+        ));
+    }
+    if after.duplicate_rules > before.duplicate_rules {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!(
+                "写入门禁拒绝 {id}：重复规则数增加 {} → {}",
+                before.duplicate_rules, after.duplicate_rules
+            ),
+        ));
+    }
+    if policy == WritePolicy::ProseMaintenance {
+        if after.rule_count > before.rule_count {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!(
+                    "写入门禁拒绝 {id}：维护 rule 数增加 {} → {}",
+                    before.rule_count, after.rule_count
+                ),
+            ));
+        }
+        if after.body_tokens > before.body_tokens {
+            return Err(HarnessError::invalid(
+                ERROR_DOMAIN,
+                format!(
+                    "写入门禁拒绝 {id}：维护 token 增加 {} → {}",
+                    before.body_tokens, after.body_tokens
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 应用变更集：统一预检 → 全部通过才统一写入。
 ///
 /// 任一预检失败返回 [`HarnessError`]（Invalid），registry 状态保持不变。
@@ -165,8 +257,35 @@ pub fn apply_change_set(
     registry: &mut dyn ComponentRegistry,
     change_set: &ChangeSet,
 ) -> Result<Vec<AppliedEdit>, HarnessError> {
+    apply_change_set_with_policy(registry, change_set, WritePolicy::Unrestricted)
+}
+
+/// 应用变更集并按 [`WritePolicy`] 做写入前 prose 回归门禁。
+pub fn apply_change_set_with_policy(
+    registry: &mut dyn ComponentRegistry,
+    change_set: &ChangeSet,
+    policy: WritePolicy,
+) -> Result<Vec<AppliedEdit>, HarnessError> {
     for edit in &change_set.edits {
         precheck_edit(registry, edit)?;
+    }
+    if matches!(
+        policy,
+        WritePolicy::ProseEvidence | WritePolicy::ProseMaintenance
+    ) {
+        for edit in &change_set.edits {
+            let id = edit.id();
+            if !is_auditable_kind(id.kind) {
+                continue;
+            }
+            let Some(after) = content_after_edit(registry, edit)? else {
+                continue;
+            };
+            let Ok(before) = registry.read(id) else {
+                continue;
+            };
+            validate_no_regression(id, &before.body, &after.body, policy)?;
+        }
     }
 
     // 写前快照：任一后续写入失败时按逆序恢复，避免多条目半采纳。
