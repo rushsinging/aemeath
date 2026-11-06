@@ -90,6 +90,7 @@ async fn maintenance_compacts_oversized_rule() {
         &mut preview,
         None,
         None,
+        None,
     )
     .await
     .expect("maintenance");
@@ -127,6 +128,7 @@ async fn maintenance_rejects_missing_rule_coverage() {
         &mut preview,
         None,
         None,
+        None,
     )
     .await
     .expect("maintenance");
@@ -156,6 +158,7 @@ async fn maintenance_rejects_semantic_fragment() {
         &[finding],
         false,
         &mut preview,
+        None,
         None,
         None,
     )
@@ -191,6 +194,7 @@ async fn dry_run_maintenance_does_not_write_version_snapshot() {
         &mut preview,
         None,
         Some(&version_store),
+        None,
     )
     .await
     .expect("maintenance");
@@ -226,6 +230,7 @@ async fn maintenance_strips_bullet_marker_from_merge_text() {
         &[finding],
         false,
         &mut preview,
+        None,
         None,
         None,
     )
@@ -279,6 +284,7 @@ async fn oversized_body_is_chunked_and_compacted() {
         &mut preview,
         None,
         None,
+        None,
     )
     .await
     .expect("maintenance");
@@ -313,6 +319,7 @@ async fn body_beyond_double_budget_is_skipped_without_llm_calls() {
         &[finding],
         true,
         &mut preview,
+        None,
         None,
         None,
     )

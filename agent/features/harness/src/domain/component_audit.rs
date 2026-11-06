@@ -260,6 +260,16 @@ pub(crate) fn parse_audit_rules(body: &str) -> Vec<AuditRuleUnit> {
 }
 
 /// 只对 prose 组件做审计：guardrails/tool-guidance/overlay。
+/// 仅用户级组件进入默认维护：global overlay、guardrails、tool-guidance。
+/// 项目 overlay 只作为证据，不自动改写。
+pub(crate) fn is_user_level_component(id: &ComponentId) -> bool {
+    match id.kind {
+        ComponentKind::Guardrails | ComponentKind::ToolGuidance => true,
+        ComponentKind::SystemPromptOverlay => id.name.as_str() == "global",
+        _ => false,
+    }
+}
+
 pub(crate) fn is_auditable_kind(kind: ComponentKind) -> bool {
     matches!(
         kind,

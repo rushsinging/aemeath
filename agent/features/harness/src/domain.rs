@@ -1,5 +1,6 @@
 //! Harness 组件树领域模型。
 
+pub mod candidate;
 pub mod changeset;
 #[cfg(test)]
 mod changeset_tests;

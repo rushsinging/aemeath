@@ -6,6 +6,7 @@
 
 use crate::application::ComponentRegistry;
 use crate::constants::{COMPONENT_MAINTENANCE_CHUNK_RULES, ERROR_DOMAIN};
+use crate::domain::candidate::{CandidateRisk, CandidateScope, RsiCandidate, RsiCandidateStore};
 use crate::domain::changeset::{
     apply_change_set_with_policy, ChangeSet, ComponentEdit, WritePolicy,
 };
@@ -441,6 +442,7 @@ pub async fn run_maintenance_compose_phase(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&ComponentVersionStore>,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<Vec<String>, HarnessError> {
     let mut summaries = Vec::new();
     for finding in findings {
@@ -588,6 +590,29 @@ pub async fn run_maintenance_compose_phase(
             summaries.push(format!(
                 "维护 Compose：{} 校验失败（跳过）",
                 finding.component
+            ));
+            continue;
+        }
+        if let Some(candidate_store) = candidate_store {
+            let candidate = RsiCandidate::new_pending(
+                CandidateScope::Global,
+                finding.component.to_string(),
+                current.body.clone(),
+                body.clone(),
+                finding
+                    .triggers
+                    .iter()
+                    .map(|trigger| trigger_name(*trigger).to_string())
+                    .collect(),
+                Vec::new(),
+                CandidateRisk::Medium,
+            );
+            candidate_store.append(&candidate).map_err(|error| {
+                HarnessError::storage(ERROR_DOMAIN, format!("候选写入失败：{}", error.message()))
+            })?;
+            summaries.push(format!(
+                "维护 Compose：{} 待确认（{}）",
+                finding.component, candidate.id
             ));
             continue;
         }

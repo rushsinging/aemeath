@@ -30,6 +30,8 @@ pub struct HarnessRsiCycleTask {
     version_store: Option<std::sync::Arc<crate::domain::versioning::ComponentVersionStore>>,
     /// 跨周期信号累计文件（#2092 强度门禁的持久状态）。
     history_path: std::path::PathBuf,
+    /// 待审候选库：全局维护变更先入候选，不直接落盘。
+    candidate_store: Option<std::sync::Arc<crate::domain::candidate::RsiCandidateStore>>,
 }
 
 impl HarnessRsiCycleTask {
@@ -49,12 +51,22 @@ impl HarnessRsiCycleTask {
             recorder: None,
             version_store: None,
             history_path: std::path::PathBuf::new(),
+            candidate_store: None,
         }
     }
 
     /// 注入跨周期信号累计文件路径（#2092）。
     pub fn with_history_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.history_path = path.into();
+        self
+    }
+
+    /// 注入待审候选库：全局维护变更进入 review 闭环。
+    pub fn with_candidate_store(
+        mut self,
+        store: std::sync::Arc<crate::domain::candidate::RsiCandidateStore>,
+    ) -> Self {
+        self.candidate_store = Some(store);
         self
     }
 
@@ -350,6 +362,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
+                self.candidate_store.as_deref(),
             )
             .await;
             if !maintenance.is_empty() {
@@ -494,6 +507,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
+                self.candidate_store.as_deref(),
             )
             .await,
         );
@@ -591,9 +605,13 @@ async fn maintain_final_components(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    candidate_store: Option<&crate::domain::candidate::RsiCandidateStore>,
 ) -> Vec<String> {
     let mut findings = Vec::new();
     for id in registry.list() {
+        if !crate::domain::component_audit::is_user_level_component(&id) {
+            continue;
+        }
         let Ok(content) = registry.read(&id) else {
             continue;
         };
@@ -638,6 +656,7 @@ async fn maintain_final_components(
         preview_lines,
         recorder,
         version_store,
+        candidate_store,
     )
     .await
     .unwrap_or_else(|error| {
