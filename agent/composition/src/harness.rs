@@ -673,6 +673,11 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
         harness::domain::candidate::RsiCandidateStore::new(
             share::config::paths::global_harness_dir().join("candidates.jsonl"),
         ),
+    ))
+    .with_observation_store(std::sync::Arc::new(
+        harness::domain::change_observation::ChangeObservationStore::new(
+            share::config::paths::global_harness_dir().join("changes.jsonl"),
+        ),
     ));
     let mut task = task;
     if dry_run {
@@ -937,6 +942,12 @@ fn rsi_candidate_store() -> harness::domain::candidate::RsiCandidateStore {
     )
 }
 
+fn rsi_observation_store() -> harness::domain::change_observation::ChangeObservationStore {
+    harness::domain::change_observation::ChangeObservationStore::new(
+        share::config::paths::global_harness_dir().join("changes.jsonl"),
+    )
+}
+
 fn render_candidate(candidate: &harness::domain::candidate::RsiCandidate) -> String {
     let conflict = candidate
         .conflict
@@ -1118,7 +1129,8 @@ pub fn run_rsi_review_approve(id: &str, resolve: Option<&str>, reason: Option<&s
     let version_store = harness::domain::versioning::ComponentVersionStore::new(
         share::config::paths::global_harness_dir().join("versions"),
     );
-    if let Err(error) = version_store.capture(&**guard, &component_id, "review", "upsert") {
+    let review_cycle = format!("review-{id}");
+    if let Err(error) = version_store.capture(&**guard, &component_id, &review_cycle, "upsert") {
         return RsiRunExit::Failure {
             message: format!("写前快照失败：{}", error.message()),
             exit_code: 1,
@@ -1152,6 +1164,19 @@ pub fn run_rsi_review_approve(id: &str, resolve: Option<&str>, reason: Option<&s
             message: format!("候选状态更新失败：{}", error.message()),
             exit_code: 1,
         };
+    }
+    if !candidate.evidence.is_empty() {
+        let observation = harness::domain::change_observation::ChangeObservation::new_applied(
+            candidate.target_component.clone(),
+            review_cycle,
+            harness::domain::change_observation::body_hash(&candidate.base_body),
+            harness::domain::change_observation::body_hash(&candidate.proposed_body),
+            candidate.evidence.clone(),
+            candidate.evidence.clone(),
+        );
+        if let Err(error) = rsi_observation_store().append(&observation) {
+            log::warn!(target: crate::LOG_TARGET, "写入 change 观察失败：{}", error.message());
+        }
     }
     RsiRunExit::Done {
         summary: format!("已写入 {}（候选 {}）", candidate.target_component, id),

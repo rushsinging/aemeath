@@ -32,6 +32,9 @@ pub struct HarnessRsiCycleTask {
     history_path: std::path::PathBuf,
     /// 待审候选库：全局维护变更先入候选，不直接落盘。
     candidate_store: Option<std::sync::Arc<crate::domain::candidate::RsiCandidateStore>>,
+    /// 写入变更观察库：后续周期验收，失败自动回滚。
+    observation_store:
+        Option<std::sync::Arc<crate::domain::change_observation::ChangeObservationStore>>,
 }
 
 impl HarnessRsiCycleTask {
@@ -52,6 +55,7 @@ impl HarnessRsiCycleTask {
             version_store: None,
             history_path: std::path::PathBuf::new(),
             candidate_store: None,
+            observation_store: None,
         }
     }
 
@@ -67,6 +71,15 @@ impl HarnessRsiCycleTask {
         store: std::sync::Arc<crate::domain::candidate::RsiCandidateStore>,
     ) -> Self {
         self.candidate_store = Some(store);
+        self
+    }
+
+    /// 注入写入变更观察库。
+    pub fn with_observation_store(
+        mut self,
+        store: std::sync::Arc<crate::domain::change_observation::ChangeObservationStore>,
+    ) -> Self {
+        self.observation_store = Some(store);
         self
     }
 
@@ -170,6 +183,27 @@ impl RsiTask for HarnessRsiCycleTask {
             || block_evidences
                 .iter()
                 .any(|evidence| evidence.sessions_covered > 0);
+
+        // 自动观察：下一周期先验收上轮写入；失败自动回滚，再进入新变更。
+        let mut observation_summaries = Vec::new();
+        if !self.dry_run {
+            if let (Some(observation_store), Some(version_store)) = (
+                self.observation_store.as_deref(),
+                self.version_store.as_deref(),
+            ) {
+                let mut merged = crate::domain::evidence::EvidenceBundle::default();
+                for evidence in &block_evidences {
+                    merged.signals.extend(evidence.signals.iter().cloned());
+                    merged.sessions_covered += evidence.sessions_covered;
+                }
+                observation_summaries = crate::domain::change_observation::evaluate_and_rollback(
+                    observation_store,
+                    registry,
+                    version_store,
+                    &merged,
+                );
+            }
+        }
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_secs())
@@ -317,6 +351,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 ));
             }
             let mut history = load_signal_history(&self.history_path);
+            let observation_evidence = merged_evidence.clone();
             let run = crate::domain::improvement::run_two_phase_cycle_with_candidates(
                 registry,
                 self.llm.as_ref(),
@@ -337,6 +372,21 @@ impl RsiTask for HarnessRsiCycleTask {
                 save_signal_history(&self.history_path, &history);
             }
             let mut outcome = run.outcome;
+            if !self.dry_run {
+                if let (Some(observation_store), Some(version_store)) = (
+                    self.observation_store.as_deref(),
+                    self.version_store.as_deref(),
+                ) {
+                    record_change_observations(
+                        observation_store,
+                        registry,
+                        version_store,
+                        &outcome.adopted,
+                        &cycle_id,
+                        &observation_evidence,
+                    );
+                }
+            }
             if !outcome.adopted.is_empty() {
                 if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
                     registry,
@@ -368,6 +418,13 @@ impl RsiTask for HarnessRsiCycleTask {
             .await;
             if !maintenance.is_empty() {
                 outcome.summary = format!("{} | {}", outcome.summary, maintenance.join(" | "));
+            }
+            if !observation_summaries.is_empty() {
+                outcome.summary = format!(
+                    "{} | {}",
+                    outcome.summary,
+                    observation_summaries.join(" | ")
+                );
             }
             if self.dry_run {
                 report_lines.push(format!("    TwoPhase：{}", outcome.summary));
@@ -500,6 +557,26 @@ impl RsiTask for HarnessRsiCycleTask {
                 summary_parts.push(compose_outcome.summary);
             }
         }
+        if !self.dry_run {
+            if let (Some(observation_store), Some(version_store)) = (
+                self.observation_store.as_deref(),
+                self.version_store.as_deref(),
+            ) {
+                let mut merged = crate::domain::evidence::EvidenceBundle::default();
+                for evidence in &block_evidences {
+                    merged.signals.extend(evidence.signals.iter().cloned());
+                    merged.sessions_covered += evidence.sessions_covered;
+                }
+                record_change_observations(
+                    observation_store,
+                    registry,
+                    version_store,
+                    &all_adoptions,
+                    &cycle_id,
+                    &merged,
+                );
+            }
+        }
         // 组件维护：确定性审计触发后，即使本周期无采纳也清理已有膨胀。
         summary_parts.extend(
             maintain_final_components(
@@ -513,6 +590,7 @@ impl RsiTask for HarnessRsiCycleTask {
             )
             .await,
         );
+        summary_parts.extend(observation_summaries.clone());
         if summary_parts.is_empty() {
             return Ok(crate::domain::task::CycleOutcome {
                 summary: "无待处理证据块".to_string(),
@@ -599,6 +677,51 @@ fn save_signal_history(path: &std::path::Path, history: &crate::domain::strength
     }
 }
 // #2188（main）：组件维护审计与维护 Compose；sealed 已随实现权治理移除。
+
+fn record_change_observations(
+    store: &crate::domain::change_observation::ChangeObservationStore,
+    registry: &dyn crate::application::ComponentRegistry,
+    version_store: &crate::domain::versioning::ComponentVersionStore,
+    adopted: &[crate::domain::task::AdoptionRecord],
+    cycle_id: &str,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) {
+    for adoption in adopted {
+        let Ok(current) = registry.read(&adoption.id) else {
+            continue;
+        };
+        let Ok(snapshot) = version_store.load(&adoption.id, None) else {
+            continue;
+        };
+        let crate::domain::versioning::SnapshotContent::Existing { raw } = &snapshot.payload else {
+            continue;
+        };
+        let target_signal_ids: Vec<String> = adoption
+            .evidence
+            .iter()
+            .map(|binding| binding.signal_id.clone())
+            .collect();
+        if target_signal_ids.is_empty() {
+            continue;
+        }
+        let observation = crate::domain::change_observation::ChangeObservation::new_applied(
+            adoption.id.to_string(),
+            cycle_id.to_string(),
+            crate::domain::change_observation::body_hash(raw),
+            crate::domain::change_observation::body_hash(&current.body),
+            target_signal_ids,
+            evidence
+                .signals
+                .iter()
+                .map(|signal| signal.signal_id.clone())
+                .collect(),
+        );
+        if let Err(error) = store.append(&observation) {
+            log::warn!(target: crate::LOG_TARGET, "写入变更观察失败：{}", error.message());
+        }
+    }
+}
+
 /// 对最终组件做确定性审计并执行维护 Compose；返回摘要（无命中为空）。
 async fn maintain_final_components(
     registry: &mut dyn crate::application::ComponentRegistry,

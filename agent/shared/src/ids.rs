@@ -198,6 +198,11 @@ define_typed_id!(
     "rsc",
     "Harness RSI review candidate identity（typed `rsc_`；兼容 legacy UUIDv7）。"
 );
+define_typed_id!(
+    ChangeObservationId,
+    "chg",
+    "Harness RSI applied-change observation identity（typed `chg_`；兼容 legacy UUIDv7）。"
+);
 
 /// 生成前缀形态 typed id：`<prefix>_<11 字符 base62 雪花>`。
 ///
