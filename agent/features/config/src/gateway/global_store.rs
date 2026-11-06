@@ -22,12 +22,53 @@ impl GlobalConfigRevision {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// 稳定数值化视图（#1866 A3）：内容摘要前 8 字节大端 u64。
+    /// 仅供 SDK/表单视图的 u64 revision 展示位使用，契约层一律用
+    /// `GlobalConfigRevision` 本体，消费方 NEVER 自行哈希。
+    pub fn display_u64(&self) -> u64 {
+        let mut bytes = [0u8; 8];
+        let mut hasher = Sha256::new();
+        hasher.update(self.0.as_bytes());
+        let digest = hasher.finalize();
+        if let Some(prefix) = digest.get(..8) {
+            bytes.copy_from_slice(prefix);
+        }
+        u64::from_be_bytes(bytes)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct GlobalConfigDocument {
     pub revision: GlobalConfigRevision,
     pub value: Value,
+}
+
+impl GlobalConfigDocument {
+    /// 类型化投影：`models.providers` → `BTreeMap<source, ProviderModelsConfig>`
+    /// （#1866 A2——读侧唯一反序列化点，替代消费方逐字段手拼 JSON）。
+    /// 文档缺该段时返回空表；结构非法返回 Invalid。
+    pub fn provider_models(
+        &self,
+    ) -> Result<
+        std::collections::BTreeMap<String, share::config::models::ProviderModelsConfig>,
+        share::error::DomainError,
+    > {
+        let providers = self
+            .value
+            .get("models")
+            .and_then(|models| models.get("providers"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        // legacy camelCase 兼容由 share 的 ModelEntryConfig 自定义反序列化单点承担
+        //（deserialize.rs 的 alias）；此处不再重复规范化。
+        serde_json::from_value(providers).map_err(|error| {
+            share::error::DomainError::invalid(
+                "config",
+                format!("全局配置 providers 段结构非法：{error}"),
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -335,6 +376,7 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
             .as_ref()
             .filter(|user_agent| !user_agent.trim().is_empty())
             .map(|user_agent| user_agent.trim().to_string()),
+        api_style: None,
     };
     let provider = serde_json::to_value(&provider_config)
         .map_err(|error| GlobalConfigStoreError::InvalidDocument(error.to_string()))?;

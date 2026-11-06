@@ -2,8 +2,6 @@
 //!
 //! 覆盖目标：
 //! - `SystemInformation` 字段类型稳定；
-//! - `SystemInformationPort::current` 是 async；
-//! - 测试辅助 `StaticSystemInformation` 仅在测试模块内可用，不进入生产 API；
 //! - Provider Probe 端口契约：`ProviderProbeRequest` 字段稳定、`ProviderProbeErrorKind`
 //!   是封闭枚举、错误展示走 `Display`，敏感字段不应出现在 `Debug` 默认输出之外的字段；
 //! - 测试辅助 `StaticProbe` 仅在 ports_tests 内可达，不进入生产 API。
@@ -14,28 +12,8 @@ use std::time::Duration;
 use crate::catalog::DriverId;
 use crate::ports::{
     ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
-    ProviderProbeResult, SystemInformation, SystemInformationPort,
+    ProviderProbeResult, SystemInformation,
 };
-
-/// 测试辅助：固定返回值的 `SystemInformationPort` 实现。仅在 `ports_tests`
-/// 模块内部使用，不在生产路径可达，亦不通过 `pub use` 重新导出到 crate 根。
-#[derive(Debug, Clone)]
-pub struct StaticSystemInformation {
-    pub os_name: &'static str,
-    pub os_version: Option<&'static str>,
-    pub arch: &'static str,
-}
-
-#[async_trait::async_trait]
-impl SystemInformationPort for StaticSystemInformation {
-    async fn current(&self) -> SystemInformation {
-        SystemInformation {
-            os_name: self.os_name.to_string(),
-            os_version: self.os_version.map(str::to_string),
-            arch: self.arch.to_string(),
-        }
-    }
-}
 
 /// 测试辅助：固定结果的 `ProviderProbePort` 实现。仅在 `ports_tests` 模块内可用。
 pub struct StaticProbe {
@@ -99,30 +77,6 @@ fn system_information_supports_none_os_version_for_unavailable_platforms() {
         arch: "x86_64".to_string(),
     };
     assert!(info.os_version.is_none());
-}
-
-#[tokio::test]
-async fn static_system_information_test_helper_returns_configured_values() {
-    let helper = StaticSystemInformation {
-        os_name: "linux",
-        os_version: Some("6.1.0"),
-        arch: "x86_64",
-    };
-    let snapshot = helper.current().await;
-    assert_eq!(snapshot.os_name, "linux");
-    assert_eq!(snapshot.os_version.as_deref(), Some("6.1.0"));
-    assert_eq!(snapshot.arch, "x86_64");
-}
-
-#[tokio::test]
-async fn static_system_information_supports_none_os_version() {
-    let helper = StaticSystemInformation {
-        os_name: "linux",
-        os_version: None,
-        arch: "x86_64",
-    };
-    let snapshot = helper.current().await;
-    assert!(snapshot.os_version.is_none());
 }
 
 // ProviderProbePort tests -------------------------------------------------------

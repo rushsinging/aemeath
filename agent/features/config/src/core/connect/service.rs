@@ -980,7 +980,7 @@ enum AsyncOutcome {
         message: String,
     },
     CommitSuccess {
-        applied_revision: u64,
+        applied_revision: crate::GlobalConfigRevision,
     },
     CommitFailed(ConnectError),
 }

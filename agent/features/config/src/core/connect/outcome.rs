@@ -10,7 +10,9 @@ pub enum ConnectOutcome {
     ///
     /// `applied_revision` 是 [`crate::ports::ConnectCommitPort`] 返回的
     /// receipt 投影；下一次 committed snapshot 读取应能取到一致值。
-    Completed { applied_revision: u64 },
+    Completed {
+        applied_revision: crate::GlobalConfigRevision,
+    },
     /// 用户主动或被动取消；session 内的 draft 全部丢弃，没有持久化副作用。
     Cancelled,
 }

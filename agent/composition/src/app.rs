@@ -10,11 +10,7 @@ use logging::{LoggingOutputMode, LoggingSettings, NativeStderrRouting, UnifiedLo
 use share::config::domain::snapshot::ConfigSnapshot;
 use std::path::Path;
 
-use async_trait::async_trait;
-use config::connect::{
-    ConnectAppService, ConnectCommitError, ConnectCommitPort, ConnectCommitReceipt,
-    ConnectCommitRequest, ConnectError, ConnectOrigin, ConnectView, ExistingProviderSnapshot,
-};
+use config::connect::{ConnectAppService, ConnectError, ConnectOrigin, ConnectView};
 use config::form::{
     connect_command_for_form, provider_connect_form_view, PROVIDER_CONNECT_WORKFLOW_ID,
 };
@@ -295,56 +291,6 @@ impl sdk::ConnectClient for ConnectFacade {
     }
 }
 
-pub struct GlobalConnectCommitAdapter {
-    store: Arc<dyn config::GlobalConfigConnectStore>,
-}
-
-/// Provider 目录读适配器：start_connect 经此一次加载全量已有 Provider 快照。
-struct GlobalConnectDirectoryAdapter {
-    store: Arc<dyn config::GlobalConfigConnectStore>,
-}
-
-impl GlobalConnectDirectoryAdapter {
-    fn new(store: Arc<dyn config::GlobalConfigConnectStore>) -> Arc<Self> {
-        Arc::new(Self { store })
-    }
-}
-
-#[async_trait::async_trait]
-impl config::connect::ConnectProviderDirectory for GlobalConnectDirectoryAdapter {
-    async fn provider_snapshots(
-        &self,
-    ) -> Result<Vec<ExistingProviderSnapshot>, share::error::DomainError> {
-        let document = self.store.load_global_document().await?;
-        Ok(document
-            .as_ref()
-            .map(|document| existing_provider_snapshots(&document.value))
-            .unwrap_or_default())
-    }
-}
-
-impl GlobalConnectCommitAdapter {
-    pub fn new(store: Arc<dyn config::GlobalConfigConnectStore>) -> Arc<Self> {
-        Arc::new(Self { store })
-    }
-}
-
-#[async_trait]
-impl ConnectCommitPort for GlobalConnectCommitAdapter {
-    async fn commit(
-        &self,
-        request: ConnectCommitRequest,
-    ) -> Result<ConnectCommitReceipt, ConnectCommitError> {
-        let revision = self
-            .store
-            .compare_and_swap(request.expected_global_revision, request.draft)
-            .await
-            .map_err(map_store_error)?;
-        let applied_revision = stable_revision(revision.as_str());
-        Ok(ConnectCommitReceipt { applied_revision })
-    }
-}
-
 pub struct FirstChatConnectBootstrap {
     pub connect: Arc<dyn sdk::ConnectClient>,
     pub forms: Arc<dyn sdk::ConfigFormClient>,
@@ -391,10 +337,10 @@ pub async fn prepare_first_chat_with_agents_dir(
         .create_complete_default()
         .await
         .map_err(|error| global_connect_store_sdk_error(&error))?;
-    let global_user_agent = load_connect_global_user_agent(&store).await?;
+    // #1866 A1/A5：全局 UA 由 config::wire_connect 内部读取，此处不再预载。
     Ok(Some(FirstChatConnectBootstrap {
-        connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
-        forms: wire_connect_with_store(store.clone(), global_user_agent),
+        connect: wire_connect_with_store(store.clone(), None).await,
+        forms: wire_connect_with_store(store.clone(), None).await,
         store,
         receipt,
     }))
@@ -426,188 +372,35 @@ pub async fn build_connect_bootstrap_with_agents_dir(
             .await
             .map_err(|error| global_connect_store_sdk_error(&error))?;
     }
-    let global_user_agent = load_connect_global_user_agent(&store).await?;
+    // #1866 A1/A5：全局 UA 由 config::wire_connect 内部读取，此处不再预载。
     Ok(ConnectBootstrap {
-        connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
-        forms: wire_connect_with_store(store, global_user_agent),
+        connect: wire_connect_with_store(store.clone(), None).await,
+        forms: wire_connect_with_store(store, None).await,
     })
 }
 
-fn wire_connect(
-    agents_dir: &std::path::Path,
-    global_user_agent: Option<String>,
-) -> Arc<ConnectFacade> {
+async fn wire_connect(agents_dir: &std::path::Path) -> Arc<ConnectFacade> {
     let store: Arc<dyn config::GlobalConfigConnectStore> =
         config::wire_global_connect_store(agents_dir);
-    wire_connect_with_store(store, global_user_agent)
+    wire_connect_with_store(store, None).await
 }
 
-/// 从全局配置文档读取 `api.user_agent`，空白视为未配置。
-///
-/// 字段名由 `share::config::Config` 类型定义，**NEVER** 手写 JSON 路径；文档结构
-/// 异常时降级为默认配置语义，不制造非法 UA。
-fn connect_global_user_agent_from_document(
-    document: &config::GlobalConfigDocument,
-) -> Option<String> {
-    let config = serde_json::from_value::<share::config::Config>(document.value.clone())
-        .unwrap_or_else(|_| share::config::Config::default());
-    let value = config.api.user_agent.trim();
-    (!value.is_empty()).then(|| value.to_string())
-}
-
-/// 读取当前全局配置的全局 UA，作为 Connect probe 与正式请求的共同回退来源。
-async fn load_connect_global_user_agent(
-    store: &Arc<dyn config::GlobalConfigConnectStore>,
-) -> Result<Option<String>, SdkError> {
-    let document = store
-        .load_global_document()
-        .await
-        .map_err(|error| global_connect_store_sdk_error(&error))?;
-    Ok(document
-        .as_ref()
-        .and_then(connect_global_user_agent_from_document))
-}
-
-fn wire_connect_with_store(
+/// #1866 A1：Connect 装配（catalog/系统信息/全局 UA/版本）与 commit/directory
+/// 适配器、错误映射全部收拢在 `config::wire_connect`，composition 只注入 probe。
+async fn wire_connect_with_store(
     store: Arc<dyn config::GlobalConfigConnectStore>,
-    global_user_agent: Option<String>,
+    _global_user_agent: Option<String>,
 ) -> Arc<ConnectFacade> {
-    let commit = GlobalConnectCommitAdapter::new(store.clone());
-    let directory = GlobalConnectDirectoryAdapter::new(store.clone());
-    let service = Arc::new(
-        ConnectAppService::builder()
-            .with_catalog(config::catalog::PROVIDER_CATALOG)
-            .with_probe(crate::provider::ProviderProbeAdapter::new())
-            .with_commit(commit)
-            .with_provider_directory(directory)
-            .with_global_user_agent(global_user_agent)
-            .with_system(config::ports::SystemInformation {
-                os_name: std::env::consts::OS.to_string(),
-                os_version: None,
-                arch: std::env::consts::ARCH.to_string(),
-            })
-            .build(),
-    );
+    let service = config::wire_connect(
+        Arc::clone(&store),
+        crate::provider::ProviderProbeAdapter::new(),
+    )
+    .await;
     ConnectFacade::new(service, store)
-}
-
-/// 从全局文档加载全部已有 Provider 快照（Connect 目录单点读取入口）。
-fn existing_provider_snapshots(document: &serde_json::Value) -> Vec<ExistingProviderSnapshot> {
-    document
-        .get("models")
-        .and_then(|models| models.get("providers"))
-        .and_then(serde_json::Value::as_object)
-        .map(|providers| {
-            providers
-                .iter()
-                .filter_map(|(source, provider)| provider_snapshot_from_config(source, provider))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn provider_snapshot_from_config(
-    source: &str,
-    provider: &serde_json::Value,
-) -> Option<ExistingProviderSnapshot> {
-    let model = provider
-        .get("models")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|models| models.first());
-    Some(ExistingProviderSnapshot::from_provider_config(
-        source,
-        provider
-            .get("baseUrl")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default(),
-        provider.get("apiKey").and_then(serde_json::Value::as_str),
-        provider.get("driver").and_then(serde_json::Value::as_str),
-        model
-            .and_then(|model| model.get("id"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default(),
-        model
-            .and_then(|model| model.get("contextWindow"))
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|value| usize::try_from(value).ok())
-            .unwrap_or_default(),
-        model
-            .and_then(|model| model.get("max_tokens").or_else(|| model.get("maxTokens")))
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok())
-            .unwrap_or_default(),
-        provider
-            .get("userAgent")
-            .and_then(serde_json::Value::as_str),
-        model.and_then(model_reasoning_effort),
-        // canonical 为模型级 `apiStyle`；存量文件曾落 provider 级，fallback
-        // 读取以保证编辑已有 Provider 时接口风格选择不丢失。
-        model
-            .and_then(|model| model.get("apiStyle"))
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| provider.get("apiStyle").and_then(serde_json::Value::as_str)),
-        provider
-            .get("models")
-            .and_then(serde_json::Value::as_array)
-            .map(|models| {
-                models
-                    .iter()
-                    .filter_map(|model| {
-                        let id = model.get("id").and_then(serde_json::Value::as_str)?;
-                        Some(config::connect::ExistingModelSnapshot {
-                            model_id: id.to_string(),
-                            context_window: model
-                                .get("contextWindow")
-                                .and_then(serde_json::Value::as_u64)
-                                .and_then(|value| usize::try_from(value).ok())
-                                .unwrap_or_default(),
-                            max_tokens: model
-                                .get("max_tokens")
-                                .or_else(|| model.get("maxTokens"))
-                                .and_then(serde_json::Value::as_u64)
-                                .and_then(|value| u32::try_from(value).ok())
-                                .unwrap_or_default(),
-                            reasoning_effort: model_reasoning_effort(model).map(str::to_string),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-    ))
-}
-
-/// 读取模型 entry 的推理档位：canonical `reasoning_effort` 优先，兼容存量
-/// camelCase `reasoningEffort`（Connect 曾落盘的漂移格式）。
-fn model_reasoning_effort(model: &serde_json::Value) -> Option<&str> {
-    model
-        .get("reasoning_effort")
-        .or_else(|| model.get("reasoningEffort"))
-        .and_then(serde_json::Value::as_str)
 }
 
 fn global_connect_store_sdk_error(error: &share::error::DomainError) -> SdkError {
     SdkError::Init(format!("全局配置初始化失败：{error}"))
-}
-
-fn map_store_error(error: share::error::DomainError) -> ConnectCommitError {
-    // Conflict 语义由 config crate 的行为辅助识别（变体已折叠为 DomainError）；
-    // 其余按分类分流：Storage → IO 失败，Invalid 等 → 内部错误。
-    if config::is_persist_conflict(&error) {
-        return ConnectCommitError::PersistConflict { expected: 0 };
-    }
-    match error.category() {
-        share::error::ErrorCategory::Storage => ConnectCommitError::io(error.to_string()),
-        _ => ConnectCommitError::internal(error.to_string()),
-    }
-}
-
-fn stable_revision(value: &str) -> u64 {
-    let bytes = value.as_bytes();
-    let mut folded = 0_u64;
-    for byte in bytes.iter().take(16) {
-        folded = folded.wrapping_mul(257).wrapping_add(u64::from(*byte));
-    }
-    folded
 }
 
 fn config_origin(origin: sdk::ConnectOrigin) -> ConnectOrigin {
@@ -752,7 +545,9 @@ fn sdk_view(view: ConnectView) -> sdk::ConnectView {
         last_error: view.last_error.map(sdk_error_view),
         terminal: view.terminal.map(|outcome| match outcome {
             config::connect::ConnectOutcome::Completed { applied_revision } => {
-                sdk::ConnectOutcome::Completed { applied_revision }
+                sdk::ConnectOutcome::Completed {
+                    applied_revision: applied_revision.display_u64(),
+                }
             }
             config::connect::ConnectOutcome::Cancelled => sdk::ConnectOutcome::Cancelled,
         }),
@@ -1636,7 +1431,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .collect();
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
-    let connect_facade = wire_connect(&agents_dir, Some(user_agent.clone()));
+    let connect_facade = wire_connect(&agents_dir).await;
     let connect: Arc<dyn sdk::ConnectClient> = connect_facade.clone();
     let forms: Arc<dyn sdk::ConfigFormClient> = connect_facade;
     let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());

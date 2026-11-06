@@ -306,6 +306,45 @@ impl ExistingProviderSnapshot {
         }
     }
 
+    /// 从类型化 [`ProviderModelsConfig`] 投影构造 snapshot（#1866 A2：替代
+    /// 逐字段 JSON 手拼；canonical 字段经类型化反序列化，legacy camelCase
+    /// 由 serde alias 兼容）。模型级 `apiStyle` 优先，provider 级存量位
+    /// fallback。
+    pub fn from_provider_models(
+        source: &str,
+        provider: &share::config::models::ProviderModelsConfig,
+    ) -> Self {
+        let primary = provider.models.first();
+        let models = provider
+            .models
+            .iter()
+            .map(|model| ExistingModelSnapshot {
+                model_id: model.id.clone(),
+                context_window: model.context_window,
+                max_tokens: model.max_tokens,
+                reasoning_effort: model.reasoning_effort.clone(),
+            })
+            .collect();
+        let api_style = primary
+            .and_then(|model| model.api_style.clone())
+            .or_else(|| provider.api_style.clone());
+        Self::from_provider_config(
+            source,
+            &provider.base_url,
+            Some(provider.api_key.as_str()),
+            Some(provider.driver.as_str()),
+            primary.map(|model| model.id.as_str()).unwrap_or_default(),
+            primary
+                .map(|model| model.context_window)
+                .unwrap_or_default(),
+            primary.map(|model| model.max_tokens).unwrap_or_default(),
+            provider.user_agent.as_deref(),
+            primary.and_then(|model| model.reasoning_effort.as_deref()),
+            api_style.as_deref(),
+            models,
+        )
+    }
+
     /// 在 catalog 中是否存在该 source；存在时返回对应 [`ProviderSource`]，
     /// 否则返回 `None`。**所有 session 构建路径**应优先调用此函数以保
     /// 证 source 一致性。

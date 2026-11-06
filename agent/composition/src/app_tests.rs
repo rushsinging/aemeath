@@ -14,7 +14,7 @@ fn connect_global_user_agent_reads_trimmed_document_value() {
     let document =
         document_with_value(serde_json::json!({"api": {"user_agent": "  company-agent/7.7  "}}));
     assert_eq!(
-        connect_global_user_agent_from_document(&document),
+        config::connect_wiring::global_user_agent_from_document(&document),
         Some("company-agent/7.7".to_string())
     );
 }
@@ -22,7 +22,10 @@ fn connect_global_user_agent_reads_trimmed_document_value() {
 #[test]
 fn connect_global_user_agent_treats_blank_value_as_unconfigured() {
     let document = document_with_value(serde_json::json!({"api": {"user_agent": "   "}}));
-    assert_eq!(connect_global_user_agent_from_document(&document), None);
+    assert_eq!(
+        config::connect_wiring::global_user_agent_from_document(&document),
+        None
+    );
 }
 
 #[test]
@@ -31,7 +34,7 @@ fn connect_global_user_agent_keeps_config_default_when_api_section_is_absent() {
     // `ConfigSnapshot::user_agent()` 一致地回落到默认配置 UA。
     let document = document_with_value(serde_json::json!({"models": {"providers": {}}}));
     assert_eq!(
-        connect_global_user_agent_from_document(&document),
+        config::connect_wiring::global_user_agent_from_document(&document),
         Some(Config::default().api.user_agent)
     );
 }
@@ -40,7 +43,7 @@ fn connect_global_user_agent_keeps_config_default_when_api_section_is_absent() {
 fn connect_global_user_agent_degrades_for_non_object_document() {
     let document = document_with_value(serde_json::json!("not-an-object"));
     assert_eq!(
-        connect_global_user_agent_from_document(&document),
+        config::connect_wiring::global_user_agent_from_document(&document),
         Some(Config::default().api.user_agent)
     );
 }
@@ -62,7 +65,8 @@ fn provider_snapshot_reads_canonical_reasoning_effort_and_model_level_api_style(
             }]
         }}}
     }));
-    let snapshots = existing_provider_snapshots(&document.value);
+    let snapshots =
+        config::connect::provider_snapshots_from_document(&document).expect("consistent document");
     let snapshot = snapshots.first().expect("snapshot extracted");
     assert_eq!(snapshot.reasoning_effort.as_deref(), Some("high"));
     assert_eq!(snapshot.api_style.as_deref(), Some("responses"));
@@ -89,7 +93,8 @@ fn provider_snapshot_reads_legacy_camel_case_and_provider_level_api_style() {
             }]
         }}}
     }));
-    let snapshots = existing_provider_snapshots(&document.value);
+    let snapshots =
+        config::connect::provider_snapshots_from_document(&document).expect("consistent document");
     let snapshot = snapshots.first().expect("snapshot extracted");
     assert_eq!(snapshot.reasoning_effort.as_deref(), Some("xhigh"));
     assert_eq!(snapshot.api_style.as_deref(), Some("responses"));
@@ -99,9 +104,10 @@ fn provider_snapshot_reads_legacy_camel_case_and_provider_level_api_style() {
     );
 }
 
-/// 快照提取（canonical 优先）：两种格式并存时以 snake_case 为准。
+/// 快照提取：canonical 与 legacy 双字段并存时视为歧义文档（读取报错），
+/// 单 legacy 字段仍经 share 反序列化 alias 兼容。
 #[test]
-fn provider_snapshot_prefers_canonical_reasoning_effort_over_legacy_alias() {
+fn provider_snapshot_rejects_ambiguous_legacy_alias_conflict() {
     let document = document_with_value(serde_json::json!({
         "models": {"providers": {"Zhipu": {
             "baseUrl": "https://zhipu.test",
@@ -115,11 +121,9 @@ fn provider_snapshot_prefers_canonical_reasoning_effort_over_legacy_alias() {
             }]
         }}}
     }));
-    let snapshots = existing_provider_snapshots(&document.value);
-    assert_eq!(
-        snapshots.first().unwrap().reasoning_effort.as_deref(),
-        Some("low")
-    );
+    let error = config::connect::provider_snapshots_from_document(&document)
+        .expect_err("双字段并存应报歧义");
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]

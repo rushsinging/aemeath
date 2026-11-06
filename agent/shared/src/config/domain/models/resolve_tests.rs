@@ -20,6 +20,7 @@ fn resolver_config() -> ModelsConfig {
                 ..Default::default()
             }],
             user_agent: None,
+            ..Default::default()
         },
     );
     providers.insert(
@@ -40,6 +41,7 @@ fn resolver_config() -> ModelsConfig {
                 ..Default::default()
             }],
             user_agent: None,
+            ..Default::default()
         },
     );
     ModelsConfig {

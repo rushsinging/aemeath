@@ -277,17 +277,25 @@ where
         .filter(|value| *value >= T::from(0))
 }
 
-fn driver_key_envs() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("anthropic", "ANTHROPIC_API_KEY"),
-        ("openai", "OPENAI_API_KEY"),
-        ("volcengine", "VOLCENGINE_CODING_PLAN_API_KEY"),
-        ("minimax", "MINIMAX_API_KEY"),
-        ("mimo", "MIMO_API_KEY"),
-        ("deepseek", "DEEPSEEK_API_KEY"),
-        ("agnes", "AGNES_API_KEY"),
-        ("ollama", "OLLAMA_API_KEY"),
-    ]
+/// 候选 driver 名 → API Key env 名（#1866 B7）：env 名一律经
+/// `share::config::domain::driver_env::driver_api_key_env_name` 真相源解析，
+/// 本处只维护「需要扫描哪些 driver」的候选清单（NEVER 复制映射值）。
+fn driver_key_envs() -> impl Iterator<Item = (&'static str, &'static str)> {
+    const CANDIDATE_DRIVERS: &[&str] = &[
+        "anthropic",
+        "openai",
+        "volcengine",
+        "minimax",
+        "mimo",
+        "deepseek",
+        "agnes",
+        "ollama",
+        "opencode-go",
+    ];
+    CANDIDATE_DRIVERS.iter().filter_map(|driver| {
+        share::config::domain::driver_env::driver_api_key_env_name(driver)
+            .map(|env_name| (*driver, env_name))
+    })
 }
 
 #[derive(Debug, Clone, Default)]

@@ -87,7 +87,7 @@ pub async fn wire_session_switch_coordinator(
 /// 的 bootstrap 协议一致（initial canonical + config prepare/commit +
 /// memory eager open）。
 #[cfg(any(test, feature = "dev"))]
-use config::{ConfigReader, ProjectConfigParticipant};
+use config::ports::{ConfigReader, ProjectConfigParticipant};
 #[cfg(any(test, feature = "dev"))]
 use context::{MainContextFactory, SessionManagementPort};
 #[cfg(any(test, feature = "dev"))]

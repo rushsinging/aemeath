@@ -70,6 +70,11 @@ pub struct ProviderModelsConfig {
     ///   **NEVER** 直接下发原始字符串。
     #[serde(default, rename = "userAgent", skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+
+    /// 存量 provider 级 `apiStyle` 兼容位（#1866 A2）：写侧不产生（恒 None，
+    /// 序列化时省略）；读侧仅用于旧文件投影时的模型级 fallback。
+    #[serde(default, rename = "apiStyle", skip_serializing_if = "Option::is_none")]
+    pub api_style: Option<String>,
 }
 
 impl ProviderModelsConfig {

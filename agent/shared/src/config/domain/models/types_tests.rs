@@ -19,6 +19,7 @@ fn provider_with_user_agent(value: &str) -> ProviderModelsConfig {
             ..Default::default()
         }],
         user_agent: Some(value.to_string()),
+        ..Default::default()
     }
 }
 

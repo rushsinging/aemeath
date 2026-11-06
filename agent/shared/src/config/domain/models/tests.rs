@@ -22,6 +22,7 @@ fn test_config() -> ModelsConfig {
                 api_style: None,
             }],
             user_agent: None,
+            ..Default::default()
         },
     );
     ModelsConfig {

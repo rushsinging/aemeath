@@ -774,7 +774,7 @@ fn all_connect_stages_publish_a_form_page_or_terminal() {
         let mut view = connect_view(stage);
         view.terminal = match stage {
             ConnectStage::Completed => Some(crate::connect::ConnectOutcome::Completed {
-                applied_revision: 9,
+                applied_revision: crate::GlobalConfigRevision::from_digest("9"),
             }),
             ConnectStage::Cancelled => Some(crate::connect::ConnectOutcome::Cancelled),
             _ => None,

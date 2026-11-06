@@ -19,7 +19,8 @@
 
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::ports::SessionQueryPort;
-use config::{ConfigReader, ConfigRefreshOutcomeData};
+use config::ports::ConfigReader;
+use config::ConfigRefreshOutcomeData;
 use sdk::ChatInputEvent;
 use std::sync::Arc;
 

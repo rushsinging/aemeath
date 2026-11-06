@@ -130,7 +130,7 @@ impl ConnectCommitPort for BlockingCommit {
         self.entered.notify_one();
         self.release.notified().await;
         Ok(ConnectCommitReceipt {
-            applied_revision: 11,
+            applied_revision: crate::GlobalConfigRevision::from_digest("11"),
         })
     }
 }
@@ -449,7 +449,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
 #[tokio::test]
 async fn custom_model_skip_probe_save_completes_without_exposing_api_key() {
     let commit = StubCommitPort::new(CommitOutcome::Success {
-        applied_revision: 7,
+        applied_revision: crate::GlobalConfigRevision::from_digest("7"),
     });
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
@@ -471,7 +471,7 @@ async fn custom_model_skip_probe_save_completes_without_exposing_api_key() {
     assert_eq!(
         completed.terminal,
         Some(ConnectOutcome::Completed {
-            applied_revision: 7
+            applied_revision: crate::GlobalConfigRevision::from_digest("7")
         })
     );
     assert_eq!(commit.requests.lock().await.len(), 1);
@@ -919,7 +919,9 @@ async fn empty_credential_submission_keeps_preserved_existing_key() {
 #[tokio::test]
 async fn commit_conflict_remains_saving_and_can_retry() {
     let commit = StubCommitPort::new(CommitOutcome::Failure(
-        ConnectCommitError::PersistConflict { expected: 2 },
+        ConnectCommitError::PersistConflict {
+            expected: Some(crate::GlobalConfigRevision::from_digest("2")),
+        },
     ));
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
@@ -934,14 +936,14 @@ async fn commit_conflict_remains_saving_and_can_retry() {
     let conflicted = wait_for_view(&service, &saving.session_id, |view| {
         matches!(
             view.last_error,
-            Some(ConnectError::PersistConflict { expected: 2 })
+            Some(ConnectError::PersistConflict { expected: Some(_) })
         )
     })
     .await;
     assert_eq!(conflicted.stage, ConnectStage::Saving);
     commit
         .set_outcome(CommitOutcome::Success {
-            applied_revision: 3,
+            applied_revision: crate::GlobalConfigRevision::from_digest("3"),
         })
         .await;
     let completed = advance(&service, conflicted, ConnectCommand::ConfirmSave).await;

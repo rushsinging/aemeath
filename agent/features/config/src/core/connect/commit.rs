@@ -40,18 +40,21 @@ impl ConnectCommitRequest {
 }
 
 /// Connect 提交成功回执。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectCommitReceipt {
-    /// adapter 写入后能读到的新 revision。下游 SDK / CLI 应把该值作为下次
-    /// `committed_snapshot()` 的依据。
-    pub applied_revision: u64,
+    /// adapter 写入后能读到的新 revision（#1866 A3：契约层类型化，
+    /// SDK/表单视图经 `display_u64()` 单点转换）。
+    pub applied_revision: crate::GlobalConfigRevision,
 }
 
 /// Connect 提交 typed error。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectCommitError {
     /// CAS 失败：调用方期望的 revision 与当前不同；UI 引导用户重载。
-    PersistConflict { expected: u64 },
+    /// `expected = None` 表示 store 折叠后未携带原值（DomainError 不承诺细节）。
+    PersistConflict {
+        expected: Option<crate::GlobalConfigRevision>,
+    },
     /// 非冲突的写入 / 校验失败。
     PersistFailed {
         kind: PersistErrorKind,
@@ -129,7 +132,9 @@ pub mod test_helpers {
 
     #[derive(Debug, Clone)]
     pub enum CommitOutcome {
-        Success { applied_revision: u64 },
+        Success {
+            applied_revision: crate::GlobalConfigRevision,
+        },
         Failure(ConnectCommitError),
     }
 
