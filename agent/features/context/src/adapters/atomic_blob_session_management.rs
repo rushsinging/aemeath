@@ -256,6 +256,3 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         Ok(())
     }
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for AtomicBlobSessionManagement {}

@@ -176,3 +176,42 @@ async fn fault_injection_scopes_to_the_adapter_that_requested_it() {
     let _ = std::fs::remove_dir_all(&clean_root);
     let _ = std::fs::remove_dir_all(&injected_root);
 }
+
+/// #1865 A：恢复证据分类是决策表的唯一输入口——四种观测与旧内联判定等价。
+#[test]
+fn classify_digest_observation_matches_legacy_inline_semantics() {
+    use super::classify_digest_observation;
+    use crate::domain::blob_recovery::DigestObservation;
+    let journal = super::BlobJournal {
+        nonce: "n".to_owned(),
+        old_digest: Some("old".to_owned()),
+        new_digest: "new".to_owned(),
+        phase: crate::domain::blob_recovery::JournalPhase::Prepared,
+    };
+    assert_eq!(
+        classify_digest_observation(&journal, Some("new")),
+        DigestObservation::New
+    );
+    assert_eq!(
+        classify_digest_observation(&journal, Some("old")),
+        DigestObservation::Old
+    );
+    assert_eq!(
+        classify_digest_observation(&journal, Some("other")),
+        DigestObservation::Other
+    );
+    assert_eq!(
+        classify_digest_observation(&journal, None),
+        DigestObservation::Other,
+        "old 存在而观测缺失 → 不属于 old/absent，落 Other（Corrupt）"
+    );
+    let fresh = super::BlobJournal {
+        old_digest: None,
+        ..journal
+    };
+    assert_eq!(
+        classify_digest_observation(&fresh, None),
+        DigestObservation::Absent,
+        "双方均缺失 → Absent（RollBack）"
+    );
+}

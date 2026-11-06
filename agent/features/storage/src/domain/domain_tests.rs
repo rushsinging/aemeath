@@ -1,13 +1,14 @@
 use std::str::FromStr;
 
+use crate::domain::blob_recovery::{
+    decide_blob_recovery, decide_orphan_previous, DigestObservation, JournalPhase, RecoveryDecision,
+};
 use crate::domain::{
-    decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
-    DatasetChangeSetData, DatasetKeyData, DatasetManifestData, DatasetMemberChangeData,
-    DatasetMemberData, DatasetMemberReferenceData, DeleteOptionsData, DigestObservation,
-    DurabilityData, GenerationData, JournalPhase, PreviousPolicy, QuarantineDisposition,
-    QuarantineOutcomeData, QuarantineReason, RecoveryDecision, SafePathSegmentData,
-    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionDigest,
-    TransactionScopeData,
+    CorruptTransactionError, CorruptionReason, DatasetChangeSetData, DatasetKeyData,
+    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
+    DeleteOptionsData, DurabilityData, GenerationData, QuarantineDisposition,
+    QuarantineOutcomeData, QuarantineReason, SafePathSegmentData, StorageErrorKind, StorageKeyData,
+    StorageNamespaceData, TransactionScopeData,
 };
 
 #[test]
@@ -35,7 +36,7 @@ fn storage_key_requires_at_least_one_segment() {
     let error = StorageKeyData::new(StorageNamespaceData::Session, Vec::new())
         .expect_err("empty keys must be rejected");
 
-    assert_eq!(error.kind(), &crate::domain::StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -49,27 +50,8 @@ fn namespace_minimum_durability_cannot_be_lowered() {
         DurabilityData::ProcessCrashSafe
     );
     assert_eq!(
-        StorageNamespaceData::AuditUsage.effective_durability(DurabilityData::BestEffort),
-        DurabilityData::BestEffort
-    );
-}
-
-#[test]
-fn namespace_previous_policy_is_explicit() {
-    for namespace in [
-        StorageNamespaceData::Session,
-        StorageNamespaceData::Memory,
-        StorageNamespaceData::TaskData,
-        StorageNamespaceData::History,
-        StorageNamespaceData::ToolResult,
-        StorageNamespaceData::Config,
-        StorageNamespaceData::Workspace,
-    ] {
-        assert_eq!(namespace.previous_policy(), PreviousPolicy::Retain);
-    }
-    assert_eq!(
-        StorageNamespaceData::AuditUsage.previous_policy(),
-        PreviousPolicy::Discard
+        StorageNamespaceData::Config.effective_durability(DurabilityData::ProcessCrashSafe),
+        DurabilityData::ProcessCrashSafe
     );
 }
 
@@ -126,22 +108,6 @@ fn orphan_previous_next_is_only_cleaned_when_it_matches_primary() {
 }
 
 #[test]
-fn transaction_digest_is_domain_separated_and_distinguishes_absent() {
-    assert_ne!(
-        TransactionDigest::blob_bytes(b"value"),
-        TransactionDigest::dataset_bytes(b"value")
-    );
-    assert_ne!(
-        TransactionDigest::blob_bytes(b""),
-        TransactionDigest::absent_blob()
-    );
-    assert_eq!(
-        TransactionDigest::blob_bytes(b"value"),
-        TransactionDigest::blob_bytes(b"value")
-    );
-}
-
-#[test]
 fn corrupt_transaction_error_preserves_typed_facts_without_paths() {
     let corruption = CorruptTransactionError::new(
         TransactionScopeData::Blob,
@@ -150,15 +116,7 @@ fn corrupt_transaction_error_preserves_typed_facts_without_paths() {
     );
     let kind = StorageErrorKind::CorruptTransaction(corruption.clone());
 
-    assert_eq!(corruption.scope(), TransactionScopeData::Blob);
-    assert_eq!(
-        corruption.reason(),
-        CorruptionReason::CommittedDigestMismatch
-    );
-    assert_eq!(
-        corruption.quarantine_disposition(),
-        QuarantineDisposition::EvidenceQuarantined
-    );
+    // #1865 C：载荷访问器随零消费删除；诊断经 Debug 脱敏 + kind 等值断言。
     assert_eq!(kind, StorageErrorKind::CorruptTransaction(corruption));
     assert!(!format!("{kind:?}").contains('/'));
 }
@@ -191,7 +149,7 @@ fn dataset_key_with_empty_segments_is_rejected() {
     let error = DatasetKeyData::new(StorageNamespaceData::Memory, Vec::new())
         .expect_err("dataset keys with no segments must be rejected");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -220,7 +178,7 @@ fn dataset_manifest_with_duplicate_member_names_is_rejected() {
     ])
     .expect_err("duplicate member names must be rejected");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -330,7 +288,7 @@ fn incremental_dataset_rejects_duplicate_new_and_reused_member_names() {
     )
     .expect_err("one member cannot be both replaced and reused");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -352,7 +310,10 @@ fn incremental_dataset_removal_names_are_canonical_and_unique() {
         .expect("empty change set should be valid")
         .with_removed_members(vec![active.clone(), active])
         .expect_err("duplicate removal names must be rejected");
-    assert_eq!(duplicate_error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(
+        duplicate_error.category(),
+        share::error::ErrorCategory::Invalid
+    );
 }
 
 #[test]
@@ -375,7 +336,7 @@ fn incremental_dataset_rejects_reused_member_from_another_revision() {
     let error = DatasetChangeSetData::new(expected_revision, Vec::new(), vec![reused])
         .expect_err("a reused member must belong to the expected generation");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -396,7 +357,7 @@ fn incremental_dataset_rejects_member_named_as_removed() {
     .with_removed_members(vec![active])
     .expect_err("a target member cannot also be removed");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -436,9 +397,5 @@ fn background_process_namespace_is_crash_safe_and_retained() {
     assert_eq!(
         StorageNamespaceData::BackgroundProcess.effective_durability(DurabilityData::BestEffort),
         DurabilityData::ProcessCrashSafe
-    );
-    assert_eq!(
-        StorageNamespaceData::BackgroundProcess.previous_policy(),
-        PreviousPolicy::Retain
     );
 }

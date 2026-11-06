@@ -505,7 +505,7 @@ impl IntervalReflectionMaterialSlot {
 #[cfg(test)]
 mod reflection_binding_selection_tests {
     use super::*;
-    use crate::application::reflection::test_support::static_reflection_binding;
+    use crate::application::reflection::fakes::static_reflection_binding;
 
     fn adapter() -> ReflectionTaskAdapter {
         ReflectionTaskAdapter::production(std::time::Duration::from_secs(240))

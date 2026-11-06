@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 fn test_ctx(root: std::path::PathBuf) -> ToolExecutionContext {
-    crate::domain::test_support::TestToolExecutionContextBuilder::new(root).build()
+    crate::domain::fakes::TestToolExecutionContextBuilder::new(root).build()
 }
 
 /// 永远报告“已取消”的 signal：Grep 必须在 spawn 前后立即观察到它。

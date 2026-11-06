@@ -3,8 +3,8 @@ use std::os::unix::fs::symlink;
 use std::str::FromStr;
 use storage::{
     AtomicBlobPort, DeleteOptionsData, DurabilityData, GenerationData, PromoteOutcomeData,
-    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, SafePathSegmentData,
-    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
+    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, SafePathSegmentData, StorageKeyData,
+    StorageNamespaceData, TransactionScopeData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -169,7 +169,7 @@ async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
         .list_primary(StorageNamespaceData::Session)
         .await
         .expect_err("symlink entry must fail closed");
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     std::fs::remove_file(root.join("session/unsafe")).expect("remove symlink");
 
     let entries = adapter
@@ -229,10 +229,8 @@ async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
         .expect("list primary");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].key(), &first);
-    assert_eq!(entries[0].generation(), GenerationData::Primary);
     assert_eq!(entries[0].size_bytes(), b"first-next".len());
     assert_eq!(entries[1].key(), &second);
-    assert_eq!(entries[1].generation(), GenerationData::Primary);
     assert_eq!(entries[1].size_bytes(), b"second".len());
 
     std::fs::remove_dir_all(root).expect("remove test root");
@@ -327,12 +325,21 @@ async fn filesystem_adapter_quarantine_moves_only_requested_generation() {
         .await
         .unwrap();
 
-    let QuarantineOutcomeData::Moved(receipt) = outcome else {
+    let QuarantineOutcomeData::Moved(_receipt) = outcome else {
         panic!("existing previous must move to quarantine");
     };
-    let quarantine_path = root
-        .join("session")
-        .join(format!("session-1.quarantine.{}", receipt.id()));
+    // #1865 B：id 访问器随零消费删除；目录扫描断言隔离证据存在（文件名前缀契约）。
+    let session_dir = root.join("session");
+    let quarantine_path = std::fs::read_dir(&session_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("session-1.quarantine."))
+        })
+        .expect("quarantine evidence file must exist");
     assert_eq!(std::fs::read(quarantine_path).unwrap(), b"old");
     assert_eq!(
         std::fs::read(root.join("session/session-1")).unwrap(),
@@ -365,7 +372,7 @@ async fn filesystem_adapter_rejects_symlink_target_without_touching_outside_file
         .await
         .expect_err("symlink target must fail closed");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     assert_eq!(std::fs::read(outside_file).unwrap(), b"outside");
 
     std::fs::remove_dir_all(root).unwrap();

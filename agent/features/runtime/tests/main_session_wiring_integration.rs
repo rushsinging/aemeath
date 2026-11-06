@@ -77,10 +77,10 @@ async fn make_wiring_and_workspace(
     .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::test_support::AtomicBlobSessionManagement::new(
+        context::wire_session_management(
             storage::wire_file_system_blob(temp.path().join("agents"))
                 .expect("create session blob"),
-        ));
+        );
     let wiring = runtime::wire_test_session_switch(
         &workspace,
         std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
@@ -248,10 +248,10 @@ async fn config_query_and_writer_come_from_wiring() {
     .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::test_support::AtomicBlobSessionManagement::new(
+        context::wire_session_management(
             storage::wire_file_system_blob(temp.path().join("agents"))
                 .expect("create session blob"),
-        ));
+        );
 
     let wiring = runtime::wire_test_session_switch(
         &workspace,

@@ -28,7 +28,7 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
 
 fn fake_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
-        provider: crate::application::reflection::test_support::static_reflection_port(),
+        provider: crate::application::reflection::fakes::static_reflection_port(),
         model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "manual-test-model".to_string(),
@@ -201,7 +201,7 @@ async fn manual_run_dispatches_detached_and_freezes_the_visible_messages() {
     let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
     let binding = fake_binding();
     let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-    let history = crate::application::reflection::test_support::noop_reflection_history();
+    let history = crate::application::reflection::fakes::noop_reflection_history();
 
     // 统一异步链路（#2002）：Manual 派发即 Detached，快照冻结传递到 detached
     // 任务（「可见历史进反思」的完整证据由 recording_port 组覆盖）。
@@ -245,7 +245,7 @@ use share::config::domain::snapshot::ConfigSnapshot;
 /// `build_prompt` 汇入单条 user prompt，因此 prompt 文本是快照到达执行层的直接证据。
 fn recording_port(prompts: Arc<Mutex<Vec<String>>>) -> Arc<dyn crate::ports::LlmInvokePort> {
     // #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本化端口。
-    provider::test_support::scripted_llm(move |request| {
+    testkit::provider::scripted_llm(move |request| {
         prompts.lock().unwrap().push(
             request
                 .messages
@@ -254,7 +254,7 @@ fn recording_port(prompts: Arc<Mutex<Vec<String>>>) -> Arc<dyn crate::ports::Llm
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-        Ok(provider::test_support::text_stream_with_usage(
+        Ok(testkit::provider::text_stream_with_usage(
             r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
             1,
             1,
@@ -294,9 +294,7 @@ fn manual_reflection_port(
     let fixture = SessionRunFixture::builder()
         .with_config(ConfigSnapshot::new(config))
         .with_provider_binding(recording_binding(prompts))
-        .with_reflection_history(
-            crate::application::reflection::test_support::noop_reflection_history(),
-        )
+        .with_reflection_history(crate::application::reflection::fakes::noop_reflection_history())
         .with_session_id("manual-reflection".to_string())
         .with_usage_sink(usage_sink)
         .build();

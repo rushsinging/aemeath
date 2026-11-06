@@ -93,10 +93,6 @@ impl QuarantineReceiptData {
             reason,
         }
     }
-
-    pub fn id(&self) -> &super::SafePathSegmentData {
-        &self.id
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -199,10 +195,6 @@ impl StorageEntryData {
     pub fn size_bytes(&self) -> usize {
         self.size_bytes
     }
-
-    pub fn generation(&self) -> GenerationData {
-        GenerationData::Primary
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -222,11 +214,7 @@ impl WriteOptionsData {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommitWarningData {
-    PreviousPromotionPending,
     JournalCleanupPending,
-    /// The dataset is committed, but one or more members still require
-    /// mechanical roll-forward before the generation becomes visible.
-    MemberPublishRecoveryPending,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

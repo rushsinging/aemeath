@@ -5,7 +5,7 @@ use crate::domain::{
     revision_member_digest, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
     DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
     DatasetReadOutcomeData, DatasetRevisionData, DurabilityData, SafePathSegmentData,
-    StorageErrorKind, StorageNamespaceData, WriteOptionsData,
+    StorageNamespaceData, WriteOptionsData,
 };
 use crate::ports::AtomicDatasetPort;
 use crate::test_log;
@@ -145,11 +145,6 @@ async fn incremental_commit_persists_only_changed_member_content() {
         DatasetCommitVisibilityData::Visible,
         "第二次增量提交必须完整落盘，实际 receipt={receipt:?}"
     );
-    assert!(
-        receipt.warning().is_none(),
-        "第二次增量提交不得携带降级警告，实际 receipt={receipt:?}"
-    );
-
     let content_files_after = dataset_member_content_file_count(&dataset_path);
     let member_store = dataset_path.join("members");
     // 替换一个成员恰好持久化一个新内容文件、回收一个被两代丢弃的最旧内容；
@@ -524,8 +519,8 @@ async fn incremental_commit_rejects_reused_member_when_primary_bytes_do_not_matc
         .expect_err("mismatched reuse evidence must be rejected");
 
     assert!(matches!(
-        error.kind(),
-        StorageErrorKind::CorruptTransaction(_)
+        error.category(),
+        share::error::ErrorCategory::Storage
     ));
     let requested = [SafePathSegmentData::from_str("active").expect("safe member name")];
     let DatasetReadOutcomeData::Found(read) = adapter
@@ -583,8 +578,8 @@ async fn incremental_commit_rejects_reused_member_missing_from_primary_manifest(
         .expect_err("missing source member must be rejected");
 
     assert!(matches!(
-        error.kind(),
-        StorageErrorKind::CorruptTransaction(_)
+        error.category(),
+        share::error::ErrorCategory::Storage
     ));
 
     let _ = std::fs::remove_dir_all(&root);

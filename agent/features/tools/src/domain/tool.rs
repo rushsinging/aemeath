@@ -24,7 +24,7 @@ pub trait ToolListProvider: Send + Sync {
 ///
 /// 工具源应实现 [`TypedTool`]，用 [`TypedToolAdapter`] 包装后注册。
 #[async_trait]
-pub trait Tool: crate::sealed::Sealed + Send + Sync {
+pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
 
@@ -317,6 +317,5 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
     }
 }
 
-// #2146 密封解锁：Tool 的唯一实现是 TypedToolAdapter（泛型包装，
+// Tool 的唯一实现是 TypedToolAdapter（泛型包装，
 // 工具源实现 TypedTool 经 adapter 注册，实现权仍在 crate 内）。
-impl<T: TypedTool> crate::sealed::Sealed for TypedToolAdapter<T> {}

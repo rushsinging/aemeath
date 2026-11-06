@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use super::*;
 
-/// #2146：ScoringPort 实现权归 systemone crate；替身经其脚本端口
+/// 替身经其脚本端口
 ///（captured 共享记录收到的题目）。
 fn triage_with(
     p_true: f64,
@@ -17,7 +17,7 @@ fn triage_with(
     let captured: Arc<std::sync::Mutex<Vec<systemone::ScoringQuestion>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let captured2 = Arc::clone(&captured);
-    let port = systemone::test_support::scripted_scoring(move |_state, questions| {
+    let port = testkit::systemone::scripted_scoring(move |_state, questions| {
         captured2
             .lock()
             .expect("capture 锁")

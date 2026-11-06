@@ -8,10 +8,10 @@ use tools::published::skill::{
     SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind,
 };
 
-/// 可变 catalog 替身（#2146：实现权归 tools crate；跨 crate 经脚本端口）。
+/// 可变 catalog 替身（跨 crate 经脚本端口）。
 fn mutable_catalog(descriptors: Arc<Mutex<Vec<SkillDescriptor>>>) -> Arc<dyn SkillCatalogPort> {
     let as_trait: Arc<dyn SkillCatalogPort> =
-        Arc::new(tools::test_support::MutableSkillCatalog(descriptors));
+        Arc::new(testkit::tools::MutableSkillCatalog(descriptors));
     as_trait
 }
 /// 收集全部事件的 sink fake。

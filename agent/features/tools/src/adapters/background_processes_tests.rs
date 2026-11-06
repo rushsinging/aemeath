@@ -94,7 +94,7 @@ fn source() -> Arc<StaticSource> {
 }
 
 fn test_context() -> crate::domain::context::ToolExecutionContext {
-    crate::domain::test_support::TestToolExecutionContextBuilder::new(std::env::temp_dir()).build()
+    crate::domain::fakes::TestToolExecutionContextBuilder::new(std::env::temp_dir()).build()
 }
 
 #[tokio::test]

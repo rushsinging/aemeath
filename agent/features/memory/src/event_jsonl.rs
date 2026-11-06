@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use storage::{
     SafeOpenOptions, SafePathSegmentData, SafeStorageDir, SafeStorageFileType, SafeStorageRoot,
-    StorageErrorKind, StorageNamespaceData,
+    StorageNamespaceData,
 };
 
 #[cfg(test)]
@@ -94,10 +94,12 @@ impl JsonlSegmentEventStore {
             .ok_or(EventAppendError::Rejected)
     }
 
-    fn map_storage_error(error: storage::StorageError) -> EventAppendError {
-        match error.kind() {
-            StorageErrorKind::InvalidKey => EventAppendError::Rejected,
-            _ => EventAppendError::Io,
+    fn map_storage_error(error: share::error::DomainError) -> EventAppendError {
+        match error.category() {
+            share::error::ErrorCategory::Invalid => EventAppendError::Rejected,
+            share::error::ErrorCategory::Storage | share::error::ErrorCategory::Unavailable => {
+                EventAppendError::Io
+            }
         }
     }
 

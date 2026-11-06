@@ -1,7 +1,7 @@
 use super::*;
 
 fn test_ctx() -> ToolExecutionContext {
-    crate::domain::test_support::TestToolExecutionContextBuilder::new(std::path::PathBuf::from("."))
+    crate::domain::fakes::TestToolExecutionContextBuilder::new(std::path::PathBuf::from("."))
         .build()
 }
 

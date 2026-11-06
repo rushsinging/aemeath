@@ -37,31 +37,24 @@ fn store(root: &std::path::Path) -> AtomicDatasetMemoryStore {
 }
 
 #[test]
-fn storage_error_acl_maps_only_memory_owned_error_kinds() {
+fn storage_error_acl_maps_only_semantic_categories() {
+    // #1865 C：storage 只发布语义三档（Storage/Invalid/Unavailable）。
     let cases = [
         (
-            storage_api::StorageErrorKind::PermissionDenied,
-            MemoryStorageErrorKind::PermissionDenied,
-        ),
-        (
-            storage_api::StorageErrorKind::ConcurrentWrite,
-            MemoryStorageErrorKind::ConcurrentWrite,
-        ),
-        (
-            storage_api::StorageErrorKind::Io,
+            share::error::ErrorCategory::Storage,
             MemoryStorageErrorKind::Io,
         ),
         (
-            storage_api::StorageErrorKind::UnsupportedDurability,
+            share::error::ErrorCategory::Unavailable,
             MemoryStorageErrorKind::Io,
         ),
         (
-            storage_api::StorageErrorKind::InvalidKey,
+            share::error::ErrorCategory::Invalid,
             MemoryStorageErrorKind::Serialization,
         ),
     ];
-    for (storage_kind, expected) in cases {
-        let error = storage_api::StorageError::new(storage_kind, "redacted by ACL");
+    for (category, expected) in cases {
+        let error = share::error::DomainError::from_parts("storage", category, "redacted by ACL");
         assert_eq!(map_storage_error(&error), expected);
     }
 }
@@ -235,10 +228,11 @@ async fn stale_revision_rejects_layer_generation() {
         .commit(MemoryLayer::Project, &stale, &rejected_project)
         .await
         .unwrap_err();
+    // #1865 C：storage 只发布语义三档——并发写冲突归 Storage 类别 → Memory Io。
     assert_eq!(
         error,
         MemoryError::Storage {
-            kind: MemoryStorageErrorKind::ConcurrentWrite
+            kind: MemoryStorageErrorKind::Io
         }
     );
     assert_eq!(

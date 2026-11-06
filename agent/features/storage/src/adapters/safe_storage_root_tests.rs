@@ -50,6 +50,6 @@ fn remove_file_rejects_symlink_and_keeps_target() {
         .remove_file(&segment("link.jsonl"))
         .expect_err("symlink must be rejected");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     assert!(target.exists(), "symlink rejection must not touch target");
 }

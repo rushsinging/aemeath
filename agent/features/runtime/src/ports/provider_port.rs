@@ -86,10 +86,9 @@ pub(crate) mod fake {
         }
     }
 
-    /// FakeProvider 的调用端口（#2146：实现归 provider test_support，
-    /// 契约 harness 只提供脚本与流构造）。
+    /// FakeProvider 的调用端口。
     pub(crate) fn port() -> Arc<dyn LlmInvokePort> {
-        provider::test_support::scripted_llm(|request| {
+        testkit::provider::scripted_llm(|request| {
             // 契约 harness 的取消语义由脚本显式表达（回放器不拦截）。
             if request.cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());

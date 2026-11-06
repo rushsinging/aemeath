@@ -118,7 +118,7 @@ fn snapshot_is_not_changed_by_later_session_updates() {
 
 #[test]
 fn session_state_tracks_production_binding_model_identity() {
-    let binding = crate::application::model::test_support::test_binding(vec!["response"]);
+    let binding = crate::application::model::fakes::test_binding(vec!["response"]);
     let mut session = SessionState::new(
         "session-1",
         PathBuf::from("/workspace"),

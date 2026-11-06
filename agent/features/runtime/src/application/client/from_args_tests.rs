@@ -251,7 +251,7 @@ async fn make_test_shell(
         std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
         config.reader(),
         config.participant(),
-        Arc::new(context::test_support::UnavailableSessionManagement),
+        Arc::new(testkit::context::UnavailableSessionManagement),
         Arc::new(
             context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
                 .with_persistence(task_wiring.persist(), workspace.persist()),
@@ -259,7 +259,7 @@ async fn make_test_shell(
     )
     .await;
     let snapshot = wiring.committed_config_snapshot();
-    let binding = crate::application::model::test_support::test_binding(Vec::new());
+    let binding = crate::application::model::fakes::test_binding(Vec::new());
     let policy: Arc<dyn Policy> = policy::allow_all();
     let _memory: Arc<dyn MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
@@ -283,12 +283,11 @@ async fn make_test_shell(
         }
     }
     let agent_runner: Arc<dyn tools::published::agent::AgentRunner> = Arc::new(NoopRunner);
-    let tool_result_materializer =
-        crate::application::tool::test_support::test_tool_result_materializer();
+    let tool_result_materializer = crate::application::tool::fakes::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let config_query = wiring.gate_aware_config_reader();
     let config_writer = wiring.gate_aware_config_writer();
-    let session_management = Arc::new(context::test_support::UnavailableSessionManagement);
+    let session_management = Arc::new(testkit::context::UnavailableSessionManagement);
     let cwd = root.clone();
 
     // #1248 TaskData 3: Build RuntimeContextFactory for test SessionRuntime.
@@ -452,8 +451,7 @@ async fn model_switch_affects_only_next_assembler() {
 
     let binding_before = ctx_before.provider();
     // Simulate model switch: create a new binding.
-    let new_binding =
-        crate::application::model::test_support::test_binding(vec!["new model response"]);
+    let new_binding = crate::application::model::fakes::test_binding(vec!["new model response"]);
     shell.model_state.update_binding(new_binding.clone());
 
     // Second assembly picks up the new binding.
@@ -579,7 +577,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
         config.reader(),
         config.participant(),
-        Arc::new(context::test_support::UnavailableSessionManagement),
+        Arc::new(testkit::context::UnavailableSessionManagement),
         Arc::new(
             context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
                 .with_persistence(task_wiring.persist(), workspace.persist()),
@@ -589,8 +587,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let policy: Arc<dyn policy::Policy> = policy::allow_all();
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
-    let tool_result_materializer =
-        crate::application::tool::test_support::test_tool_result_materializer();
+    let tool_result_materializer = crate::application::tool::fakes::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
         &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
@@ -662,7 +659,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             workspace.clone(),
             wiring,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            Arc::new(context::test_support::UnavailableSessionManagement),
+            Arc::new(testkit::context::UnavailableSessionManagement),
         ),
         RuntimeToolAssemblyDependenciesData::new(
             tools.catalog_port(),
@@ -736,7 +733,7 @@ async fn startup_snapshot_reads_current_model_state() {
         make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
 
     // Write a distinct binding into SessionModelState.
-    let switched = crate::application::model::test_support::test_binding(vec!["tui sees this"]);
+    let switched = crate::application::model::fakes::test_binding(vec!["tui sees this"]);
     shell.model_state.update_binding(switched);
 
     let handle = RuntimeHandle {

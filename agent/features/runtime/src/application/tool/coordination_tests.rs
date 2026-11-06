@@ -45,11 +45,11 @@ struct RecordingPolicy {
 }
 
 impl RecordingPolicy {
-    /// #2146：实现权归 policy crate；替身经其 test_support。
+    /// 替身经 testkit 构造。
     fn port(&self) -> std::sync::Arc<dyn crate::ports::Policy> {
         let names = Arc::clone(&self.names);
         let decision = self.decision.clone();
-        policy::test_support::scripted_policy(
+        testkit::policy::scripted_policy(
             move |request| {
                 names
                     .lock()
@@ -173,10 +173,10 @@ struct AllowAllRecordingPolicy {
 }
 
 impl AllowAllRecordingPolicy {
-    /// #2146：实现权归 policy crate；替身经其 test_support。
+    /// 替身经 testkit 构造。
     fn port(&self) -> std::sync::Arc<dyn crate::ports::Policy> {
         let names = std::sync::Arc::clone(&self.names);
-        policy::test_support::scripted_policy(
+        testkit::policy::scripted_policy(
             move |request| {
                 names
                     .lock()
@@ -440,11 +440,11 @@ impl HookTestPolicy {
         }
     }
 
-    /// #2146：实现权归 policy crate；替身经其 test_support。
+    /// 替身经 testkit 构造。
     fn port(&self) -> Arc<dyn crate::ports::Policy> {
         let eval_count = Arc::clone(&self.eval_count);
         let authorization = self.authorization;
-        policy::test_support::scripted_policy(
+        testkit::policy::scripted_policy(
             move |request| {
                 *eval_count.lock().unwrap() += 1;
                 match request.tool_name().as_str() {
@@ -923,9 +923,9 @@ fn streaming_round_pairing_validation_rejects_orphan_results() {
     );
 }
 
-/// #2146：ScoringPort 实现权归 systemone crate；固定风险替身经其脚本端口。
+/// 固定风险替身经 testkit 脚本端口构造。
 fn triage_policy_with(p_true: f64) -> crate::application::tool::PolicyTriage {
-    crate::application::tool::PolicyTriage::new(systemone::test_support::scripted_scoring(
+    crate::application::tool::PolicyTriage::new(testkit::systemone::scripted_scoring(
         move |_state, _questions| {
             Ok(vec![systemone::ScoringAnswer::noul(
                 p_true,

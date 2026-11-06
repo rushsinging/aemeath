@@ -28,9 +28,9 @@ impl tools::ToolCatalogPort for SpyToolCatalog {
     }
 }
 
-/// A policy spy（#2146：实现权归 policy crate，脚本记录调用）。
+/// Policy spy（脚本记录调用）：经 testkit::policy 构造。
 fn spy_policy(called: Arc<AtomicBool>) -> Arc<dyn crate::ports::Policy> {
-    policy::test_support::scripted_policy(
+    testkit::policy::scripted_policy(
         move |_request| {
             called.store(true, Ordering::SeqCst);
             policy::PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
@@ -304,7 +304,7 @@ impl tools::published::typed::TypedTool for SpyTool {
 
 #[tokio::test]
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
-    use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
+    use crate::application::model::fakes::{test_binding_from_port, TestProviderPort};
     use provider::{
         ProviderContentData, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
     };
@@ -355,7 +355,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     // ── Provider: first call → tool call, second call → end_turn ──
     let second_call = Arc::new(AtomicBool::new(false));
     let second_call2 = second_call.clone();
-    let model = crate::application::model::test_support::test_model_info();
+    let model = crate::application::model::fakes::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, request| {
             let is_second = second_call2.swap(true, Ordering::SeqCst);
@@ -400,7 +400,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     ));
 
     let binding = test_binding_from_port(port);
-    let factory = crate::application::model::test_support::constant_factory(binding);
+    let factory = crate::application::model::fakes::constant_factory(binding);
 
     let workspace = crate::application::run::workspace_test_support::runtime_workspace(
         &crate::application::run::workspace_test_support::test_tool_execution_context(
@@ -414,8 +414,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer:
-            crate::application::tool::test_support::test_tool_result_materializer(),
+        tool_result_materializer: crate::application::tool::fakes::test_tool_result_materializer(),
         workspace,
         skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: source,
@@ -533,7 +532,7 @@ impl tools::published::typed::TypedTool for BlockingCancelTool {
 
 #[tokio::test]
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
-    use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
+    use crate::application::model::fakes::{test_binding_from_port, TestProviderPort};
     use provider::{
         ProviderContentData, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
     };
@@ -567,7 +566,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         }));
 
     // Provider: returns a tool call for blocking_cancel.
-    let model = crate::application::model::test_support::test_model_info();
+    let model = crate::application::model::fakes::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, _request| {
             let tc = ProviderContentData::ToolCall {
@@ -590,7 +589,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     ));
 
     let binding = test_binding_from_port(port);
-    let factory = crate::application::model::test_support::constant_factory(binding);
+    let factory = crate::application::model::fakes::constant_factory(binding);
 
     let workspace = crate::application::run::workspace_test_support::runtime_workspace(
         &crate::application::run::workspace_test_support::test_tool_execution_context(
@@ -604,8 +603,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer:
-            crate::application::tool::test_support::test_tool_result_materializer(),
+        tool_result_materializer: crate::application::tool::fakes::test_tool_result_materializer(),
         workspace,
         skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: source,

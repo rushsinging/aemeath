@@ -580,7 +580,7 @@ fn save_signal_history(path: &std::path::Path, history: &crate::domain::strength
         }
     }
 }
-
+// #2188（main）：组件维护审计与维护 Compose；sealed 已随实现权治理移除。
 /// 对最终组件做确定性审计并执行维护 Compose；返回摘要（无命中为空）。
 async fn maintain_final_components(
     registry: &mut dyn crate::application::ComponentRegistry,
@@ -645,4 +645,4 @@ async fn maintain_final_components(
 }
 
 // #2146 密封解锁：实现权归属声明（Sealed 于定义 crate 内授予）。
-impl crate::sealed::Sealed for HarnessRsiCycleTask {}
+// impl （密封已移除） for HarnessRsiCycleTask {}

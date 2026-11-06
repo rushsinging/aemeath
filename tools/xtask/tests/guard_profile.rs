@@ -39,7 +39,6 @@ fn assertion_name(rule: &guards_rules::Rule) -> &'static str {
         RuleSpec::ConstantPlacement { .. } => "constant_placement",
         RuleSpec::CountRatio { .. } => "count_ratio",
         RuleSpec::StructFieldPresence { .. } => "struct_field_presence",
-        RuleSpec::ImplRegistry { .. } => "impl_registry",
     }
 }
 

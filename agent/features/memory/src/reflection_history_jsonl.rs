@@ -109,7 +109,7 @@ impl JsonlReflectionHistoryStore {
 
     // ---------- 错误与序列化 ----------
 
-    fn storage_failure(error: storage::StorageError) -> MemoryError {
+    fn storage_failure(error: share::error::DomainError) -> MemoryError {
         MemoryError::Storage {
             kind: map_storage_error(&error),
         }

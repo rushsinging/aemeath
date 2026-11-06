@@ -184,7 +184,7 @@ pub(crate) fn test_wiring_builder() -> crate::SessionSwitchCoordinatorBuilder {
         config_reader: config.clone(),
         config_participant: config,
         memory_opener: Box::new(TestMemoryOpener),
-        session_management: Arc::new(context::test_support::UnavailableSessionManagement),
+        session_management: Arc::new(testkit::context::UnavailableSessionManagement),
         initial_session,
         initial_memory: Arc::new(memory::api::NoOpMemory),
         context_factory: Arc::new(
@@ -216,7 +216,7 @@ fn test_wiring_with_context_factory(
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
-            session_management: Arc::new(context::test_support::UnavailableSessionManagement),
+            session_management: Arc::new(testkit::context::UnavailableSessionManagement),
             initial_session: {
                 let mut session =
                     context::session::CanonicalSession::empty(uuid::Uuid::now_v7().to_string());
@@ -229,7 +229,7 @@ fn test_wiring_with_context_factory(
     ))
 }
 
-use crate::application::model::test_support::{
+use crate::application::model::fakes::{
     advance_until_retry_condition, empty_completion, successful_completion, text_completion_stream,
     ScriptedInvocationProvider, ScriptedLlmProvider,
 };
@@ -324,7 +324,7 @@ fn test_shell_with_catalog(
     factory: ::tools::composition::TestCatalogExecution,
 ) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
-    let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
+    let binding = crate::application::model::fakes::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
@@ -353,8 +353,8 @@ fn test_shell_with_catalog(
         session_switch: wiring,
         config_query: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         config_writer: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
-        session_management: Arc::new(context::test_support::UnavailableSessionManagement),
-        provider_factory: crate::application::model::test_support::constant_factory(
+        session_management: Arc::new(testkit::context::UnavailableSessionManagement),
+        provider_factory: crate::application::model::fakes::constant_factory(
             binding.clone(),
         ),
         model_state: crate::application::client::SessionModelState::new(
@@ -387,7 +387,7 @@ fn test_shell_with_catalog(
         agent_runner: Arc::new(NoopAgentRunner),
         parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
         tool_result_materializer:
-            crate::application::tool::test_support::test_tool_result_materializer(),
+            crate::application::tool::fakes::test_tool_result_materializer(),
         active_run: Arc::new(
             crate::application::run::active_registry::wire_active_run_registry(),
         ),
@@ -435,7 +435,7 @@ fn test_shell_with_task_store(
     task_store: Arc<task::TaskStore>,
 ) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
-    let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
+    let binding = crate::application::model::fakes::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
@@ -465,8 +465,8 @@ fn test_shell_with_task_store(
         session_switch: wiring,
         config_query: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         config_writer: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
-        session_management: Arc::new(context::test_support::UnavailableSessionManagement),
-        provider_factory: crate::application::model::test_support::constant_factory(
+        session_management: Arc::new(testkit::context::UnavailableSessionManagement),
+        provider_factory: crate::application::model::fakes::constant_factory(
             binding.clone(),
         ),
         model_state: crate::application::client::SessionModelState::new(
@@ -499,7 +499,7 @@ fn test_shell_with_task_store(
         agent_runner: Arc::new(NoopAgentRunner),
         parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
         tool_result_materializer:
-            crate::application::tool::test_support::test_tool_result_materializer(),
+            crate::application::tool::fakes::test_tool_result_materializer(),
         active_run: Arc::new(
             crate::application::run::active_registry::wire_active_run_registry(),
         ),
@@ -1006,7 +1006,7 @@ fn retry_main_context_with_wiring(
     let shell = test_shell();
     let wiring = shell.session_switch.clone();
     shell.model_state.update_binding(
-        crate::application::model::test_support::binding_from_llm_provider(provider),
+        crate::application::model::fakes::binding_from_llm_provider(provider),
     );
     shell.set_test_session_id("test-main-terminal-retry");
     (test_session_driver_input(sink, input_events, shell), wiring)

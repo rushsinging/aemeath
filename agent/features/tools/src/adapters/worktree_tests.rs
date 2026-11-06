@@ -144,9 +144,7 @@ fn test_enter_worktree_schema() {
 async fn enter_worktree_normalizes_blank_path_and_preserves_base_for_project() {
     let temp = tempfile::tempdir().expect("temp workspace");
     let ctx = build_ctx(temp.path().to_path_buf());
-    let control = Arc::new(project::test_support::FakeWorkspace::new(
-        std::env::temp_dir(),
-    ));
+    let control = Arc::new(testkit::project::FakeWorkspace::new(std::env::temp_dir()));
     let tool = EnterWorktreeTool {
         control: control.clone(),
     };

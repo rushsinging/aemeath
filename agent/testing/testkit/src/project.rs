@@ -1,13 +1,15 @@
-//! Project 测试实现面（#2146 实现权治理：WorkspaceReader / WorkspaceControl /
-//! WorkspaceWriter 实现权归本 crate，跨 crate 测试经此获得替身；
-//! 生产不编译）。
+//! project 测试替身（#2146 治理后统一由 testkit 维护）。
+//!
+//! WorkspaceReader / WorkspaceControl / WorkspaceWriter 实现权归 project crate，
+//! 跨 crate 测试经本模块获得替身；消费方经 `[dev-dependencies] testkit` 引用，
+//! 不进生产依赖图。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::WorkspaceControl;
-use crate::WorkspaceData;
-use crate::WorkspaceReader;
+use project::WorkspaceControl;
+use project::WorkspaceData;
+use project::WorkspaceReader;
 use share::session_types::ProjectIdentityData;
 use share::session_types::WorkspaceId;
 
@@ -18,9 +20,9 @@ pub type EnterCall = (Option<PathBuf>, Option<String>, Option<String>);
 
 #[derive(Clone)]
 pub struct FakeWorkspace {
-    pub(crate) initial_root: PathBuf,
-    pub(crate) current: Arc<Mutex<PathBuf>>,
-    pub(crate) enter_calls: Arc<Mutex<Vec<EnterCall>>>,
+    initial_root: PathBuf,
+    current: Arc<Mutex<PathBuf>>,
+    enter_calls: Arc<Mutex<Vec<EnterCall>>>,
 }
 
 impl FakeWorkspace {
@@ -169,21 +171,17 @@ impl WorkspaceControl for FakeWorkspace {
 /// restore 通道 panic（未用场景）。
 pub struct FixedWorkspaceWriter(pub share::session_types::PersistedWorkspaceContext);
 
-impl crate::WorkspaceWriter for FixedWorkspaceWriter {
+impl project::WorkspaceWriter for FixedWorkspaceWriter {
     fn snapshot(&self) -> share::session_types::PersistedWorkspaceContext {
         self.0.clone()
     }
     fn prepare_restore(
         &self,
         _dto: &share::session_types::PersistedWorkspaceContext,
-    ) -> Result<crate::domain::state::WorkspaceRestoreData, share::error::DomainError> {
+    ) -> Result<project::WorkspaceRestoreData, share::error::DomainError> {
         panic!("not used")
     }
-    fn commit_restore(&self, _prepared: crate::domain::state::WorkspaceRestoreData) {
+    fn commit_restore(&self, _prepared: project::WorkspaceRestoreData) {
         panic!("not used")
     }
 }
-
-// #2146 密封解锁（测试替身）。
-impl crate::sealed::Sealed for FakeWorkspace {}
-impl crate::sealed::Sealed for FixedWorkspaceWriter {}

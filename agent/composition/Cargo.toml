@@ -42,11 +42,12 @@ uuid = { version = "1", features = ["v7"] }
 chrono = "0.4"
 
 [dev-dependencies]
-provider = { path = "../features/provider", features = ["dev"] }
+testkit = { path = "../testing/testkit" }
+provider = { path = "../features/provider" }
 runtime = { path = "../features/runtime", features = ["dev"] }
-project = { path = "../features/project", features = ["dev"] }
-# 测试经 test_support 消费 context port mock（AtomicBlobSessionManagement）。
-context = { path = "../features/context", features = ["dev"] }
+project = { path = "../features/project" }
+# 测试经 testkit 消费 context port mock（wire_session_management 装配入口）。
+context = { path = "../features/context" }
 tools = { path = "../features/tools", features = ["test-harness"] }
 task = { path = "../features/task" }
 tokio = { workspace = true }

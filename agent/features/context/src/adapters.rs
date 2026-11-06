@@ -14,7 +14,7 @@ pub mod memory_injection;
 pub mod prompt;
 mod prompt_source;
 pub(crate) mod session_legacy_workspace;
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 mod session_lifecycle;
 mod skill_prompt_source;
 mod system_prompt;
@@ -39,13 +39,20 @@ pub(crate) use memory_injection::{CommittedMemoryRetrieveAdapter, NoOpContextMem
 pub use prompt_source::BaselinePromptSource;
 pub use session_legacy_workspace::decode as decode_session;
 pub(crate) use session_legacy_workspace::LegacySessionDecoder;
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use session_lifecycle::capture as capture_session_lifecycle;
 #[cfg(test)]
 pub(crate) use skill_prompt_source::skill_prompt_budget;
 pub(crate) use skill_prompt_source::SkillPromptSource;
 pub use skill_prompt_source::WorkspaceSkillQueryFactory;
 pub use system_prompt::{SessionPromptInputsData, SystemPromptAssembly};
+
+/// 会话管理装配入口（#1863 F 项遗留 + 测试替身通道）：blob 端口 → SessionManagementPort。
+pub fn wire_session_management(
+    blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
+) -> std::sync::Arc<dyn crate::ports::SessionManagementPort> {
+    std::sync::Arc::new(AtomicBlobSessionManagement::new(blob))
+}
 
 pub fn wire_isolated_context(session_id: &str) -> crate::ports::ContextPorts {
     let repository = Arc::new(InMemorySessionRepository::new());

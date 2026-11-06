@@ -649,9 +649,9 @@ impl CanonicalSessionRepository {
         candidate: CanonicalSession,
     ) -> Result<(), String> {
         let mut committed = self.session.write().map_err(|error| error.to_string())?;
-        #[cfg(any(test, feature = "dev"))]
+        #[cfg(test)]
         crate::adapters::session_lifecycle::record_generation_transition(current, &candidate);
-        #[cfg(not(any(test, feature = "dev")))]
+        #[cfg(not(test))]
         let _ = current;
         *committed = Arc::new(candidate);
         Ok(())

@@ -510,13 +510,13 @@ impl FakeToolExecutionPort {
     }
 
 
-    /// #2146：实现权归 tools crate；替身经其脚本端口（共享状态经闭包捕获）。
+    /// 替身经其脚本端口（共享状态经闭包捕获）。
     fn port(&self) -> std::sync::Arc<dyn tools::published::execution::ToolExecutionPort> {
         let execute_count = std::sync::Arc::clone(&self.execute_count);
         let recorded = std::sync::Arc::clone(&self.recorded_invocations);
         let result_text = std::sync::Arc::clone(&self.result_text);
         let returned_text = std::sync::Arc::clone(&self.returned_text);
-        tools::test_support::scripted_tool_execution(move |invocation, _context| {
+        testkit::tools::scripted_tool_execution(move |invocation, _context| {
             use std::sync::atomic::Ordering;
             execute_count.fetch_add(1, Ordering::AcqRel);
             recorded.lock().unwrap().push(invocation.clone());
@@ -1451,7 +1451,7 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
             >,
         > = std::sync::OnceLock::new();
         let materializer = MATERIALIZER
-            .get_or_init(crate::application::tool::test_support::test_tool_result_materializer)
+            .get_or_init(crate::application::tool::fakes::test_tool_result_materializer)
             .as_ref();
         static UNUSED_TOOL_EXECUTION: std::sync::LazyLock<
             Arc<dyn tools::published::execution::ToolExecutionPort>,

@@ -3,7 +3,7 @@ use super::*;
 
 fn bash_tool(ctx: &ToolExecutionContext) -> BashTool {
     BashTool {
-        control: crate::domain::test_support::workspace_control(ctx),
+        control: crate::domain::fakes::workspace_control(ctx),
     }
 }
 use crate::domain::ToolProgressEvent;
@@ -51,11 +51,10 @@ async fn drain_reader_tasks_times_out_and_aborts_stuck_readers() {
 #[tokio::test]
 async fn bash_allow_all_bypasses_shell_injection_guard() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(
@@ -76,11 +75,10 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
     let workspace = tempdir().unwrap();
     let worktree = workspace.path().join(".worktrees/bug35");
     std::fs::create_dir_all(&worktree).unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(
@@ -106,11 +104,10 @@ async fn test_bash_display_field_contains_stdout_not_message() {
     // 回归：Bash result 的 output 应包含 stdout（通过 display 字段），
     // 而非 "Command executed successfully" 元信息。
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "echo hello_world_12345" }), &ctx)
@@ -143,11 +140,10 @@ async fn test_bash_display_field_contains_stdout_not_message() {
 #[tokio::test]
 async fn bash_child_starts_new_session_without_controlling_terminal() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(
@@ -174,11 +170,10 @@ async fn bash_child_starts_new_session_without_controlling_terminal() {
 #[tokio::test]
 async fn bash_reads_eof_from_isolated_stdin() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "IFS= read -r value; printf 'read_status=%s value=%s' \"$?\" \"$value\"" }), &ctx)
@@ -202,11 +197,10 @@ async fn test_bash_result_cwd_reflects_cd() {
     let workspace = tempdir().unwrap();
     let subdir = workspace.path().join("subdir");
     std::fs::create_dir_all(&subdir).unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(
@@ -227,11 +221,10 @@ async fn test_bash_result_cwd_reflects_cd() {
 async fn test_bash_result_cwd_on_failed_command() {
     // AC6: 命令失败（非零 exit code）时 result 也带 cwd
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "false" }), &ctx)
@@ -249,11 +242,10 @@ async fn test_bash_result_cwd_on_failed_command() {
 async fn test_bash_result_cwd_on_empty_output() {
     // AC5: stdout + stderr 均为空时的 "Command executed successfully" 也带 cwd
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "true" }), &ctx)
@@ -286,12 +278,11 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 
     let workspace = tempdir().unwrap();
     let (tx, mut rx) = mpsc::channel::<ToolProgressEvent>(256);
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .progress_sink(std::sync::Arc::new(ChannelProgressSink(tx)))
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .progress_sink(std::sync::Arc::new(ChannelProgressSink(tx)))
+            .build();
 
     let result = bash_tool(&ctx)
         .call(
@@ -370,12 +361,11 @@ async fn bash_cancellation_returns_visible_command_cancelled_result() {
     }
 
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build()
-    .with_cancellation(std::sync::Arc::new(Cancelled));
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build()
+            .with_cancellation(std::sync::Arc::new(Cancelled));
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "sleep 60" }), &ctx)
@@ -419,12 +409,11 @@ async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
         cancelled: std::sync::atomic::AtomicBool::new(false),
         notify: tokio::sync::Notify::new(),
     });
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build()
-    .with_cancellation(cancellation.clone());
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build()
+            .with_cancellation(cancellation.clone());
     let tool = bash_tool(&ctx);
 
     let execution = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
@@ -505,12 +494,11 @@ async fn bash_cancellation_preserves_partial_stdout() {
         cancelled: std::sync::atomic::AtomicBool::new(false),
         notify: tokio::sync::Notify::new(),
     });
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build()
-    .with_cancellation(cancellation.clone());
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build()
+            .with_cancellation(cancellation.clone());
     let tool = bash_tool(&ctx);
 
     let execution = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -554,11 +542,10 @@ async fn bash_cancellation_preserves_partial_stdout() {
 #[tokio::test]
 async fn bash_timeout_preserves_partial_stdout() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let execution = bash_tool(&ctx)
         .call(
@@ -586,11 +573,10 @@ async fn bash_timeout_preserves_partial_stdout() {
 #[tokio::test]
 async fn test_bash_no_progress_tx_still_works() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "echo no_channel_test_98765" }), &ctx)
@@ -749,11 +735,10 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
     // 而应包含 signal 信息。
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "kill -9 $$" }), &ctx)
@@ -776,11 +761,10 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
 #[test]
 fn bash_tool_timeout_defaults_to_30m_and_background_budget_to_24h() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
     let tool = bash_tool(&ctx);
     assert_eq!(tool.get_timeout_secs(None, false), 1800);
     assert_eq!(tool.get_timeout_secs(None, true), 86400);
@@ -794,11 +778,10 @@ fn bash_tool_timeout_defaults_to_30m_and_background_budget_to_24h() {
 #[test]
 fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
     let tool = bash_tool(&ctx);
     let own_schema = tool.input_schema().to_string();
     assert!(
@@ -836,7 +819,7 @@ fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
 async fn bash_when_workspace_deleted_returns_cwd_attribution() {
     let workspace = tempdir().unwrap();
     let root = workspace.path().to_path_buf();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(root.clone())
+    let ctx = crate::domain::fakes::TestToolExecutionContextBuilder::new(root.clone())
         .allow_all(true)
         .build();
     let tool = bash_tool(&ctx);
@@ -869,12 +852,11 @@ async fn bash_when_workspace_deleted_returns_cwd_attribution() {
 async fn bash_direct_log_writes_stdout_to_log_file_and_result_keeps_text() {
     let workspace = tempdir().unwrap();
     let log_path = workspace.path().join("bgp_direct1.log");
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build()
-    .with_background_log_path(log_path.clone());
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build()
+            .with_background_log_path(log_path.clone());
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "echo direct-bound-output" }), &ctx)
@@ -897,12 +879,11 @@ async fn bash_direct_log_writes_stdout_to_log_file_and_result_keeps_text() {
 async fn bash_direct_log_keeps_full_output_beyond_capture_limit() {
     let workspace = tempdir().unwrap();
     let log_path = workspace.path().join("bgp_direct2.log");
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build()
-    .with_background_log_path(log_path.clone());
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build()
+            .with_background_log_path(log_path.clone());
 
     // 11MB：超过 MAX_CAPTURE_BYTES（10MB）——pipe 形态会丢弃超限部分。
     let result = bash_tool(&ctx)
@@ -925,11 +906,10 @@ async fn bash_direct_log_keeps_full_output_beyond_capture_limit() {
 #[tokio::test]
 async fn bash_without_log_path_behaves_unchanged() {
     let workspace = tempdir().unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = bash_tool(&ctx)
         .call(json!({ "command": "echo piped-unchanged" }), &ctx)
@@ -947,12 +927,11 @@ async fn bash_without_log_path_behaves_unchanged() {
 async fn bash_direct_log_writes_stderr_to_same_file_interleaved() {
     let workspace = tempdir().unwrap();
     let log_path = workspace.path().join("bgp_stderr_direct.log");
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build()
-    .with_background_log_path(log_path.clone());
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build()
+            .with_background_log_path(log_path.clone());
 
     // stdout 与 stderr 各出一行（1>&2 走 stderr 通道）。
     let result = bash_tool(&ctx)

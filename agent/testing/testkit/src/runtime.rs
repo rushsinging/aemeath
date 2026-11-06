@@ -1,14 +1,21 @@
-//! Runtime 测试实现面（#2146 实现权治理：ProviderFactory 实现权归本
-//! crate，跨 crate 测试经此获得替身；生产不编译）。
+//! runtime 测试替身（#2146 治理后统一由 testkit 维护）。
+//!
+//! ProviderFactory 实现权归 runtime crate，跨 crate 测试经本模块获得替身；
+//! 消费方经 `[dev-dependencies] testkit` 引用，不进生产依赖图。
+//!
+//! 注意：runtime crate 自身 lib 测试专用的 model/reflection/tool fake 留在
+//! runtime 内（`application/*/fakes.rs`）——Cargo dev-dependency 循环下对被测
+//! crate 会产生双实例，`testkit::runtime` 仅供其它 crate 消费。
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
+use provider::ProviderError;
+use runtime::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 
 /// 脚本化 ProviderFactory：build 按脚本产出 binding（可伪造任意端口/模型）。
 pub fn scripted_provider_factory(
-    script: impl Fn(ProviderBuildSpecData) -> Result<ProviderBindingData, provider::ProviderError>
+    script: impl Fn(ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError>
         + Send
         + Sync
         + 'static,
@@ -24,14 +31,9 @@ struct ScriptedFactory<F> {
 
 impl<F> ProviderFactory for ScriptedFactory<F>
 where
-    F: Fn(ProviderBuildSpecData) -> Result<ProviderBindingData, provider::ProviderError>
-        + Send
-        + Sync,
+    F: Fn(ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> + Send + Sync,
 {
-    fn build(
-        &self,
-        spec: ProviderBuildSpecData,
-    ) -> Result<ProviderBindingData, provider::ProviderError> {
+    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         (self.script)(spec)
     }
 }

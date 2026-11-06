@@ -1,3 +1,4 @@
+use super::error_map::{map_io, map_sync, reject_symlink};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -5,13 +6,8 @@ use cap_std::fs::{Dir, OpenOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::domain::blob_recovery::JournalPhase;
 use crate::{StorageError, StorageErrorKind};
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) enum JournalPhase {
-    Prepared,
-    Committed,
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct BlobJournal {
@@ -93,32 +89,4 @@ pub(super) fn read_journal(
 
 pub(super) fn journal_name(primary_name: &Path) -> PathBuf {
     primary_name.with_extension("journal")
-}
-
-fn reject_symlink(parent: &Dir, path: &Path) -> Result<(), StorageError> {
-    if let Ok(metadata) = parent.symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            return Err(StorageError::new(
-                StorageErrorKind::InvalidKey,
-                "事务协议文件是符号链接",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn map_io(error: std::io::Error) -> StorageError {
-    let kind = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        StorageErrorKind::PermissionDenied
-    } else {
-        StorageErrorKind::Io
-    };
-    StorageError::new(kind, format!("事务 I/O 失败：{error}"))
-}
-
-fn map_sync(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::UnsupportedDurability,
-        format!("当前平台无法兑现事务持久性：{error}"),
-    )
 }

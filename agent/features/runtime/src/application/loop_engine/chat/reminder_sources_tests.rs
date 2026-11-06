@@ -182,9 +182,9 @@ async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
     Arc::new(memory)
 }
 
-/// #2146：ScoringPort 实现权归 systemone crate；关键词评分替身。
+/// 关键词评分替身。
 fn keyword_scoring(keyword: &'static str, high: f64) -> std::sync::Arc<dyn systemone::ScoringPort> {
-    systemone::test_support::scripted_scoring(move |state, questions| match &questions[0] {
+    testkit::systemone::scripted_scoring(move |state, questions| match &questions[0] {
         systemone::ScoringQuestion::Choice { criteria, .. } => {
             let probabilities: Vec<(String, f64)> = criteria
                 .iter()
@@ -318,7 +318,7 @@ async fn recall_below_threshold_clears_cache_and_skips_turn() {
 async fn recall_scoring_failure_clears_cache_silently() {
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec!["git worktree 的创建步骤"]).await,
-        systemone::test_support::unavailable_scoring("服务未启动"),
+        testkit::systemone::unavailable_scoring("服务未启动"),
         Arc::new(|| 4_242),
     );
     source.refresh("worktree").await;
@@ -376,7 +376,7 @@ async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
     assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
     let failed_source = MemoryRecallReminderSource::with_clock(
         Arc::clone(&memory),
-        systemone::test_support::unavailable_scoring("服务未启动"),
+        testkit::systemone::unavailable_scoring("服务未启动"),
         Arc::new(|| 4_242),
     );
     failed_source.refresh("worktree").await;

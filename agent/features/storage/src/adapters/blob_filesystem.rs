@@ -1,6 +1,7 @@
 #[cfg(any(test, feature = "test-fault-injection"))]
 use super::constants::{FAULT_ABORT_ENV, FAULT_POINT_ENV};
-use crate::domain::PreviousPolicy;
+use super::error_map::{map_durability, map_io, map_lock_io};
+use crate::domain::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -12,14 +13,17 @@ use fs2::FileExt;
 use uuid::Uuid;
 
 use super::blob_protocol::{
-    digest, digest_file, journal_name, read_journal, write_journal, BlobJournal, JournalPhase,
+    digest, digest_file, journal_name, read_journal, write_journal, BlobJournal,
+};
+use crate::domain::blob_recovery::{
+    decide_blob_recovery, decide_orphan_previous, DigestObservation, JournalPhase, RecoveryDecision,
 };
 use crate::{
-    AtomicBlobPort, BlobReadData, CorruptTransactionError, CorruptionReason, DeleteOptionsData,
-    DeleteOutcomeData, DurabilityData, GenerationData, PromoteOutcomeData, QuarantineDisposition,
-    QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData, ReadOutcomeData,
-    SafePathSegmentData, StorageEntryData, StorageError, StorageErrorKind, StorageKeyData,
-    StorageNamespaceData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
+    AtomicBlobPort, BlobReadData, DeleteOptionsData, DeleteOutcomeData, DurabilityData,
+    GenerationData, PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason,
+    QuarantineReceiptData, ReadOutcomeData, SafePathSegmentData, StorageEntryData, StorageError,
+    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
+    WriteReceiptData,
 };
 
 #[derive(Debug)]
@@ -140,11 +144,7 @@ impl FileSystemBlobAdapter {
     }
 
     fn relative_primary(key: &StorageKeyData) -> PathBuf {
-        key.segments()
-            .iter()
-            .fold(PathBuf::from(key.namespace().as_str()), |path, segment| {
-                path.join(segment.as_str())
-            })
+        key.relative_path()
     }
 
     fn prepare_parent(&self, key: &StorageKeyData) -> Result<(Dir, PathBuf), StorageError> {
@@ -254,7 +254,10 @@ impl FileSystemBlobAdapter {
             }
             if metadata.file_type().is_file() {
                 prefix_segments.push(segment);
-                let key = StorageKeyData::new(namespace, prefix_segments.clone())?;
+                let key =
+                    StorageKeyData::new(namespace, prefix_segments.clone()).map_err(|error| {
+                        StorageError::new(StorageErrorKind::InvalidKey, error.message())
+                    })?;
                 prefix_segments.pop();
                 entries.push(StorageEntryData::new(key, metadata.len() as usize));
             } else {
@@ -274,18 +277,22 @@ impl FileSystemBlobAdapter {
             return self.recover_orphan_previous(parent, primary_name);
         };
         let observed = digest_file(parent, primary_name)?;
-        match journal.phase {
-            JournalPhase::Prepared if observed.as_deref() == Some(journal.new_digest.as_str()) => {
-                let committed = BlobJournal {
-                    phase: JournalPhase::Committed,
-                    ..journal.clone()
-                };
-                write_journal(parent, primary_name, &committed, true)?;
+        // 策略判定单点在 domain（#1865 A）：本函数只采集证据并执行决策动作。
+        let decision = decide_blob_recovery(
+            journal.phase,
+            classify_digest_observation(&journal, observed.as_deref()),
+        );
+        match decision {
+            RecoveryDecision::RollForward => {
+                if journal.phase == JournalPhase::Prepared {
+                    let committed = BlobJournal {
+                        phase: JournalPhase::Committed,
+                        ..journal.clone()
+                    };
+                    write_journal(parent, primary_name, &committed, true)?;
+                }
             }
-            JournalPhase::Prepared
-                if observed == journal.old_digest
-                    || (observed.is_none() && journal.old_digest.is_none()) =>
-            {
+            RecoveryDecision::RollBack => {
                 let _ = parent.remove_file(format!(".stage-{}", journal.nonce));
                 let _ = parent.remove_file(primary_name.with_extension("previous.next"));
                 parent
@@ -293,19 +300,16 @@ impl FileSystemBlobAdapter {
                     .map_err(map_io)?;
                 return Ok(());
             }
-            JournalPhase::Committed if observed.as_deref() == Some(journal.new_digest.as_str()) => {
-            }
-            _ => {
+            RecoveryDecision::Corrupt(reason) => {
                 return Err(self.quarantine_corrupt_transaction(
                     parent,
                     primary_name,
                     &journal,
-                    if journal.phase == JournalPhase::Committed {
-                        CorruptionReason::CommittedDigestMismatch
-                    } else {
-                        CorruptionReason::PrimaryDigestMatchesNeitherGeneration
-                    },
+                    reason,
                 ));
+            }
+            RecoveryDecision::CleanOrphan => {
+                unreachable!("decide_blob_recovery 不产生 CleanOrphan")
             }
         }
         let previous_next = primary_name.with_extension("previous.next");
@@ -332,22 +336,26 @@ impl FileSystemBlobAdapter {
         let Some(orphan_digest) = digest_file(parent, &previous_next)? else {
             return Ok(());
         };
-        if digest_file(parent, primary_name)?.as_deref() == Some(orphan_digest.as_str()) {
-            parent.remove_file(&previous_next).map_err(map_io)?;
-            return sync_directory(parent, DurabilityData::ProcessCrashSafe);
+        let matches_primary =
+            digest_file(parent, primary_name)?.as_deref() == Some(orphan_digest.as_str());
+        match decide_orphan_previous(matches_primary) {
+            RecoveryDecision::CleanOrphan => {
+                parent.remove_file(&previous_next).map_err(map_io)?;
+                sync_directory(parent, DurabilityData::ProcessCrashSafe)
+            }
+            RecoveryDecision::Corrupt(reason) => {
+                let journal = BlobJournal {
+                    nonce: "orphan".to_string(),
+                    old_digest: None,
+                    new_digest: orphan_digest,
+                    phase: JournalPhase::Prepared,
+                };
+                Err(self.quarantine_corrupt_transaction(parent, primary_name, &journal, reason))
+            }
+            RecoveryDecision::RollForward | RecoveryDecision::RollBack => {
+                unreachable!("decide_orphan_previous 只产生 CleanOrphan/Corrupt")
+            }
         }
-        let journal = BlobJournal {
-            nonce: "orphan".to_string(),
-            old_digest: None,
-            new_digest: orphan_digest,
-            phase: JournalPhase::Prepared,
-        };
-        Err(self.quarantine_corrupt_transaction(
-            parent,
-            primary_name,
-            &journal,
-            CorruptionReason::OrphanPreviousDigestMismatch,
-        ))
     }
 
     fn quarantine_corrupt_transaction(
@@ -442,7 +450,8 @@ impl FileSystemBlobAdapter {
                 new_digest: digest(bytes),
                 phase: JournalPhase::Prepared,
             };
-            if key.namespace().previous_policy() == PreviousPolicy::Retain && primary_exists {
+            // #1865 B：PreviousPolicy 恒 Retain（Discard 随死变体删除），保留上一代即唯一路径。
+            if primary_exists {
                 let previous_name = primary_name.with_extension("previous");
                 let previous_next_name = primary_name.with_extension("previous.next");
                 if let Ok(metadata) = parent.symlink_metadata(&previous_next_name) {
@@ -556,11 +565,8 @@ impl FileSystemBlobAdapter {
             }
         }
     }
-}
 
-#[async_trait]
-impl AtomicBlobPort for FileSystemBlobAdapter {
-    async fn read(
+    async fn read_inner(
         &self,
         key: &StorageKeyData,
         generation: GenerationData,
@@ -589,7 +595,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         Ok(ReadOutcomeData::Found(BlobReadData::new(generation, bytes)))
     }
 
-    async fn write_atomic(
+    async fn write_atomic_inner(
         &self,
         key: &StorageKeyData,
         bytes: &[u8],
@@ -598,7 +604,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         self.write_sync(key, bytes, options)
     }
 
-    async fn promote_previous(
+    async fn promote_previous_inner(
         &self,
         key: &StorageKeyData,
     ) -> Result<PromoteOutcomeData, StorageError> {
@@ -647,7 +653,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         )))
     }
 
-    async fn quarantine(
+    async fn quarantine_inner(
         &self,
         key: &StorageKeyData,
         generation: GenerationData,
@@ -675,7 +681,8 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
             Ok(_) => {}
         }
 
-        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())?;
+        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())
+            .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.message()))?;
         let target = quarantine_name(&primary_name, id.as_str());
         parent.rename(&source, &parent, target).map_err(map_io)?;
         Ok(QuarantineOutcomeData::Moved(QuarantineReceiptData::new(
@@ -683,7 +690,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         )))
     }
 
-    async fn delete_all_generations(
+    async fn delete_all_generations_inner(
         &self,
         key: &StorageKeyData,
         options: DeleteOptionsData,
@@ -711,11 +718,75 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         ))
     }
 
-    async fn list_primary(
+    async fn list_primary_inner(
         &self,
         namespace: StorageNamespaceData,
     ) -> Result<Vec<StorageEntryData>, StorageError> {
         self.list_primary_sync(namespace)
+    }
+}
+
+#[async_trait]
+impl AtomicBlobPort for FileSystemBlobAdapter {
+    async fn read(
+        &self,
+        key: &StorageKeyData,
+        generation: GenerationData,
+    ) -> Result<ReadOutcomeData, share::error::DomainError> {
+        self.read_inner(key, generation)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn write_atomic(
+        &self,
+        key: &StorageKeyData,
+        bytes: &[u8],
+        options: WriteOptionsData,
+    ) -> Result<WriteReceiptData, share::error::DomainError> {
+        self.write_atomic_inner(key, bytes, options)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn promote_previous(
+        &self,
+        key: &StorageKeyData,
+    ) -> Result<PromoteOutcomeData, share::error::DomainError> {
+        self.promote_previous_inner(key)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn quarantine(
+        &self,
+        key: &StorageKeyData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
+        reason: QuarantineReason,
+    ) -> Result<QuarantineOutcomeData, share::error::DomainError> {
+        self.quarantine_inner(key, generation, scope, reason)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn delete_all_generations(
+        &self,
+        key: &StorageKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, share::error::DomainError> {
+        self.delete_all_generations_inner(key, options)
+            .await
+            .map_err(share::error::DomainError::from)
+    }
+
+    async fn list_primary(
+        &self,
+        namespace: StorageNamespaceData,
+    ) -> Result<Vec<StorageEntryData>, share::error::DomainError> {
+        self.list_primary_inner(namespace)
+            .await
+            .map_err(share::error::DomainError::from)
     }
 }
 
@@ -782,30 +853,6 @@ fn remove_if_exists(parent: &Dir, path: &Path) -> Result<bool, StorageError> {
         }
     }
 }
-
-fn map_lock_io(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::ConcurrentWrite,
-        format!("Storage key 锁获取失败：{error}"),
-    )
-}
-
-fn map_io(error: std::io::Error) -> StorageError {
-    let kind = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        StorageErrorKind::PermissionDenied
-    } else {
-        StorageErrorKind::Io
-    };
-    StorageError::new(kind, format!("存储 I/O 失败：{error}"))
-}
-
-fn map_durability(error: std::io::Error) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::UnsupportedDurability,
-        format!("当前平台无法兑现持久性要求：{error}"),
-    )
-}
-
 // ---------------------------------------------------------------------------
 // #[cfg(test)] blob RecoveryPending 终态日志 TDD —— 外置到
 // blob_filesystem_tests.rs，通过 `#[path]` 引入。
@@ -815,5 +862,16 @@ fn map_durability(error: std::io::Error) -> StorageError {
 #[path = "blob_filesystem_tests.rs"]
 mod tests;
 
-// #2146 密封解锁。
-impl crate::sealed::Sealed for FileSystemBlobAdapter {}
+/// 恢复证据分类（#1865 A）：把 journal 记录的 new/old digest 与磁盘观测值
+/// 归入决策表的输入词汇。等价于旧内联判定的三分支：
+/// new 命中 → New；old 命中（含双方均缺失）→ Old/Absent；其余 → Other。
+fn classify_digest_observation(journal: &BlobJournal, observed: Option<&str>) -> DigestObservation {
+    if observed == Some(journal.new_digest.as_str()) {
+        return DigestObservation::New;
+    }
+    match (journal.old_digest.as_deref(), observed) {
+        (None, None) => DigestObservation::Absent,
+        (Some(old), Some(seen)) if old == seen => DigestObservation::Old,
+        _ => DigestObservation::Other,
+    }
+}

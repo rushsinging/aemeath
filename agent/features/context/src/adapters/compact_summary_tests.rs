@@ -199,7 +199,7 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let calls = self.calls.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 Ok(text_output(typed_response_for_request(&request.messages)))
             })
@@ -280,7 +280,7 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
     impl BulkyFactsGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let text = request
                     .messages
                     .first()
@@ -397,7 +397,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let calls = self.calls.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let _ = request.messages;
                 Ok(text_output(typed_response_for_request(&request.messages)))
@@ -800,7 +800,7 @@ async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
     impl FlakyChunkGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .first()
@@ -1406,7 +1406,7 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let map_calls = self.map_calls.clone();
             let forbidden_full_checkpoint_calls = self.forbidden_full_checkpoint_calls.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .first()
@@ -1485,7 +1485,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
             let current = self.current.clone();
             let max_concurrent = self.max_concurrent.clone();
             let call_count = self.call_count.clone();
-            provider::test_support::scripted_llm_async(move |request| {
+            testkit::provider::scripted_llm_async(move |request| {
                 let current = current.clone();
                 let max_concurrent = max_concurrent.clone();
                 let call_count = call_count.clone();
@@ -1582,7 +1582,7 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let call_count = self.call_count.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 call_count.fetch_add(1, Ordering::SeqCst);
                 let text = request
                     .messages
@@ -1652,7 +1652,7 @@ impl MockGenerator {
     fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
         let text = self.text.clone();
         let requests = self.requests.clone();
-        provider::test_support::scripted_llm(move |request| {
+        testkit::provider::scripted_llm(move |request| {
             requests.lock().unwrap().push(
                 request
                     .messages
@@ -1715,7 +1715,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
     impl CancelledGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |_request| {
+            testkit::provider::scripted_llm(move |_request| {
                 Err(provider::ProviderError::cancelled())
             })
         }
@@ -1750,7 +1750,7 @@ async fn compact_falls_back_when_generator_errors() {
     impl FailingGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |_request| {
+            testkit::provider::scripted_llm(move |_request| {
                 Err(provider::ProviderError::fatal(
                     provider::ProviderErrorKind::UpstreamUnavailable,
                     "simulated LLM failure",
@@ -1855,7 +1855,7 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let calls = self.calls.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let text = request
                     .messages
@@ -1936,7 +1936,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     impl EchoGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 Ok(text_output(typed_response_for_request(&request.messages)))
             })
         }
@@ -2023,7 +2023,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     impl EchoGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 Ok(text_output(typed_response_for_request(&request.messages)))
             })
         }
@@ -2085,7 +2085,7 @@ async fn empty_single_map_retries_once_with_original_history() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let requests = self.requests.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .iter()
@@ -2157,7 +2157,7 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let empty_calls = self.empty_calls.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .iter()
@@ -2226,7 +2226,7 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
     impl SuccessfulMapGenerator {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-            provider::test_support::scripted_llm(move |_request| Ok(text_output(VALID_MAP_FACTS)))
+            testkit::provider::scripted_llm(move |_request| Ok(text_output(VALID_MAP_FACTS)))
         }
     }
 
@@ -2278,7 +2278,7 @@ async fn partial_map_fallback_preserves_previous_constraints() {
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let first_chunk_calls = self.first_chunk_calls.clone();
             let previous_facts = self.previous_facts.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .iter()
@@ -2344,7 +2344,7 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let requests = self.requests.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .first()
@@ -2413,7 +2413,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let full_checkpoint_calls = self.0.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .first()
@@ -2472,7 +2472,7 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let calls = self.calls.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let prompt = request
                     .messages
@@ -2566,7 +2566,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let refresh_calls = self.refresh_calls.clone();
             let repair_seen = self.repair_seen.clone();
-            provider::test_support::scripted_llm(move |request| {
+            testkit::provider::scripted_llm(move |request| {
                 let prompt = request
                     .messages
                     .first()
@@ -2645,7 +2645,7 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let calls = self.calls.clone();
             let cancel = self.cancel.clone();
-            provider::test_support::scripted_llm(move |_request| {
+            testkit::provider::scripted_llm(move |_request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 cancel.cancel();
                 Ok(text_output(r#"{"facts":"not-an-array"}"#))
@@ -2691,7 +2691,7 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
         /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
         fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
             let calls = self.0.clone();
-            provider::test_support::scripted_llm(move |_request| {
+            testkit::provider::scripted_llm(move |_request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 Ok(text_output(r#"{"facts":"not-an-array"}"#))
             })
@@ -2828,7 +2828,7 @@ struct FactsWithoutObjective;
 impl FactsWithoutObjective {
     /// #2146：LlmInvokePort 只允许 provider 实现；测试经脚本化端口。
     fn port(&self) -> std::sync::Arc<dyn provider::LlmInvokePort> {
-        provider::test_support::scripted_llm(move |request| {
+        testkit::provider::scripted_llm(move |request| {
             let text = request
                 .messages
                 .first()

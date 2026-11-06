@@ -1,9 +1,11 @@
-//! Policy 测试实现面（#2146 实现权治理：Policy 实现权归本 crate，
-//! 跨 crate 测试经此获得替身；生产不编译）。
+//! policy 测试替身（#2146 治理后统一由 testkit 维护）。
+//!
+//! Policy 实现权归 policy crate，跨 crate 测试经本模块获得替身；
+//! 消费方经 `[dev-dependencies] testkit` 引用，不进生产依赖图。
 
 use std::sync::Arc;
 
-use crate::domain::{Policy, PolicyDecisionData, PolicyModeData, PolicyRequestData};
+use policy::{Policy, PolicyDecisionData, PolicyModeData, PolicyRequestData};
 
 /// 脚本化 Policy：evaluate 按脚本，mode 固定。
 pub fn scripted_policy(
@@ -37,6 +39,3 @@ pub fn allow_all_standard() -> Arc<dyn Policy> {
         PolicyModeData::Standard,
     )
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for ScriptedPolicy {}

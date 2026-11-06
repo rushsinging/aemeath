@@ -825,9 +825,8 @@ fn factory_assembled_context_event_sink_is_real_not_noop() {
 fn scoring_slots_preserve_independent_identity_per_accessor() {
     use std::sync::Arc;
 
-    // #2146：ScoringPort 实现权归 systemone crate。
-    let noop_scoring =
-        || systemone::test_support::scripted_scoring(|_state, _questions| Ok(Vec::new()));
+    // ScoringPort 替身：经 testkit::systemone 构造。
+    let noop_scoring = || testkit::systemone::scripted_scoring(|_state, _questions| Ok(Vec::new()));
     let recall_port: Arc<dyn systemone::ScoringPort> = noop_scoring();
     let skill_match_port: Arc<dyn systemone::ScoringPort> = noop_scoring();
     let fixture = SessionRunFixture::builder()

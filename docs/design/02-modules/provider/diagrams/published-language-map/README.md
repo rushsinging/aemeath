@@ -26,6 +26,13 @@
   因此 re-export 不会被误算为消费；排除 provider crate 自身文件。
 - 职责（duty）、分组、groupChains 为人工编辑内容。
 
+## 实现权与测试替身口径（2026-11-02）
+
+不 sealed、不逐条登记：定义方只提供 trait + 生产 adapter；跨 crate 测试替身统一在
+`agent/testing/testkit` 维护（消费方经 `[dev-dependencies] testkit` 引用），各 crate
+`src/test_support.rs` 通道由守卫 `pattern.pl.fake-impl-location` 禁止；生产实现方向由
+`dependency.workspace-matrix` 管。详见 `06-ports-and-adapters.md §2.4`。
+
 ## 重新生成
 
 ```bash

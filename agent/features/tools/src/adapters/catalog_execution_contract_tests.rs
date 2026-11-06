@@ -675,9 +675,7 @@ fn context_for_run_profile_cancellation_and_selection(
     cancellation: Arc<dyn CancellationSignal>,
     selection: ToolSelection,
 ) -> ToolExecutionContext {
-    let workspace = Arc::new(project::test_support::FakeWorkspace::new(
-        std::env::temp_dir(),
-    ));
+    let workspace = Arc::new(testkit::project::FakeWorkspace::new(std::env::temp_dir()));
     let scope = ExecutionScope::builder(
         run_id,
         workspace.workspace_id(),

@@ -15,12 +15,12 @@ use super::*;
 use crate::domain::Language;
 use share::ids::InteractionRequestId;
 
-/// #2146：MemoryPort 实现权归 memory crate；注入替身经其 test_support。
+/// MemoryPort 替身：经 testkit::memory 构造。
 fn memory_test_injection(
     mode: MemoryRetrievalMode,
     hits: Vec<MemorySearchHit>,
-) -> Arc<memory::test_support::InjectionOnlyMemory> {
-    Arc::new(memory::test_support::InjectionOnlyMemory::new(
+) -> Arc<testkit::memory::InjectionOnlyMemory> {
+    Arc::new(testkit::memory::InjectionOnlyMemory::new(
         MemorySearchResult { mode, hits },
     ))
 }

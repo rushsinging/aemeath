@@ -312,7 +312,7 @@ fn spawn_calls(
                 &ctx,
             ),
             tool_result_materializer:
-                crate::application::tool::test_support::test_tool_result_materializer(),
+                crate::application::tool::fakes::test_tool_result_materializer(),
             committed_side_effects: Default::default(),
             runtime_cancellation: cancel.clone(),
             background_threshold: None,

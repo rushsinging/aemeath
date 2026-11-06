@@ -36,6 +36,3 @@ impl ScoringPort for NullScoringAdapter {
 #[cfg(test)]
 #[path = "null_tests.rs"]
 mod tests;
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for NullScoringAdapter {}

@@ -164,7 +164,7 @@ fn build_reflection_port(harness: &CompactHarness) -> RuntimeReflection<'_> {
 /// reflection port (三者经 `material_slot` 共享 PreCompact 材料)。
 struct CompactHarness {
     adapter: ReflectionTaskAdapter,
-    stub: Arc<context::test_support::StubContextService>,
+    stub: Arc<testkit::context::StubContextService>,
     runtime_context: crate::application::run::context::RuntimeContext,
     /// 记录型反思历史；注入非记录实现的构造（`with_history`）时为 None。
     reflection_history: Option<Arc<RecordingReflectionHistory>>,
@@ -214,11 +214,9 @@ impl CompactHarness {
         recording_history: Option<Arc<RecordingReflectionHistory>>,
     ) -> Self {
         let adapter = production_adapter();
-        // #2146：Context 四端口实现权归 context crate；读路径失败 + compact
-        // 结果可配置替身经其 test_support（take 一次语义一致）。
-        let stub = std::sync::Arc::new(context::test_support::StubContextService::unavailable(
-            "stub",
-        ));
+        // 读路径失败 + compact
+        // 结果可配置替身经 testkit（take 一次语义一致）。
+        let stub = std::sync::Arc::new(testkit::context::StubContextService::unavailable("stub"));
         stub.set_compact_outcome(outcome);
         let binding = pre_compact_test_binding();
         let usage_sink = Arc::new(RecordingUsageSink::default());
@@ -328,7 +326,7 @@ impl memory::api::ReflectionHistoryStore for RecordingReflectionHistory {
 /// Build a `ProviderBindingData` whose provider returns a parseable reflection
 /// response so `submit_complete` can drain the adapter to a terminal state.
 fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBindingData> {
-    crate::application::reflection::test_support::static_reflection_binding()
+    crate::application::reflection::fakes::static_reflection_binding()
 }
 
 fn committed_outcome() -> CompactOutcome {

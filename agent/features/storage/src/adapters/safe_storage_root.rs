@@ -1,3 +1,4 @@
+use super::error_map::{map_io, reject_symlink};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -41,7 +42,7 @@ pub struct SafeStorageRoot {
 }
 
 impl SafeStorageRoot {
-    pub fn open(root: impl AsRef<Path>) -> Result<Self, StorageError> {
+    pub fn open(root: impl AsRef<Path>) -> Result<Self, share::error::DomainError> {
         std::fs::create_dir_all(root.as_ref()).map_err(map_io)?;
         let dir = Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(map_io)?;
         Ok(Self { dir: Arc::new(dir) })
@@ -50,14 +51,14 @@ impl SafeStorageRoot {
     pub fn ensure_dir(
         &self,
         segments: &[SafePathSegmentData],
-    ) -> Result<SafeStorageDir, StorageError> {
+    ) -> Result<SafeStorageDir, share::error::DomainError> {
         let mut current = self.dir.try_clone().map_err(map_io)?;
         for segment in segments {
             reject_symlink(&current, Path::new(segment.as_str()))?;
             match current.create_dir(segment.as_str()) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(map_io(error)),
+                Err(error) => return Err(share::error::DomainError::from(map_io(error))),
             }
             reject_symlink(&current, Path::new(segment.as_str()))?;
             current = current.open_dir(segment.as_str()).map_err(map_io)?;
@@ -78,20 +79,20 @@ impl SafeStorageDir {
         &self,
         name: &SafePathSegmentData,
         options: SafeOpenOptions,
-    ) -> Result<std::fs::File, StorageError> {
+    ) -> Result<std::fs::File, share::error::DomainError> {
         reject_regular_file_symlink(&self.dir, name)?;
         let options = cap_options(options, false);
         self.dir
             .open_with(name.as_str(), &options)
             .map(cap_std::fs::File::into_std)
-            .map_err(map_io)
+            .map_err(|error| share::error::DomainError::from(map_io(error)))
     }
 
     pub fn create_or_open(
         &self,
         name: &SafePathSegmentData,
         options: SafeOpenOptions,
-    ) -> Result<std::fs::File, StorageError> {
+    ) -> Result<std::fs::File, share::error::DomainError> {
         reject_regular_file_symlink(&self.dir, name)?;
         let options = cap_options(options, true);
         let file = self
@@ -103,7 +104,7 @@ impl SafeStorageDir {
         Ok(file)
     }
 
-    pub fn entries(&self) -> Result<Vec<SafeStorageEntryData>, StorageError> {
+    pub fn entries(&self) -> Result<Vec<SafeStorageEntryData>, share::error::DomainError> {
         let mut entries = Vec::new();
         for entry in self.dir.entries().map_err(map_io)? {
             let entry = entry.map_err(map_io)?;
@@ -132,9 +133,11 @@ impl SafeStorageDir {
     /// 删除目录内的普通文件（GC 收口用）。安全口径与 [`Self::create_or_open`]
     /// 对齐：符号链接、非常规文件一律拒收（`InvalidKey`），文件系统错误按
     /// [`map_io`] 归类；文件不存在返回 `Io` 错误。
-    pub fn remove_file(&self, name: &SafePathSegmentData) -> Result<(), StorageError> {
+    pub fn remove_file(&self, name: &SafePathSegmentData) -> Result<(), share::error::DomainError> {
         reject_regular_file_symlink(&self.dir, name)?;
-        self.dir.remove_file(name.as_str()).map_err(map_io)
+        self.dir
+            .remove_file(name.as_str())
+            .map_err(|error| share::error::DomainError::from(map_io(error)))
     }
 }
 
@@ -159,28 +162,6 @@ fn reject_regular_file_symlink(dir: &Dir, name: &SafePathSegmentData) -> Result<
         Err(error) => Err(map_io(error)),
     }
 }
-
-fn reject_symlink(dir: &Dir, path: &Path) -> Result<(), StorageError> {
-    match dir.symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(StorageError::new(
-            StorageErrorKind::InvalidKey,
-            "路径目标是符号链接",
-        )),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(map_io(error)),
-    }
-}
-
-fn map_io(error: std::io::Error) -> StorageError {
-    let kind = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        StorageErrorKind::PermissionDenied
-    } else {
-        StorageErrorKind::Io
-    };
-    StorageError::new(kind, "路径安全操作失败")
-}
-
 #[cfg(test)]
 #[path = "safe_storage_root_tests.rs"]
 mod tests;

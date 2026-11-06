@@ -119,7 +119,7 @@ impl CompactionCoordinator {
 }
 
 /// 把 Runtime 的 [`CompactProgressView`]（SDK 视图 stage）适配为 Context 的
-/// `CompactProgressFn` 闭包（#2146：实现权归 context blanket，适配经闭包）。
+/// `CompactProgressFn` 闭包。
 pub(crate) fn compact_progress_adapter(
     view: std::sync::Arc<dyn CompactProgressView>,
 ) -> std::sync::Arc<dyn context::compact::CompactProgressFn> {

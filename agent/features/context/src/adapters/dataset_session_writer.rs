@@ -4,7 +4,7 @@ use std::sync::Arc;
 use storage::{
     AtomicDatasetPort, DatasetChangeSetData, DatasetKeyData, DatasetMemberChangeData,
     DatasetMemberData, DatasetMemberReferenceData, DurabilityData, SafePathSegmentData,
-    StorageError, StorageErrorKind, StorageNamespaceData, WriteOptionsData,
+    StorageNamespaceData, WriteOptionsData,
 };
 
 use crate::domain::session::{
@@ -242,7 +242,9 @@ impl DatasetCanonicalSessionWriter {
     }
 }
 
-pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKeyData, StorageError> {
+pub(super) fn session_dataset_key(
+    session_id: &str,
+) -> Result<DatasetKeyData, share::error::DomainError> {
     DatasetKeyData::new(
         StorageNamespaceData::Session,
         vec![SafePathSegmentData::from_str(&format!(
@@ -255,7 +257,7 @@ pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKeyData, St
 pub(super) fn session_dataset_key_scoped(
     project_dir: &SafePathSegmentData,
     session_id: &str,
-) -> Result<DatasetKeyData, StorageError> {
+) -> Result<DatasetKeyData, share::error::DomainError> {
     DatasetKeyData::new(
         StorageNamespaceData::Session,
         vec![
@@ -273,7 +275,7 @@ pub(super) fn subrun_dataset_key_scoped(
     project_dir: &SafePathSegmentData,
     parent_session_id: &str,
     sub_run_id: &str,
-) -> Result<DatasetKeyData, StorageError> {
+) -> Result<DatasetKeyData, share::error::DomainError> {
     DatasetKeyData::new(
         StorageNamespaceData::Session,
         vec![
@@ -289,7 +291,9 @@ pub(super) fn subrun_dataset_key_scoped(
 /// project 目录段下，否则退回平铺（无归属信息的 session 维持旧布局）。
 ///
 /// `origin = SubRun` 的存档改落 `subruns/` 子空间（#2160 P2）。
-fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKeyData, StorageError> {
+fn dataset_key_for_session(
+    session: &CanonicalSession,
+) -> Result<DatasetKeyData, share::error::DomainError> {
     if session.metadata.origin == Some(crate::domain::session::SessionOrigin::SubRun) {
         let parent = session
             .metadata
@@ -320,7 +324,7 @@ fn dataset_key_for_plan(
     project_dir: Option<&SafePathSegmentData>,
     origin: Option<crate::domain::session::SessionOrigin>,
     parent_session_id: Option<&str>,
-) -> Result<DatasetKeyData, StorageError> {
+) -> Result<DatasetKeyData, share::error::DomainError> {
     if origin == Some(crate::domain::session::SessionOrigin::SubRun) {
         let _ = session_id;
         return match project_dir {
@@ -368,7 +372,7 @@ fn promote_missing_reuse_evidence(
 fn map_session_changes(
     manifest: &storage::DatasetManifestData,
     changes: SessionCommitPlan,
-) -> Result<DatasetChangeSetData, StorageError> {
+) -> Result<DatasetChangeSetData, share::error::DomainError> {
     let changed_members = changes
         .changed_members()
         .iter()
@@ -378,7 +382,7 @@ fn map_session_changes(
                 member.bytes().to_vec(),
             )))
         })
-        .collect::<Result<Vec<_>, StorageError>>()?;
+        .collect::<Result<Vec<_>, share::error::DomainError>>()?;
     let reused_members = changes
         .reused_members()
         .iter()
@@ -389,20 +393,20 @@ fn map_session_changes(
                 .cloned()
                 .ok_or_else(|| missing_reuse_evidence(name))
         })
-        .collect::<Result<Vec<DatasetMemberReferenceData>, StorageError>>()?;
+        .collect::<Result<Vec<DatasetMemberReferenceData>, share::error::DomainError>>()?;
     let removed_members = changes
         .removed_members()
         .iter()
         .map(|name| SafePathSegmentData::from_str(name))
-        .collect::<Result<Vec<_>, StorageError>>()?;
+        .collect::<Result<Vec<_>, share::error::DomainError>>()?;
 
     DatasetChangeSetData::new(manifest.revision().clone(), changed_members, reused_members)?
         .with_removed_members(removed_members)
 }
 
-fn missing_reuse_evidence(name: &str) -> StorageError {
-    StorageError::new(
-        StorageErrorKind::ConcurrentWrite,
+fn missing_reuse_evidence(name: &str) -> share::error::DomainError {
+    share::error::DomainError::invalid(
+        "context",
         format!("Session 待复用成员不属于当前数据集修订号：{name}"),
     )
 }

@@ -3,7 +3,7 @@ use super::*;
 use crate::application::loop_engine::llm_log::{
     build_llm_output_log, build_named_tool_result_log, build_tool_call_log, build_tool_result_log,
 };
-use crate::application::model::test_support::{
+use crate::application::model::fakes::{
     advance_until_retry_condition, empty_completion, successful_completion,
     ScriptedInvocationProvider, ScriptedLlmProvider, RETRY_ADVANCE_LIMITS,
 };
@@ -204,16 +204,15 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (parent_source, _parent_guard) = test_parent_source();
     let runner = CliAgentRunner {
-        factory: crate::application::model::test_support::constant_factory(
-            crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        factory: crate::application::model::fakes::constant_factory(
+            crate::application::model::fakes::binding_from_llm_provider(Arc::new(
                 ContextRecordingProvider { seen: seen.clone() },
             )),
         ),
         active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer:
-            crate::application::tool::test_support::test_tool_result_materializer(),
+        tool_result_materializer: crate::application::tool::fakes::test_tool_result_materializer(),
         workspace: crate::application::run::workspace_test_support::runtime_workspace(
             &crate::application::run::workspace_test_support::test_tool_execution_context(
                 std::env::temp_dir(),
@@ -1006,11 +1005,10 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
             }));
 
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
-    let binding = crate::application::model::test_support::binding_from_llm_provider(Arc::new(
-        ErrorProvider {
+    let binding =
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(ErrorProvider {
             error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
-        },
-    ));
+        }));
     runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
     let ctx = test_ctx();
 
@@ -1091,11 +1089,10 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
                 context: Arc::new(parent_ctx),
             }));
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
-    let binding = crate::application::model::test_support::binding_from_llm_provider(Arc::new(
-        ErrorProvider {
+    let binding =
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(ErrorProvider {
             error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
-        },
-    ));
+        }));
     runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
     let ctx = test_ctx();
 
@@ -1161,11 +1158,10 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
             }));
 
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
-    let binding = crate::application::model::test_support::binding_from_llm_provider(Arc::new(
-        ErrorProvider {
+    let binding =
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(ErrorProvider {
             error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
-        },
-    ));
+        }));
     runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
     let ctx = test_ctx();
 
@@ -1207,12 +1203,10 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     factory.register(ReadFixtureTool);
     let (mut runner, _guard) =
         test_runner(ProviderError::fatal(ProviderErrorKind::Network, "unused"));
-    runner.factory = crate::application::model::test_support::constant_factory(
-        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
-            CapturingProvider {
-                captured: captured.clone(),
-            },
-        )),
+    runner.factory = crate::application::model::fakes::constant_factory(
+        crate::application::model::fakes::binding_from_llm_provider(Arc::new(CapturingProvider {
+            captured: captured.clone(),
+        })),
     );
     let ports = factory.build(test_ctx());
     runner.skill_catalog = tools::composition::wire_skills().catalog();
@@ -1648,8 +1642,8 @@ fn test_runner_with_provider(
     let (src, guard) = test_parent_source();
     (
         CliAgentRunner {
-            factory: crate::application::model::test_support::constant_factory(
-                crate::application::model::test_support::binding_from_llm_provider(provider),
+            factory: crate::application::model::fakes::constant_factory(
+                crate::application::model::fakes::binding_from_llm_provider(provider),
             ),
             active_run: Arc::new(
                 crate::application::run::active_registry::wire_active_run_registry(),
@@ -1657,7 +1651,7 @@ fn test_runner_with_provider(
             max_tool_concurrency: 10,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             tool_result_materializer:
-                crate::application::tool::test_support::test_tool_result_materializer(),
+                crate::application::tool::fakes::test_tool_result_materializer(),
             workspace: crate::application::run::workspace_test_support::runtime_workspace(
                 &crate::application::run::workspace_test_support::test_tool_execution_context(
                     std::env::temp_dir(),

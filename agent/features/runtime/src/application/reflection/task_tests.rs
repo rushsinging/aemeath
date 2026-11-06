@@ -394,7 +394,7 @@ async fn each_configuration_gate_reports_its_own_reason() {
                 "system".to_string(),
                 "en".to_string(),
                 std::sync::Arc::new(memory::api::NoOpMemory),
-                crate::application::reflection::test_support::noop_reflection_history(),
+                crate::application::reflection::fakes::noop_reflection_history(),
                 None,
             )
             .await;
@@ -466,7 +466,7 @@ async fn succeeded_run_persists_coverage_end_cursor() {
         Ok(successful_payload())
     });
     let history = RecordingReflectionHistory::default();
-    let binding = crate::application::reflection::test_support::static_reflection_binding();
+    let binding = crate::application::reflection::fakes::static_reflection_binding();
     let mut request = ReflectionTaskRequest::new(
         ReflectionTaskTrigger::Manual,
         vec![share::message::Message::user("delta")],
@@ -650,7 +650,7 @@ async fn all_triggers_now_dispatch_detached_immediately() {
                 Ok(successful_payload())
             });
         let history = RecordingReflectionHistory::default();
-        let binding = crate::application::reflection::test_support::static_reflection_binding();
+        let binding = crate::application::reflection::fakes::static_reflection_binding();
 
         let outcome = adapter
             .run_complete(
@@ -689,7 +689,7 @@ async fn run_complete_reports_busy_skipped_synchronously_when_slot_held() {
     let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
         Ok(successful_payload())
     });
-    let binding = crate::application::reflection::test_support::static_reflection_binding();
+    let binding = crate::application::reflection::fakes::static_reflection_binding();
 
     // 占住单槽：guard 存活期间下一次 run_complete 必须同步 BusySkipped。
     let _slot_guard = adapter
@@ -707,7 +707,7 @@ async fn run_complete_reports_busy_skipped_synchronously_when_slot_held() {
             "system".to_string(),
             "en".to_string(),
             std::sync::Arc::new(memory::api::NoOpMemory),
-            crate::application::reflection::test_support::noop_reflection_history(),
+            crate::application::reflection::fakes::noop_reflection_history(),
             None,
         )
         .await;
@@ -726,7 +726,7 @@ async fn detached_run_ignores_cancelled_caller_token() {
         Ok(successful_payload())
     });
     let history = RecordingReflectionHistory::default();
-    let binding = crate::application::reflection::test_support::static_reflection_binding();
+    let binding = crate::application::reflection::fakes::static_reflection_binding();
     let cancel = CancellationToken::new();
     cancel.cancel();
 

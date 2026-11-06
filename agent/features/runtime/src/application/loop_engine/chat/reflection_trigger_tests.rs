@@ -74,7 +74,7 @@ async fn latest_coverage_cursor_picks_newest_succeeded_with_cursor() {
     use memory::api::ReflectionHistoryStore;
     use std::sync::Arc;
     let store: Arc<dyn ReflectionHistoryStore> =
-        Arc::new(crate::application::reflection::test_support::RecordingHistory::default());
+        Arc::new(crate::application::reflection::fakes::RecordingHistory::default());
     // 旧→新：无游标 Succeeded、带游标 Succeeded(10)、带游标 Failed（不得采用）、
     // 最新 Succeeded 带游标(20)
     let mut r1 = ReflectionRecord::running("r1", 1, ReflectionTrigger::Interval);
@@ -106,7 +106,7 @@ async fn latest_coverage_cursor_without_any_cursor_is_none() {
     use memory::api::ReflectionHistoryStore;
     use std::sync::Arc;
     let store: Arc<dyn ReflectionHistoryStore> =
-        Arc::new(crate::application::reflection::test_support::RecordingHistory::default());
+        Arc::new(crate::application::reflection::fakes::RecordingHistory::default());
     let mut record = ReflectionRecord::running("r1", 1, ReflectionTrigger::Manual);
     record.status = memory::api::reflection::ReflectionStatus::Succeeded;
     store.upsert(&record).await.unwrap();

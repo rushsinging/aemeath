@@ -1,9 +1,7 @@
 use std::io::{Read, Write};
 use std::str::FromStr;
 
-use storage::{
-    SafeOpenOptions, SafePathSegmentData, SafeStorageFileType, SafeStorageRoot, StorageErrorKind,
-};
+use storage::{SafeOpenOptions, SafePathSegmentData, SafeStorageFileType, SafeStorageRoot};
 
 fn segment(value: &str) -> SafePathSegmentData {
     SafePathSegmentData::from_str(value).expect("safe path segment")
@@ -42,7 +40,7 @@ fn open_when_parent_is_regular_file_returns_io_without_path_leak() {
         Err(error) => error,
     };
 
-    assert_eq!(error.kind(), &StorageErrorKind::Io);
+    assert_eq!(error.category(), share::error::ErrorCategory::Storage);
     assert!(
         !error
             .to_string()
@@ -101,7 +99,7 @@ fn open_existing_when_missing_returns_io_without_creating_file() {
         )
         .expect_err("missing file must not be created");
 
-    assert_eq!(error.kind(), &StorageErrorKind::Io);
+    assert_eq!(error.category(), share::error::ErrorCategory::Storage);
     assert!(!temp.path().join("usage/missing.jsonl").exists());
 }
 
@@ -121,7 +119,7 @@ fn open_existing_rejects_directory_target() {
             },
         )
         .expect_err("directory must not be opened as a regular file");
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
 }
 
 #[test]
@@ -164,7 +162,7 @@ fn ensure_dir_rejects_intermediate_symlink_without_touching_outside() {
         Ok(_) => panic!("intermediate symlink must fail closed"),
         Err(error) => error,
     };
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     assert!(!outside.path().join("daily").exists());
 }
 
@@ -191,6 +189,6 @@ fn regular_file_operations_reject_symlinks_and_entries_skip_them() {
         )
         .expect_err("symlink must fail closed");
 
-    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    assert_eq!(error.category(), share::error::ErrorCategory::Invalid);
     assert!(dir.entries().expect("entries").is_empty());
 }

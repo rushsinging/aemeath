@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use context::session::SessionMetadata;
-use context::test_support::AtomicBlobSessionManagement;
 use context::SessionManagementPort;
 use memory::api::{MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use share::config::domain::snapshot::ConfigRevision;
@@ -55,7 +54,7 @@ struct TestEnv {
     #[allow(dead_code)]
     temp: tempfile::TempDir,
     workspace: project::Workspace,
-    session_management: Arc<AtomicBlobSessionManagement>,
+    session_management: Arc<dyn SessionManagementPort>,
     dependencies: Option<SessionSwitchDependencies>,
     #[allow(dead_code)]
     fail_switch: Option<Arc<SwitchableOpener>>,
@@ -82,15 +81,15 @@ impl TestEnv {
         .await
         .expect("wire config");
         let task_wiring = task::wire_task();
-        let session_management = Arc::new(AtomicBlobSessionManagement::new(
+        let session_management = context::wire_session_management(
             storage::wire_file_system_blob(temp.path().join("agents"))
                 .expect("create session blob"),
-        ));
+        );
         let memory_opener: Box<dyn MemoryOpener> = match &fail_switch {
             Some(switch) => Box::new(SwitchableOpener {
                 fail: Arc::clone(&switch.fail),
             }),
-            None => Box::new(context::test_support::InMemoryTestOpener),
+            None => Box::new(testkit::context::InMemoryTestOpener),
         };
         let dependencies = SessionSwitchDependencies {
             workspace: workspace.clone(),
@@ -100,7 +99,7 @@ impl TestEnv {
             config_reader: config.reader(),
             config_participant: config.participant(),
             memory_opener,
-            session_management: Arc::clone(&session_management) as Arc<dyn SessionManagementPort>,
+            session_management: Arc::clone(&session_management),
             context_factory: Arc::new(
                 context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
                     .with_persistence(task_wiring.persist(), workspace.persist()),

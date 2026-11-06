@@ -14,11 +14,6 @@
 //! 集成测试 20 文件（9782 行）搬 src/integration_tests/。
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
-/// 实现密封基建（#2146 实现权治理）。
-pub(crate) mod sealed {
-    pub trait Sealed {}
-}
-
 /// Context Management crate — 对话历史容器、上下文压缩、token 预算、提示组装、记忆注入。
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
@@ -26,19 +21,20 @@ mod constants;
 pub(crate) use constants::LOG_TARGET;
 
 mod adapters;
-// dev 门控契约测试经 crate 根消费（canonical_session_repository / isolated_context_with_skill）。
-#[cfg(any(test, feature = "dev"))]
-// workspace feature 统一下 dev 门控测试不参与 clippy 编译，显式标注未用豁免。
+// 契约测试经 crate 根消费（canonical_session_repository / isolated_context_with_skill）。
+#[cfg(test)]
+// 测试编译下部分导入仅特定 test target 使用，显式标注未用豁免。
 #[allow(unused_imports)]
 pub(crate) use adapters::capture_session_lifecycle;
 mod application;
 mod domain;
 mod ports;
 
-#[cfg(any(test, feature = "dev"))]
 #[cfg(test)]
 pub(crate) use adapters::wire_isolated_context_with_skill;
-pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_skills};
+pub use adapters::{
+    wire_isolated_context, wire_isolated_context_with_workspace_skills, wire_session_management,
+};
 pub use adapters::{
     MainContextFactory, NoOpCanonicalSessionWriter, SubRunContextFactory, SubRunOriginData,
 };
@@ -53,10 +49,6 @@ pub use domain::session::{
 };
 pub use ports::SessionManagementPort;
 pub use ports::SubRunContextFactoryPort;
-
-// 跨 crate 测试支撑（cfg test / dev）。
-#[cfg(any(test, feature = "dev"))]
-pub use application::test_support;
 
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
 #[cfg(test)]

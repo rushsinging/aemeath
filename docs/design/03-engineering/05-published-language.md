@@ -33,6 +33,15 @@
 - `facade.<crate>.root-exports`——白名单外的 crate 根导出即违规（防回潮）；
 - `construction.cross-bc.fail-closed`——未登记的跨 BC `wire_*` 调用即违规（装配点收敛；新 wire 工厂须同步登记 `construction_symbols`，`kind: "wire"`）。
 
+### 实现权治理（与 §二 命名守卫互补）
+
+导出语法管「符号长什么样」，实现权管「trait 允许谁实现」。2026-11-02 拍板终态：
+**不 sealed、不逐条登记**——定义方只提供 trait + 生产 adapter；测试替身统一在
+`agent/testing/testkit` 维护（消费方经 `[dev-dependencies] testkit` 引用），各 crate
+`src/test_support.rs` 通道由守卫 `pattern.pl.fake-impl-location` 禁止；生产实现方向
+由 `dependency.workspace-matrix` 管。局部内联 stub（同文件 `#[cfg(test)]`、不跨模块
+导出）允许。详见 runtime `06-ports-and-adapters.md §2.4`。
+
 ## 三、DDD 判据（Published Language 收录五类）
 
 PL 只收 DDD 五类实体——**命令、事件、值对象、端口、工厂**。§二 的四类语法是命名形态（guard 可机检），五类是语义收录判据（评审判定）；一个根导出必须同时通过两层：形态合规，且属五类之一。五类之外的形态按下表降级处置：

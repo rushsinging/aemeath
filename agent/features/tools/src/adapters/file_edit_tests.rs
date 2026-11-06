@@ -1,7 +1,7 @@
 use super::*;
 
 fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext {
-    let builder = crate::domain::test_support::TestToolExecutionContextBuilder::new(root);
+    let builder = crate::domain::fakes::TestToolExecutionContextBuilder::new(root);
     if read_file.is_empty() {
         builder.build()
     } else {
@@ -27,15 +27,13 @@ fn test_start_line_of_match_error_when_missing() {
 }
 
 fn outside_contexts(workspace: &tempfile::TempDir) -> (ToolExecutionContext, ToolExecutionContext) {
-    let standard = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .build();
-    let allow_all = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let standard =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .build();
+    let allow_all =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
     (standard, allow_all)
 }
 
@@ -123,11 +121,10 @@ async fn file_read_outside_workspace_is_allowed_when_allow_all() {
     let outside = tempfile::tempdir().unwrap();
     let path = outside.path().join("outside.txt");
     tokio::fs::write(&path, "outside\n").await.unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
-        workspace.path().to_path_buf(),
-    )
-    .allow_all(true)
-    .build();
+    let ctx =
+        crate::domain::fakes::TestToolExecutionContextBuilder::new(workspace.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = crate::adapters::file_read::FileReadTool
         .call(serde_json::json!({ "file_path": path }), &ctx)
@@ -146,10 +143,9 @@ async fn file_edit_without_prior_read_is_allowed_when_allow_all() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sample.rs");
     tokio::fs::write(&path, "one\ntwo\n").await.unwrap();
-    let ctx =
-        crate::domain::test_support::TestToolExecutionContextBuilder::new(dir.path().to_path_buf())
-            .allow_all(true)
-            .build();
+    let ctx = crate::domain::fakes::TestToolExecutionContextBuilder::new(dir.path().to_path_buf())
+        .allow_all(true)
+        .build();
 
     let result = FileEditTool
         .call(

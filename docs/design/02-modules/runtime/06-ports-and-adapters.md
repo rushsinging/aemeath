@@ -165,22 +165,6 @@ struct ProviderBinding {
 
 Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `LlmInvokePort` 与 Provider Published Language
 
-### 2.2 PL trait 实现权登记表（#2146 治理）
-
-全仓 pub trait 按三族治理（97 个盘点）：
-
-| 族类 | 机制 | 守卫 |
-|---|---|---|
-| capability(pure) | **Sealed trait 编译期强制**（`pub(crate) mod sealed` + 超 trait 绑定；实现权物理归属定义 crate） | `pattern.pl.trait-implementation-registry` 双保险 |
-| injected-host / comp-bridge | 宿主（或 composition）实现合法，登记 `allowed_impl_crates` | 同上，按登记表校验 |
-| fake-pending（capability 有存量消费方 fake） | 66 处 fake 按登记 crate 锁死（新增未登记即违规）；收敛到定义方 test_support 后转 sealed | 同上 |
-
-登记表唯一真相源：`.agents/architecture-guard-registry.json` 的
-`pattern.pl.trait-implementation-registry`（55 条）。新增 PL trait MUST
-登记（能力端口同时加 Sealed），未登记 trait 不校验——登记即锁。，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`construction_symbols` 白名单锁定）。
-
-> **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。#1142 仍延期，**NEVER** 冒充已完成。
-
 ### 2.2 Runtime-owned InteractionPort 与交互语言
 
 ```rust
@@ -314,6 +298,35 @@ submit(trigger, owned message snapshot)
 - 后台完成**不主动**经 `EventSink` / SDK 向 TUI 投影 `ReflectionOutput`、formatted content 或完成正文。只有用户显式 `/reflect [limit]` 时才返回 newest-first 的安全 metadata/count 视图。
 - completion 与日志只能含 trigger、status、error category、token/count、duration、record id 等 metadata；**NEVER** 含 prompt、消息、Memory content、provider raw response、parsed/formatted output 或正文截断。
 - Run teardown 必须 drain 该 Run 的 Reflection slot；到结束 deadline 仍未完成时 cancel，并等待 cancellation/timeout 终态清槽后再释放 Run lease，**NEVER** 留下 detached job。adapter 自身的执行 timeout 同样只产出安全终态 metadata。
+
+
+### 2.4 PL trait 实现权与测试替身治理（2026-11-02 拍板，取代 #2146 三档制）
+
+**终态口径**：实现权不靠 sealed、也不靠逐条登记，靠「**定义方不负责 fake** +
+测试替身集中 + 依赖矩阵管方向」。
+
+| 关注点 | 机制 |
+|---|---|
+| 生产实现位置 | 由 `dependency.workspace-matrix` 管依赖方向（无位置守卫：宿主实现跨 BC 合法，如 runtime 实现 tools 定义的 `ToolCatalogPort`） |
+| 测试替身 | **统一在 `agent/testing/testkit` 维护**（本仓测试基建目录，未来 fixture/harness 同级扩展）；各 crate 经 `[dev-dependencies] testkit` 引用，不进生产依赖图 |
+| 定义方 fake 通道 | 撤销：`src/test_support.rs`（含目录形态）由守卫 `pattern.pl.fake-impl-location`（`forbidden_segments: ["test_support"]`）禁止重新出现；`dev` feature 一并删除 |
+| 局部内联 stub | 允许：同文件 `#[cfg(test)]` 内、不跨模块导出的局部替身无需进 testkit |
+
+**历史与撤销理由**（#2146 → 2026-11-02）：
+
+- #2146 引入 `Sealed` 超 trait 编译期密封（28 条）与 `impl_registry` 逐条登记
+  （54 条 / sealed·injected-host·comp-bridge·fake-pending 四档），并把存量 fake 迁入
+  定义方 `test_support`（`dev` feature 跨 crate 导出）。
+- 撤销原因：① sealed 阻止依赖方按需实现（产品级多后端/扩展点无法松绑）；② 逐条登记
+  维护成本高、登记与真实实现易漂移；③ 定义方维护 fake 造成「fake 归属错位」且需
+  `dev` feature 例外扩散；④ 位置类守卫实测会误杀 injected-host 合法宿主实现。
+- 迁移记录：#2146 的四档登记、`Sealed` 绑定与 `impl_registry` 断言已全部删除；28 个
+  跨 crate fake 迁入 testkit（148 处引用改经 `testkit::`）；定义方 `dev` feature 与
+  `test_support` 文件清零。
+
+**新增 PL trait 时**：无需任何登记动作（实现权治理随之自动适用）；测试替身加在
+testkit 对应模块。守卫真相源：`.agents/architecture-guard-registry.json` 的
+`pattern.pl.fake-impl-location`。
 
 ## 3. RuntimeContext、SessionState 与 IoC 装配
 

@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use storage::{
     AtomicBlobPort, CommitWarningData, DurabilityData, GenerationData, ReadOutcomeData,
-    SafePathSegmentData, StorageErrorKind, StorageKeyData, StorageNamespaceData, WriteOptionsData,
+    SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -679,13 +679,13 @@ impl NativeConfigStore {
     }
 }
 
-fn map_storage_error(error: storage::StorageError) -> ConfigAdapterError {
-    match error.kind() {
-        StorageErrorKind::PermissionDenied => ConfigAdapterError::PermissionDenied,
-        StorageErrorKind::UnsupportedDurability => ConfigAdapterError::UnsupportedDurability,
-        StorageErrorKind::CorruptTransaction(_) => ConfigAdapterError::CorruptTransaction,
-        StorageErrorKind::InvalidKey => ConfigAdapterError::Invalid,
-        StorageErrorKind::Io | StorageErrorKind::ConcurrentWrite => ConfigAdapterError::Io,
+/// storage 语义折叠（#1865 C）：只按 DomainError 三档做控制流，
+/// 不再依赖 storage 的实现细节 kind。
+fn map_storage_error(error: share::error::DomainError) -> ConfigAdapterError {
+    match error.category() {
+        share::error::ErrorCategory::Storage => ConfigAdapterError::Io,
+        share::error::ErrorCategory::Invalid => ConfigAdapterError::Invalid,
+        share::error::ErrorCategory::Unavailable => ConfigAdapterError::UnsupportedDurability,
     }
 }
 

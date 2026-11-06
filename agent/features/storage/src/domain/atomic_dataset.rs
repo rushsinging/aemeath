@@ -4,9 +4,7 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
-use super::{
-    CommitWarningData, SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData,
-};
+use super::{SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData};
 
 /// 计算单个成员字节参与修订号运算的领域摘要（`MEMBER_BYTES_DOMAIN`）。
 ///
@@ -32,12 +30,12 @@ impl DatasetKeyData {
     pub fn new(
         namespace: StorageNamespaceData,
         segments: Vec<SafePathSegmentData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         if segments.is_empty() {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "数据集键至少需要一个路径段",
-            ));
+            )));
         }
 
         Ok(Self {
@@ -149,7 +147,7 @@ impl DatasetChangeSetData {
         expected_revision: DatasetRevisionData,
         mut new_members: Vec<DatasetMemberChangeData>,
         mut reused_members: Vec<DatasetMemberReferenceData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         new_members.sort_by(|left, right| left.member().name().cmp(right.member().name()));
         reused_members.sort_by(|left, right| left.name.cmp(&right.name));
         let mut names = new_members
@@ -159,16 +157,16 @@ impl DatasetChangeSetData {
             .collect::<Vec<_>>();
         names.sort();
         if names.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(duplicate_member_error());
+            return Err(share::error::DomainError::from(duplicate_member_error()));
         }
         if reused_members
             .iter()
             .any(|member| member.source_revision != expected_revision)
         {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "复用成员必须来自期望的数据集修订号",
-            ));
+            )));
         }
         Ok(Self {
             expected_revision,
@@ -181,7 +179,7 @@ impl DatasetChangeSetData {
     pub fn with_removed_members(
         mut self,
         mut removed_members: Vec<SafePathSegmentData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         removed_members.sort();
         reject_duplicate_names(&removed_members)?;
         let target_names = self
@@ -194,10 +192,10 @@ impl DatasetChangeSetData {
             .iter()
             .any(|name| target_names.contains(name))
         {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "同一数据集成员不能同时保留和删除",
-            ));
+            )));
         }
         self.removed_members = removed_members;
         Ok(self)
@@ -422,19 +420,16 @@ pub enum DatasetCommitVisibilityData {
 pub struct DatasetCommitReceiptData {
     revision: DatasetRevisionData,
     visibility: DatasetCommitVisibilityData,
-    warning: Option<CommitWarningData>,
 }
 
 impl DatasetCommitReceiptData {
     pub(crate) fn committed(
         revision: DatasetRevisionData,
         visibility: DatasetCommitVisibilityData,
-        warning: Option<CommitWarningData>,
     ) -> Self {
         Self {
             revision,
             visibility,
-            warning,
         }
     }
 
@@ -444,10 +439,6 @@ impl DatasetCommitReceiptData {
 
     pub fn visibility(&self) -> DatasetCommitVisibilityData {
         self.visibility
-    }
-
-    pub fn warning(&self) -> Option<CommitWarningData> {
-        self.warning
     }
 }
 

@@ -9,7 +9,7 @@ use share::config::MemoryConfig;
 use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
-use crate::application::reflection::test_support::RecordingHistory;
+use crate::application::reflection::fakes::RecordingHistory;
 use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
@@ -19,12 +19,12 @@ type ParameterRecorder = Arc<Mutex<Vec<(ReasoningLevel, u32)>>>;
 
 fn parameter_recording_port(recorder: ParameterRecorder) -> Arc<dyn LlmInvokePort> {
     // #2146：LlmInvokePort 只允许 provider 实现；测试经 provider 脚本化端口。
-    provider::test_support::scripted_llm(move |request| {
+    testkit::provider::scripted_llm(move |request| {
         recorder
             .lock()
             .unwrap()
             .push((request.reasoning, request.max_output_tokens));
-        Ok(provider::test_support::text_stream_with_usage(
+        Ok(testkit::provider::text_stream_with_usage(
             r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
             1,
             1,

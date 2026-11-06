@@ -4,7 +4,7 @@ use crate::domain::types::tool_search::SearchItemKind;
 use crate::domain::{SkillCatalogPort, SkillDescriptor, SkillSource, SkillSourceKind};
 
 fn empty_skills() -> std::sync::Arc<dyn SkillCatalogPort> {
-    std::sync::Arc::new(crate::domain::test_support::FixedSkillCatalog(Vec::new()))
+    std::sync::Arc::new(crate::domain::fakes::FixedSkillCatalog(Vec::new()))
 }
 fn skill_descriptor(name: &str, description: &str) -> SkillDescriptor {
     SkillDescriptor::new(
@@ -107,7 +107,7 @@ impl ToolListProvider for FakeCatalog {
     }
 }
 
-/// #2146：ScoringPort 实现权归 systemone crate；可编程替身经其脚本端口。
+/// ScoringPort 替身：经 testkit::systemone 脚本端口构造。
 fn fake_scoring(
     probabilities: Option<Vec<(String, f64)>>,
     fail: bool,
@@ -117,7 +117,7 @@ fn fake_scoring(
 ) {
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let calls2 = std::sync::Arc::clone(&calls);
-    let port = systemone::test_support::scripted_scoring(move |_state, questions| {
+    let port = testkit::systemone::scripted_scoring(move |_state, questions| {
         use std::sync::atomic::Ordering;
         calls2.fetch_add(1, Ordering::SeqCst);
         assert_eq!(questions.len(), 1, "ToolSearch 单题调用");
@@ -156,7 +156,7 @@ fn search_context(
     .build();
     let ports = ToolExecutionPorts::new(
         Arc::new(TestCancellation),
-        WorkspaceReadAccess::new(Arc::new(project::test_support::FakeWorkspace::new(
+        WorkspaceReadAccess::new(Arc::new(testkit::project::FakeWorkspace::new(
             std::env::temp_dir(),
         ))),
         Arc::new(MutexReadSet(Arc::new(std::sync::Mutex::new(
@@ -267,9 +267,9 @@ async fn no_catalog_returns_empty_for_nonempty_query_without_skills() {
     // 生产回归：未注入 catalog 时非空 query 不得误命中。
     let ports = crate::domain::ToolExecutionPorts::new(
         Arc::new(TestCancellation),
-        crate::domain::WorkspaceReadAccess::new(Arc::new(
-            project::test_support::FakeWorkspace::new(std::env::temp_dir()),
-        )),
+        crate::domain::WorkspaceReadAccess::new(Arc::new(testkit::project::FakeWorkspace::new(
+            std::env::temp_dir(),
+        ))),
         Arc::new(crate::domain::MutexReadSet(Arc::new(
             std::sync::Mutex::new(Default::default()),
         ))),
@@ -300,7 +300,7 @@ async fn lexical_recall_without_scoring_hits_tools_and_skills() {
             make_tool("WebFetch", "Fetch a URL and return content"),
         ],
     });
-    let skills = Arc::new(crate::domain::test_support::FixedSkillCatalog(vec![
+    let skills = Arc::new(crate::domain::fakes::FixedSkillCatalog(vec![
         skill_descriptor(
             "cmux-browser",
             "Automate cmux webview browser surfaces with snapshots",

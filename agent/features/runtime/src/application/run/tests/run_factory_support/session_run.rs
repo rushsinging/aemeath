@@ -314,8 +314,8 @@ impl SessionRunFixtureBuilder {
                 )),
                 config_reader: config_service.clone(),
                 config_participant: config_service,
-                memory_opener: Box::new(context::test_support::InMemoryTestOpener),
-                session_management: Arc::new(context::test_support::UnavailableSessionManagement),
+                memory_opener: Box::new(testkit::context::InMemoryTestOpener),
+                session_management: Arc::new(testkit::context::UnavailableSessionManagement),
                 initial_session: {
                     let mut session = context::session::CanonicalSession::empty(
                         session_snapshot.session_id().to_string(),

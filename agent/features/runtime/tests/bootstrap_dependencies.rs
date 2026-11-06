@@ -9,7 +9,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
         spec: runtime::ProviderBuildSpecData,
     ) -> Result<runtime::ProviderBindingData, provider::ProviderError> {
         // #2146：LlmInvokePort 只允许 provider 实现；测试用脚本化端口。
-        let port = provider::test_support::scripted_llm(|_request| {
+        let port = testkit::provider::scripted_llm(|_request| {
             Err(provider::ProviderError::fatal(
                 provider::ProviderErrorKind::UpstreamUnavailable,
                 "unused test provider",
@@ -177,7 +177,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         storage::SafeStorageRoot::open(temp.path()).unwrap(),
     );
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::test_support::UnavailableSessionManagement);
+        Arc::new(testkit::context::UnavailableSessionManagement);
     let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task.persist())),

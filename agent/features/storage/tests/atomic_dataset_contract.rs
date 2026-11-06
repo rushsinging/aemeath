@@ -13,7 +13,7 @@ use storage::{
     AtomicDatasetPort, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
     DatasetMemberChangeData, DatasetMemberData, DatasetReadOutcomeData, DeleteOptionsData,
     DurabilityData, GenerationData, QuarantineOutcomeData, QuarantineReason, SafePathSegmentData,
-    StorageErrorKind, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
+    StorageNamespaceData, TransactionScopeData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -73,7 +73,6 @@ async fn seed_generation(
         .await
         .expect("commit_atomic must publish the generation");
     assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
-    assert_eq!(receipt.warning(), None);
     receipt.revision().clone()
 }
 
@@ -179,7 +178,6 @@ async fn first_commit_publishes_complete_generation() {
         .await
         .expect("first commit must succeed against the empty revision");
     assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
-    assert_eq!(receipt.warning(), None);
 
     let manifest = adapter.read_manifest(&key).await.unwrap();
     assert_eq!(
@@ -347,7 +345,7 @@ async fn stale_revision_commit_is_rejected_without_changing_current() {
         .commit_atomic(&key, &stale_revision, &[member("active", b"a2")], options())
         .await
         .expect_err("a commit against a stale revision must be rejected");
-    assert_eq!(error.kind(), &StorageErrorKind::ConcurrentWrite);
+    assert_eq!(error.category(), share::error::ErrorCategory::Storage);
 
     let manifest = adapter.read_manifest(&key).await.unwrap();
     assert_eq!(

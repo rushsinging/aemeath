@@ -241,10 +241,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         Ok(())
     }
 }
-
-// #2146 密封解锁。
-impl crate::sealed::Sealed for DatasetSessionManagement {}
-
+// #2163（main）：sub run dataset 清理随 main 合入；sealed 已随实现权治理移除。
 impl DatasetSessionManagement {
     /// 删除 `subruns/<parent_session_id>/` 下的全部 sub run dataset。
     ///

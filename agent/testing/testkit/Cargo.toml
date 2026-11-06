@@ -1,0 +1,29 @@
+[package]
+name = "testkit"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# 测试替身集中营：定义方 crate 不提供 fake；各 crate 经 [dev-dependencies]
+# 引用本 crate（不进生产依赖图）。新测试基建（fixture/harness 等）加在
+# agent/testing/ 下，本 crate 只收跨 crate 共享的替身。
+[dependencies]
+async-trait = { workspace = true }
+context = { path = "../../features/context" }
+futures = "0.3"
+futures-util = { workspace = true }
+memory = { path = "../../features/memory" }
+policy = { path = "../../features/policy" }
+project = { path = "../../features/project" }
+provider = { path = "../../features/provider" }
+runtime = { path = "../../features/runtime" }
+sdk = { path = "../../../packages/sdk" }
+serde_json = { workspace = true }
+share = { path = "../../shared" }
+storage = { path = "../../features/storage" }
+systemone = { path = "../../features/systemone" }
+tokio = { workspace = true }
+tools = { path = "../../features/tools" }
+
+[lints]
+workspace = true

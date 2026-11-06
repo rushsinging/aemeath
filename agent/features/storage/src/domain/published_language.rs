@@ -18,22 +18,12 @@ impl DurabilityData {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PreviousPolicy {
-    Retain,
-    Discard,
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum StorageNamespaceData {
     Session,
     Memory,
-    TaskData,
-    History,
     ToolResult,
-    AuditUsage,
     Config,
-    Workspace,
     /// #252：后台进程账本（session 级快照，resume 失效对账与查询）。
     BackgroundProcess,
     /// #252：后台进程账本旧 namespace（Background Process 更名前的
@@ -47,45 +37,17 @@ impl StorageNamespaceData {
         match self {
             Self::Session => "session",
             Self::Memory => "memory",
-            Self::TaskData => "task",
-            Self::History => "history",
             Self::ToolResult => "tool-result",
-            Self::AuditUsage => "audit-usage",
             Self::Config => "config",
-            Self::Workspace => "workspace",
             Self::BackgroundProcess => "background-process",
             Self::LegacyBackgroundTask => "background-task",
         }
     }
 
-    pub(crate) fn previous_policy(self) -> PreviousPolicy {
-        match self {
-            Self::AuditUsage => PreviousPolicy::Discard,
-            Self::Session
-            | Self::Memory
-            | Self::TaskData
-            | Self::History
-            | Self::ToolResult
-            | Self::Config
-            | Self::Workspace
-            | Self::BackgroundProcess
-            | Self::LegacyBackgroundTask => PreviousPolicy::Retain,
-        }
-    }
-
+    /// 当前所有在役 namespace 均要求 crash-safe（#1865 B：BestEffort 专属
+    /// 分支随 AuditUsage 死变体删除）。
     pub fn minimum_durability(self) -> DurabilityData {
-        match self {
-            Self::AuditUsage => DurabilityData::BestEffort,
-            Self::Session
-            | Self::Memory
-            | Self::TaskData
-            | Self::History
-            | Self::ToolResult
-            | Self::Config
-            | Self::Workspace
-            | Self::BackgroundProcess
-            | Self::LegacyBackgroundTask => DurabilityData::ProcessCrashSafe,
-        }
+        DurabilityData::ProcessCrashSafe
     }
 
     pub fn effective_durability(self, requested: DurabilityData) -> DurabilityData {
@@ -107,12 +69,12 @@ impl StorageKeyData {
     pub fn new(
         namespace: StorageNamespaceData,
         segments: Vec<SafePathSegmentData>,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, share::error::DomainError> {
         if segments.is_empty() {
-            return Err(StorageError::new(
+            return Err(share::error::DomainError::from(StorageError::new(
                 StorageErrorKind::InvalidKey,
                 "存储键至少需要一个路径段",
-            ));
+            )));
         }
         Ok(Self {
             namespace,
@@ -127,10 +89,22 @@ impl StorageKeyData {
     pub fn segments(&self) -> &[SafePathSegmentData] {
         &self.segments
     }
+
+    /// 逻辑 key → 存储根下的相对物理路径（`namespace/seg1/seg2`）。
+    /// #1865 D：物理布局知识的唯一发布点——消费方（如 runtime 工具结果
+    /// locator）NEVER 自行拼接 namespace/segment 顺序。
+    pub fn relative_path(&self) -> std::path::PathBuf {
+        self.segments.iter().fold(
+            std::path::PathBuf::from(self.namespace.as_str()),
+            |path, segment| path.join(segment.as_str()),
+        )
+    }
 }
 
+/// 语义映射（#1865 C）：InvalidKey→Invalid（调用方可修正）、UnsupportedDurability
+/// →Unavailable（能力不可用）、其余→Storage（底层存储失败）。
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StorageErrorKind {
+pub(crate) enum StorageErrorKind {
     InvalidKey,
     Io,
     PermissionDenied,
@@ -140,7 +114,7 @@ pub enum StorageErrorKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StorageError {
+pub(crate) struct StorageError {
     kind: StorageErrorKind,
     message: String,
 }
@@ -158,6 +132,21 @@ impl StorageError {
     }
 }
 
+impl StorageError {
+    /// 语义分类（DomainError 折叠的单一映射点）。
+    pub(crate) fn category(&self) -> share::error::ErrorCategory {
+        use share::error::ErrorCategory;
+        match self.kind {
+            StorageErrorKind::InvalidKey => ErrorCategory::Invalid,
+            StorageErrorKind::UnsupportedDurability => ErrorCategory::Unavailable,
+            StorageErrorKind::Io
+            | StorageErrorKind::PermissionDenied
+            | StorageErrorKind::ConcurrentWrite
+            | StorageErrorKind::CorruptTransaction(_) => ErrorCategory::Storage,
+        }
+    }
+}
+
 impl fmt::Display for StorageError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
@@ -165,3 +154,12 @@ impl fmt::Display for StorageError {
 }
 
 impl Error for StorageError {}
+
+/// 边界折叠（#1865 C）：storage 内部事实错误 → 全仓唯一跨界错误类型。
+/// 消费方只按语义三档做控制流（NEVER 依赖 storage 的实现细节 kind）。
+impl From<StorageError> for share::error::DomainError {
+    fn from(error: StorageError) -> Self {
+        share::error::DomainError::from_parts("storage", error.category(), error.message.clone())
+            .with_source(std::sync::Arc::new(error))
+    }
+}

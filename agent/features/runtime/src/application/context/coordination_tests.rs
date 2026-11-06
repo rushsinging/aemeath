@@ -41,7 +41,7 @@ fn request() -> ContextRequestData {
 async fn coordinator_exposes_current_revision_for_step_cas_baseline() {
     // Step 收口前刷新 CAS 基准，避免窗口快照 revision 落后于本 step
     // 自身 accepted-input / 工具回执推进后被误判成并发冲突。
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
 
     let revision = coordinator
@@ -55,7 +55,7 @@ async fn coordinator_exposes_current_revision_for_step_cas_baseline() {
 
 #[tokio::test]
 async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
@@ -85,7 +85,7 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
 
 #[tokio::test]
 async fn coordinator_returns_complete_window_and_decision_fields() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port));
     let frozen = request();
 
@@ -107,7 +107,7 @@ async fn coordinator_returns_complete_window_and_decision_fields() {
 
 #[tokio::test]
 async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("accepted")];
@@ -128,7 +128,7 @@ async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
 
 #[tokio::test]
 async fn finalized_step_appends_once_with_original_message_order() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![
@@ -174,7 +174,7 @@ async fn finalized_step_appends_once_with_original_message_order() {
 
 #[tokio::test]
 async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("finalized")];
@@ -279,7 +279,7 @@ fn automatic_compact_skipped_preserves_usage_and_window() {
 /// 带 chunk 计数/Finalizing）。
 #[tokio::test]
 async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
@@ -369,7 +369,7 @@ fn noop_progress() -> std::sync::Arc<dyn crate::application::loop_engine::Compac
 
 #[tokio::test]
 async fn automatic_compact_carries_llm_binding_when_resolver_bound() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()))
         .with_compact_resolver(Some(resolver()));
 
@@ -396,7 +396,7 @@ async fn automatic_compact_carries_llm_binding_when_resolver_bound() {
 
 #[tokio::test]
 async fn manual_compact_carries_llm_binding_when_resolver_bound() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()))
         .with_compact_resolver(Some(resolver()));
 
@@ -415,7 +415,7 @@ async fn manual_compact_carries_llm_binding_when_resolver_bound() {
 
 #[tokio::test]
 async fn compact_stays_local_when_resolver_absent() {
-    let port = Arc::new(context::test_support::StubContextService::new());
+    let port = Arc::new(testkit::context::StubContextService::new());
     let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
 
     coordinator

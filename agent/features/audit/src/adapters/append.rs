@@ -64,10 +64,12 @@ impl FileUsageAppendStore {
             .map_err(|_| AppendLogError::InvalidStream)
     }
 
-    fn map_open_error(error: storage::StorageError) -> AppendLogError {
-        match error.kind() {
-            storage::StorageErrorKind::InvalidKey => AppendLogError::InvalidStream,
-            _ => AppendLogError::Io,
+    fn map_open_error(error: share::error::DomainError) -> AppendLogError {
+        match error.category() {
+            share::error::ErrorCategory::Invalid => AppendLogError::InvalidStream,
+            share::error::ErrorCategory::Storage | share::error::ErrorCategory::Unavailable => {
+                AppendLogError::Io
+            }
         }
     }
 
