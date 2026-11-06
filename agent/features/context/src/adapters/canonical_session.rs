@@ -430,7 +430,12 @@ impl CanonicalSessionRepository {
         let revision = SessionRevision::new(current.revision);
         if let Some(expected_revision) = expected_revision {
             if expected_revision != revision {
-                return Err(Self::compact_revision_conflict(expected_revision, revision));
+                // 决策到执行之间有并发提交（后台任务完成通知、tool 回执等）。
+                // 压缩决策（上下文超限）对追加后的状态只会更成立，按当前快照
+                // 继续；结构性冲突（clear / 二次 compact）由 commit 侧前缀
+                // 验证兜底拒绝。
+                log::debug!(target: crate::LOG_TARGET,
+                    "[compact] 决策修订号落后（expected={expected_revision:?}, current={revision:?}），按当前快照继续");
             }
         }
         let visible_steps = current.flattened_steps_from_marker();
@@ -528,10 +533,24 @@ impl CanonicalSessionRepository {
         }
         let actual_revision = SessionRevision::new(current.revision);
         if actual_revision != source.revision {
-            return Err(Self::compact_revision_conflict(
-                source.revision,
-                actual_revision,
-            ));
+            // 压缩生成期间有并发提交。仅当新增内容是尾部追加（源快照仍是
+            // 当前可见 steps 的逐项相等前缀）时 rebase 到最新状态提交：新
+            // step 天然位于 marker 保留窗口之后、不会丢失；结构性变更
+            // （clear / 二次 compact / marker 移动）破坏前缀关系，维持冲突
+            // 拒绝，交由下一轮决策重试。
+            let current_steps = current.flattened_steps_from_marker();
+            if !Self::is_append_only_prefix(&source.visible_steps, &current_steps) {
+                return Err(Self::compact_revision_conflict(
+                    source.revision,
+                    actual_revision,
+                ));
+            }
+            log::info!(target: crate::LOG_TARGET,
+                "[compact] 写回时并发提交了 {} 个新增 step（revision {} → {}），rebase 到最新状态提交",
+                current_steps.len() - source.visible_steps.len(),
+                source.revision.get(),
+                actual_revision.get(),
+            );
         }
         let keep_messages = generated.recent_messages.len();
         let mut retained = 0usize;
@@ -576,6 +595,27 @@ impl CanonicalSessionRepository {
         ContextPortError::Compact(format!(
             "Session revision 冲突：期望 {expected:?}，实际 {actual:?}"
         ))
+    }
+
+    /// 压缩源快照是否仍是当前可见 steps 的逐项相等前缀（即期间只发生
+    /// 尾部追加）。前缀成立时 compact 写回可安全 rebase 到最新状态；
+    /// 不成立说明可见历史发生过结构性变更（clear / 二次 compact），必须
+    /// 维持冲突拒绝。
+    fn is_append_only_prefix(
+        source_steps: &[(
+            crate::domain::session::RunStepCursor,
+            Vec<share::message::Message>,
+        )],
+        current_steps: &[(
+            crate::domain::session::RunStepCursor,
+            Vec<share::message::Message>,
+        )],
+    ) -> bool {
+        source_steps.len() <= current_steps.len()
+            && source_steps
+                .iter()
+                .zip(current_steps.iter())
+                .all(|(source_step, current_step)| source_step == current_step)
     }
 
     fn receipt(append: &ContextAppendData, revision: SessionRevision) -> SessionAppendReceiptData {
