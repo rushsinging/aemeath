@@ -1118,7 +1118,7 @@ async fn evidence_proposal_for_global_component_becomes_pending_candidate() {
     let mentioned = id("mentioned");
     let mut registry = FakeRegistry::with_entries(vec![(mentioned.clone(), body_content("old"))]);
     let llm = ScriptedLlm::new(vec![
-        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","signal_ids":["repeated_failure:Bash:cargo build failed"],"promotion":"review","change_set":{"edits":[{"action":"upsert","id":{"kind":"tool-guidance","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
     let lesson_store = crate::domain::lesson::LessonStore::new(
         tempfile::tempdir()

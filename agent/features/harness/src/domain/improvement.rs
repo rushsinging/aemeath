@@ -124,6 +124,17 @@ pub struct ImprovementMaterials {
     pub evidence: crate::domain::evidence::EvidenceBundle,
 }
 
+/// LLM 对写入方式的决策：默认自动，review 才进入候选队列。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionDecision {
+    #[default]
+    Auto,
+    Review,
+    Shadow,
+    Reject,
+}
+
 /// 逐块提案的 LLM 应答信封：NEVER 裸 ChangeSet——LLM 需要能表达
 /// 「证据不支持任何变更」，该表达是合法结果而非失败。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,6 +146,8 @@ pub enum BlockProposal {
         reason: String,
         #[serde(default)]
         signal_ids: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         change_set: ChangeSet,
     },
     /// 无变更：证据不支持任何编辑（合法结果）。
@@ -472,12 +485,17 @@ pub fn build_execution_prompt(
   7800 tokens；超预算会再压缩一轮，NEVER 硬截断。
 - 每条编辑的 reason MUST 引用该任务的 target_signal。
 
+promotion 契约：
+- auto：低风险、证据充分，host 校验后直接写入
+- review：不确定、影响面大或需要人工确认
+- reject：不建议写入
+
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","reason":"<依据，引用 signal id>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<依据，引用 signal id>","promotion":"auto","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -513,6 +531,8 @@ pub enum FixedComponentExecutionProposal {
     Propose {
         reason: String,
         evidence_refs: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         #[serde(default)]
         body: Option<String>,
         #[serde(default)]
@@ -616,6 +636,11 @@ pub fn build_block_prompt(
   破坏性操作无确认、失败后不诊断根因只重试。
 - **结论质量**：空泛建议、无证据断言、不复述关键约束就动手。
 
+promotion 契约：
+  - auto：低风险、证据充分，host 校验后直接写入
+  - review：不确定、影响面大或需要人工确认
+  - reject：不建议写入
+
 编辑契约：
   - 提案只携带要变更的组件（未提及的组件自动保持原样）
   - evidence_refs 必须非空，且每个 ref 都来自上方证据块（E0/E1…）；未知引用会作废整份提案
@@ -623,8 +648,8 @@ pub fn build_block_prompt(
   - patch 的 old_string/anchor MUST 唯一且非空；patch 只改目标片段
 
   只输出一个 JSON 对象，格式三选一：
-  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
-  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"promotion":"auto","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"promotion":"auto","change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -664,6 +689,8 @@ enum RawBlockProposal {
         evidence_refs: Vec<String>,
         #[serde(default)]
         signal_ids: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         change_set: ChangeSet,
     },
     NoChange {
@@ -701,6 +728,7 @@ pub fn parse_block_proposal_with_refs(
             reason,
             evidence_refs,
             signal_ids,
+            promotion,
             change_set,
         } => {
             if !evidence_refs.is_empty() && !signal_ids.is_empty() {
@@ -738,6 +766,7 @@ pub fn parse_block_proposal_with_refs(
             Ok(BlockProposal::Propose {
                 reason,
                 signal_ids,
+                promotion,
                 change_set,
             })
         }
@@ -1367,6 +1396,7 @@ async fn compact_block_proposal_budgets(
     let BlockProposal::Propose {
         reason,
         signal_ids,
+        promotion,
         mut change_set,
     } = proposal
     else {
@@ -1400,7 +1430,7 @@ async fn compact_block_proposal_budgets(
 - 输出仍是完整正文。
 
 只输出一个 JSON 对象：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<压缩后的完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
@@ -1435,6 +1465,7 @@ async fn compact_block_proposal_budgets(
     Some(BlockProposal::Propose {
         reason,
         signal_ids,
+        promotion,
         change_set,
     })
 }
@@ -1640,9 +1671,13 @@ async fn run_block(
         BlockProposal::Propose {
             reason,
             signal_ids,
+            promotion,
             change_set,
         } => {
             let evidence_bindings = evidence_bindings_for(&signal_ids, evidence, cycle_ref);
+            if promotion == PromotionDecision::Reject {
+                return (None, "拒绝（LLM 判断不写入）");
+            }
             if dry_run {
                 // 预演（#2050）：逐条校验（含整份作废预检）但不落盘、
                 // 不写 lesson、不推游标；预览行供 preview 文件。
@@ -1716,30 +1751,32 @@ async fn run_block(
                     (None, "预演（将作废）")
                 };
             }
-            if let Some(candidate_store) = candidate_store {
-                match enqueue_global_candidates(
-                    candidate_store,
-                    registry,
-                    &change_set,
-                    &signal_ids,
-                    evidence,
-                ) {
-                    Ok(true) => {
-                        if let Some(recorder) = recorder {
-                            recorder.record(
-                                &crate::domain::events::RsiCycleEvent::ProposalParsed {
-                                    block_index,
-                                    reason: reason.clone(),
-                                    edits: change_set.edits.len(),
-                                },
-                            );
+            if promotion == PromotionDecision::Review {
+                if let Some(candidate_store) = candidate_store {
+                    match enqueue_global_candidates(
+                        candidate_store,
+                        registry,
+                        &change_set,
+                        &signal_ids,
+                        evidence,
+                    ) {
+                        Ok(true) => {
+                            if let Some(recorder) = recorder {
+                                recorder.record(
+                                    &crate::domain::events::RsiCycleEvent::ProposalParsed {
+                                        block_index,
+                                        reason: reason.clone(),
+                                        edits: change_set.edits.len(),
+                                    },
+                                );
+                            }
+                            return (None, "待确认");
                         }
-                        return (None, "待确认");
-                    }
-                    Ok(false) => {}
-                    Err(error) => {
-                        log::warn!(target: crate::LOG_TARGET, "候选入队失败：{}", error.message());
-                        return (None, "作废（候选入队失败）");
+                        Ok(false) => {}
+                        Err(error) => {
+                            log::warn!(target: crate::LOG_TARGET, "候选入队失败：{}", error.message());
+                            return (None, "作废（候选入队失败）");
+                        }
                     }
                 }
             }
@@ -2663,8 +2700,8 @@ async fn run_two_phase_cycle_inner(
   NEVER 硬截断。
 
 只输出一个 JSON 对象，格式三选一：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<完整正文>"}}
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
 {{"decision":"no_change","reason":"<一句话>"}}
 不要输出 JSON 以外的任何文字。"#,
             component_scope = component_scope_label(&component_id),
@@ -2722,6 +2759,7 @@ async fn run_two_phase_cycle_inner(
             Ok(FixedComponentExecutionProposal::Propose {
                 reason,
                 evidence_refs,
+                promotion,
                 body,
                 operations,
             }) => {
@@ -2800,6 +2838,7 @@ async fn run_two_phase_cycle_inner(
                             id: component_id.clone(),
                             operations,
                         },
+                        promotion,
                     )
                 } else {
                     let Some(mut final_body) = body else {
@@ -2836,7 +2875,7 @@ async fn run_two_phase_cycle_inner(
 - 输出仍是完整正文。
 
 只输出一个 JSON 对象：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<压缩后的完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
@@ -2921,6 +2960,7 @@ async fn run_two_phase_cycle_inner(
                             id: component_id.clone(),
                             content: new_content,
                         },
+                        promotion,
                     )
                 }
             }
@@ -2940,7 +2980,11 @@ async fn run_two_phase_cycle_inner(
                 continue;
             }
         };
-        let (reason, edit) = execution;
+        let (reason, edit, promotion) = execution;
+        if promotion == PromotionDecision::Reject {
+            discarded += issues.len();
+            continue;
+        }
         let change_set = ChangeSet {
             edits: vec![edit.clone()],
         };
@@ -2991,16 +3035,18 @@ async fn run_two_phase_cycle_inner(
             continue;
         }
 
-        if let Some(candidate_store) = candidate_store {
-            if enqueue_global_candidates(
-                candidate_store,
-                registry,
-                &change_set,
-                &signal_ids,
-                &evidence,
-            )? {
-                pending += 1;
-                continue;
+        if promotion == PromotionDecision::Review {
+            if let Some(candidate_store) = candidate_store {
+                if enqueue_global_candidates(
+                    candidate_store,
+                    registry,
+                    &change_set,
+                    &signal_ids,
+                    &evidence,
+                )? {
+                    pending += 1;
+                    continue;
+                }
             }
         }
         if let Some(version_store) = version_store {
@@ -3665,7 +3711,7 @@ pub async fn run_compose_phase(
 
 编辑契约同改进块（omitted-is-inherited；upsert 的 content.body 为
 完整正文）。只输出一个 JSON 对象，格式二选一（NEVER 输出其他形态）：
-{{"decision":"propose","reason":"<仲裁依据，一句话>","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<仲裁依据，一句话>","promotion":"auto","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#,
         adoptions = adoptions_block.join("\n"),
@@ -3689,6 +3735,7 @@ pub async fn run_compose_phase(
         Ok(BlockProposal::Propose {
             reason,
             signal_ids,
+            promotion: _,
             change_set,
         }) => {
             let evidence_by_component =

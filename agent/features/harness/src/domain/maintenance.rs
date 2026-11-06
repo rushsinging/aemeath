@@ -17,7 +17,7 @@ use crate::domain::component_audit::{
 use crate::domain::errors::HarnessError;
 use crate::domain::events::RsiCycleEvent;
 use crate::domain::improvement::{
-    complete_with_usage_event, component_body_budget_tokens, RsiLlmPort,
+    complete_with_usage_event, component_body_budget_tokens, PromotionDecision, RsiLlmPort,
 };
 use crate::domain::versioning::ComponentVersionStore;
 use serde::Deserialize;
@@ -27,6 +27,8 @@ use serde::Deserialize;
 enum MaintenanceProposal {
     Compact {
         reason: String,
+        #[serde(default)]
+        promotion: PromotionDecision,
         rules: Vec<MaintenanceRuleEdit>,
     },
     NoChange {
@@ -172,7 +174,7 @@ fn build_prompt(
 - 只输出紧凑 JSON。
 
 输出格式：
-{{"decision":"compact","reason":"<一句话>","rules":[
+{{"decision":"compact","reason":"<一句话>","promotion":"auto|review|reject","rules":[
   {{"action":"keep","source":[0]}},
   {{"action":"merge","source":[1,2],"text":"<合并后的单行规则>"}},
   {{"action":"delete","source":[3],"reason":"<理由>"}}
@@ -293,7 +295,7 @@ async fn collect_single_edits(
     body: &str,
     units: &[AuditRuleUnit],
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
-) -> Result<Option<(String, Vec<MaintenanceRuleEdit>)>, MaintenanceFailure> {
+) -> Result<Option<(String, PromotionDecision, Vec<MaintenanceRuleEdit>)>, MaintenanceFailure> {
     let prompt = build_prompt(component, triggers, units, Some(body), false, None);
     let completion = complete_with_usage_event(llm, &prompt, "maintenance_compose", 0, recorder)
         .await
@@ -305,11 +307,15 @@ async fn collect_single_edits(
             let _ = reason;
             Ok(None)
         }
-        MaintenanceProposal::Compact { reason, rules } => {
+        MaintenanceProposal::Compact {
+            reason,
+            promotion,
+            rules,
+        } => {
             validate_rule_edits(&rules, units).map_err(|message| {
                 MaintenanceFailure::rejected(format!("规则覆盖校验失败（{message}）"))
             })?;
-            Ok(Some((reason, rules)))
+            Ok(Some((reason, promotion, rules)))
         }
     }
 }
@@ -320,10 +326,11 @@ async fn collect_chunked_edits(
     triggers: &str,
     units: &[AuditRuleUnit],
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
-) -> Result<Option<(String, Vec<MaintenanceRuleEdit>)>, MaintenanceFailure> {
+) -> Result<Option<(String, PromotionDecision, Vec<MaintenanceRuleEdit>)>, MaintenanceFailure> {
     let mut all_edits = Vec::new();
     let mut reasons = Vec::new();
     let mut any_compact = false;
+    let mut promotion = PromotionDecision::Auto;
     for (chunk_index, chunk) in units.chunks(COMPONENT_MAINTENANCE_CHUNK_RULES).enumerate() {
         let mapping: Vec<usize> = chunk.iter().map(|unit| unit.index).collect();
         let local_units: Vec<AuditRuleUnit> = chunk
@@ -364,7 +371,19 @@ async fn collect_chunked_edits(
                 let _ = reason;
                 all_edits.extend(keep_all(&local_units, &mapping));
             }
-            MaintenanceProposal::Compact { reason, rules } => {
+            MaintenanceProposal::Compact {
+                reason,
+                promotion: chunk_promotion,
+                rules,
+            } => {
+                if chunk_promotion == PromotionDecision::Reject {
+                    promotion = PromotionDecision::Reject;
+                } else if (chunk_promotion == PromotionDecision::Review
+                    || chunk_promotion == PromotionDecision::Shadow)
+                    && promotion != PromotionDecision::Reject
+                {
+                    promotion = chunk_promotion;
+                }
                 validate_rule_edits(&rules, &local_units).map_err(|message| {
                     MaintenanceFailure::rejected(format!(
                         "分块 {chunk_index} 规则覆盖校验失败（{message}）"
@@ -391,7 +410,7 @@ async fn collect_chunked_edits(
     if !any_compact {
         return Ok(None);
     }
-    Ok(Some((reasons.join("；"), all_edits)))
+    Ok(Some((reasons.join("；"), promotion, all_edits)))
 }
 
 fn rebuild_body(
@@ -510,7 +529,7 @@ pub async fn run_maintenance_compose_phase(
             )
             .await
         };
-        let (reason, edits) = match collected {
+        let (reason, promotion, edits) = match collected {
             Ok(Some(value)) => value,
             Ok(None) => {
                 if let Some(recorder) = recorder {
@@ -546,6 +565,13 @@ pub async fn run_maintenance_compose_phase(
                 continue;
             }
         };
+        if promotion == PromotionDecision::Reject {
+            summaries.push(format!(
+                "维护 Compose：{} LLM 判断不写入",
+                finding.component
+            ));
+            continue;
+        }
         if let Err(message) = validate_rule_edits(&edits, &units) {
             summaries.push(format!(
                 "维护 Compose：{} 规则覆盖校验失败（{}）",
@@ -593,7 +619,9 @@ pub async fn run_maintenance_compose_phase(
             ));
             continue;
         }
-        if !dry_run {
+        if (promotion == PromotionDecision::Review || promotion == PromotionDecision::Shadow)
+            && !dry_run
+        {
             if let Some(candidate_store) = candidate_store {
                 let candidate = RsiCandidate::new_pending(
                     CandidateScope::Global,

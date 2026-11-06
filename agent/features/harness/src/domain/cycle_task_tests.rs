@@ -537,6 +537,7 @@ async fn zero_adoption_cycle_still_runs_maintenance_compose() {
     let response = serde_json::json!({
         "decision": "compact",
         "reason": "压缩超长规则",
+        "promotion": "review",
         "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
     })
     .to_string();
@@ -578,6 +579,7 @@ async fn dry_run_maintenance_keeps_underlying_component_unchanged() {
     let response = serde_json::json!({
         "decision": "compact",
         "reason": "压缩超长规则",
+        "promotion": "review",
         "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
     })
     .to_string();
@@ -701,6 +703,7 @@ async fn global_maintenance_creates_pending_candidate_without_writing() {
     let response = serde_json::json!({
         "decision": "compact",
         "reason": "压缩超长规则",
+        "promotion": "review",
         "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
     })
     .to_string();
