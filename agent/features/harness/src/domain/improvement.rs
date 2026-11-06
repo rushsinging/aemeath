@@ -1923,7 +1923,7 @@ pub async fn run_diagnosis_cycle(
         }
         report_lines.push(format!(
             "  [强度] {} → {}（{}）",
-            verdict.signal_id,
+            crate::domain::redaction::redact_sensitive_text(&verdict.signal_id),
             verdict.tier.as_str(),
             verdict.rationale
         ));
@@ -2006,7 +2006,11 @@ pub async fn run_diagnosis_cycle(
     for issue in &summary.issues {
         report_lines.push(format!(
             "  [诊断汇总] {} ← {}（×{}）：{} → {}",
-            issue.component, issue.target_signal, issue.occurrences, issue.problem, issue.direction
+            issue.component,
+            crate::domain::redaction::redact_sensitive_text(&issue.target_signal),
+            issue.occurrences,
+            issue.problem,
+            issue.direction
         ));
     }
     Ok(summary)
@@ -2082,7 +2086,7 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [强度] {} → {}（{}）",
-            verdict.signal_id,
+            crate::domain::redaction::redact_sensitive_text(&verdict.signal_id),
             verdict.tier.as_str(),
             verdict.rationale
         ));
@@ -2123,7 +2127,8 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → {}（唯一候选）",
-                    fact.signal.signal_id, component
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
+                    component
                 ));
                 route_plans.push(TwoPhaseRoutePlan {
                     fact,
@@ -2141,7 +2146,7 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → candidates: {}",
-                    fact.signal.signal_id,
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
                     candidates
                         .iter()
                         .map(|id| id.to_string())
@@ -2160,7 +2165,8 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → unresolved（{}）",
-                    fact.signal.signal_id, reason
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
+                    reason
                 ));
             }
         }
@@ -2366,7 +2372,8 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [route] {} → {}（diagnosis）",
-            plan.fact.signal.signal_id, component
+            crate::domain::redaction::redact_sensitive_text(&plan.fact.signal.signal_id),
+            component
         ));
         diagnosed_issues.push(DiagnosedIssue {
             component: component.to_string(),
@@ -2426,7 +2433,11 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [execution] fixed component {component_id} ← {}",
-            signal_ids.join(", ")
+            signal_ids
+                .iter()
+                .map(|signal_id| crate::domain::redaction::redact_sensitive_text(signal_id))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         let issue_block = issues
             .iter()

@@ -75,6 +75,9 @@ pub(crate) const COMPONENT_AUDIT_MAX_RULE_TOKENS: usize = 600;
 /// 组件维护审计：body token 达到预算的百分比阈值。
 pub(crate) const COMPONENT_AUDIT_BODY_BUDGET_PERCENT: usize = 70;
 
+/// 维护 Compose 分块：每块最多规则数（超预算组件按块维护）。
+pub(crate) const COMPONENT_MAINTENANCE_CHUNK_RULES: usize = 30;
+
 /// checkpoint 落盘文件名（`~/.agents/harness/checkpoint.json`，#2049）。
 pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";
 

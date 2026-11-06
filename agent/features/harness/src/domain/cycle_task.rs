@@ -428,7 +428,9 @@ impl RsiTask for HarnessRsiCycleTask {
                 let signals: Vec<String> = evidence
                     .signals
                     .iter()
-                    .map(|signal| signal.signal_id.clone())
+                    .map(|signal| {
+                        crate::domain::redaction::redact_sensitive_text(&signal.signal_id)
+                    })
                     .collect();
                 report_lines.push(format!(
                     "    证据：{}",

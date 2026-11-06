@@ -28,6 +28,9 @@ pub mod maintenance;
 pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
+pub(crate) mod redaction;
+#[cfg(test)]
+mod redaction_tests;
 pub mod routing;
 #[cfg(test)]
 mod routing_tests;
