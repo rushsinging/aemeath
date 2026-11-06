@@ -4,8 +4,10 @@ use crate::application::ComponentRegistry;
 use crate::constants::ERROR_DOMAIN;
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::EvidenceBundle;
+use crate::domain::improvement::{complete_with_usage_event, RsiLlmPort};
 use crate::domain::versioning::{rollback_component, ComponentVersionStore};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use share::ids::ChangeObservationId;
 use std::path::{Path, PathBuf};
 
@@ -16,6 +18,14 @@ pub enum ObservationStatus {
     Kept,
     RolledBack,
     Stale,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ObservationVerdict {
+    Keep,
+    Rollback,
+    Observe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,6 +260,158 @@ pub fn evaluate_and_rollback(
         } else if value.observation_cycles >= 5 {
             value.status = ObservationStatus::Stale;
             value.rollback_reason = Some("连续多周期无相关活动，停止观察".to_string());
+        }
+    }
+    if let Err(error) = store.save_all(&values) {
+        summaries.push(format!("变更观察保存失败：{}", error.message()));
+    }
+    summaries
+}
+
+fn observation_verdict_prompt(
+    observation: &ChangeObservation,
+    evidence: &EvidenceBundle,
+) -> String {
+    let mut signals = Vec::new();
+    for signal in &evidence.signals {
+        signals.push(format!(
+            "- {} | kind={} | occurrences={} | summary={}",
+            crate::domain::redaction::redact_sensitive_text(&signal.signal_id),
+            signal.kind.as_str(),
+            signal.occurrences,
+            crate::domain::redaction::redact_sensitive_text(&signal.summary)
+        ));
+    }
+    format!(
+        r#"你是 RSI 变更观察裁决器。判断这次组件变更是否有效。
+
+变更：
+- id: {id}
+- component: {component}
+- target_signal_ids: {targets}
+- observation_cycles: {cycles}
+- baseline_signal_ids: {baseline}
+
+当前证据：
+{signals}
+
+判断规则：
+- target signal 再次出现 → rollback
+- 目标 signal 未出现且有相关活动，并且变更语义合理 → keep
+- 证据不足以判断 → observe
+- 变更明显引入新失败或语义错误 → rollback
+
+只输出 JSON：
+{{"decision":"keep|rollback|observe","reason":"<一句话>"}}"#,
+        id = observation.id,
+        component = observation.component,
+        targets = observation.target_signal_ids.join(", "),
+        cycles = observation.observation_cycles,
+        baseline = observation.baseline_signal_ids.join(", "),
+        signals = if signals.is_empty() {
+            "（无）".to_string()
+        } else {
+            signals.join("\n")
+        },
+    )
+}
+
+async fn judge_with_llm(
+    llm: &dyn RsiLlmPort,
+    observation: &ChangeObservation,
+    evidence: &EvidenceBundle,
+) -> Option<ObservationVerdict> {
+    let prompt = observation_verdict_prompt(observation, evidence);
+    let completion = complete_with_usage_event(llm, &prompt, "change_observation", 0, None)
+        .await
+        .ok()?;
+    let start = completion.text.find('{')?;
+    let source = completion.text.get(start..)?;
+    let value: Value = serde_json::from_str(source).ok()?;
+    serde_json::from_value(value.get("decision")?.clone()).ok()
+}
+
+/// 带 LLM 语义裁决的观察入口；LLM 不可用时回退确定性规则。
+pub async fn evaluate_and_rollback_with_llm(
+    store: &ChangeObservationStore,
+    registry: &mut dyn ComponentRegistry,
+    version_store: &ComponentVersionStore,
+    evidence: &EvidenceBundle,
+    llm: &dyn RsiLlmPort,
+) -> Vec<String> {
+    let mut values = match store.load() {
+        Ok(values) => values,
+        Err(error) => return vec![format!("变更观察读取失败（跳过）：{}", error.message())],
+    };
+    let mut summaries = Vec::new();
+    for value in values
+        .iter_mut()
+        .filter(|value| value.status == ObservationStatus::Observing)
+    {
+        value.last_evaluated_at_secs = Some(now_secs());
+        value.observation_cycles = value.observation_cycles.saturating_add(1);
+        let target_present = target_reappeared(value, evidence);
+        let rollback = if target_present {
+            true
+        } else if evidence.signals.is_empty() {
+            false
+        } else if relevant_activity(value, evidence) && value.observation_cycles >= 2 {
+            match judge_with_llm(llm, value, evidence).await {
+                Some(ObservationVerdict::Rollback) => true,
+                Some(ObservationVerdict::Keep) => {
+                    value.status = ObservationStatus::Kept;
+                    summaries.push(format!("变更观察：{} LLM 判定有效，保留", value.component));
+                    false
+                }
+                Some(ObservationVerdict::Observe) | None => false,
+            }
+        } else {
+            false
+        };
+        if rollback {
+            let Some(id) = crate::parse_component_id(&value.component) else {
+                value.status = ObservationStatus::Stale;
+                value.rollback_reason = Some("组件标识无效".to_string());
+                continue;
+            };
+            let current = match registry.read(&id) {
+                Ok(content) => content,
+                Err(error) => {
+                    value.status = ObservationStatus::Stale;
+                    value.rollback_reason = Some(format!("读取组件失败：{}", error.message()));
+                    continue;
+                }
+            };
+            if body_hash(&current.body) != value.after_hash {
+                value.status = ObservationStatus::Stale;
+                value.rollback_reason = Some("组件已被外部修改，未自动回滚".to_string());
+                continue;
+            }
+            match version_store.load(&id, Some(&value.snapshot_cycle)) {
+                Ok(snapshot) => match rollback_component(registry, &id, &snapshot) {
+                    Ok(_) => {
+                        value.status = ObservationStatus::RolledBack;
+                        value.rollback_reason = Some(if target_present {
+                            "目标 signal 再次出现".to_string()
+                        } else {
+                            "LLM 判定变更无效".to_string()
+                        });
+                        summaries.push(format!(
+                            "变更观察：{} 已自动回滚（{}）",
+                            value.component, value.id
+                        ));
+                    }
+                    Err(error) => {
+                        value.rollback_reason = Some(format!("回滚失败：{}", error.message()));
+                    }
+                },
+                Err(error) => {
+                    value.rollback_reason = Some(format!("快照缺失：{}", error.message()));
+                }
+            }
+        } else if !target_present && value.observation_cycles >= 5 {
+            value.status = ObservationStatus::Stale;
+            value.rollback_reason = Some("连续多周期无明确结论，停止观察".to_string());
         }
     }
     if let Err(error) = store.save_all(&values) {

@@ -196,12 +196,15 @@ impl RsiTask for HarnessRsiCycleTask {
                     merged.signals.extend(evidence.signals.iter().cloned());
                     merged.sessions_covered += evidence.sessions_covered;
                 }
-                observation_summaries = crate::domain::change_observation::evaluate_and_rollback(
-                    observation_store,
-                    registry,
-                    version_store,
-                    &merged,
-                );
+                observation_summaries =
+                    crate::domain::change_observation::evaluate_and_rollback_with_llm(
+                        observation_store,
+                        registry,
+                        version_store,
+                        &merged,
+                        self.llm.as_ref(),
+                    )
+                    .await;
             }
         }
         let now_secs = std::time::SystemTime::now()
