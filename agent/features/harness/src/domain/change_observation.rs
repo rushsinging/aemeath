@@ -17,6 +17,9 @@ pub enum ObservationStatus {
     Observing,
     Kept,
     RolledBack,
+    /// 被同一组件的后续 RSI/Compose 写入覆盖。
+    Superseded,
+    /// 组件被外部修改，无法安全判断。
     Stale,
 }
 
@@ -156,6 +159,29 @@ impl ChangeObservationStore {
             .into_iter()
             .filter(|value| value.status == ObservationStatus::Observing)
             .collect())
+    }
+
+    /// 同一组件出现新写入时，之前仍在观察的记录全部标记 superseded。
+    pub fn supersede_component(
+        &self,
+        component: &str,
+        reason: impl Into<String>,
+    ) -> Result<usize, HarnessError> {
+        let mut values = self.load()?;
+        let reason = reason.into();
+        let mut count = 0;
+        for value in values.iter_mut() {
+            if value.component == component && value.status == ObservationStatus::Observing {
+                value.status = ObservationStatus::Superseded;
+                value.last_evaluated_at_secs = Some(now_secs());
+                value.rollback_reason = Some(reason.clone());
+                count += 1;
+            }
+        }
+        if count > 0 {
+            self.save_all(&values)?;
+        }
+        Ok(count)
     }
 
     pub fn append(&self, value: &ChangeObservation) -> Result<(), HarnessError> {

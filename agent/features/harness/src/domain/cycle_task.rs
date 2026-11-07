@@ -405,6 +405,14 @@ impl RsiTask for HarnessRsiCycleTask {
                 )
                 .await
                 {
+                    if let Some(observation_store) = self.observation_store.as_deref() {
+                        for adoption in &compose_outcome.adopted {
+                            let _ = observation_store.supersede_component(
+                                &adoption.id.to_string(),
+                                "被 Compose 修正覆盖",
+                            );
+                        }
+                    }
                     outcome.adopted.extend(compose_outcome.adopted);
                     outcome.summary = format!("{} | {}", outcome.summary, compose_outcome.summary);
                 }
@@ -556,6 +564,12 @@ impl RsiTask for HarnessRsiCycleTask {
             {
                 if self.dry_run {
                     report_lines.push(format!("    {}", compose_outcome.summary));
+                }
+                if let Some(observation_store) = self.observation_store.as_deref() {
+                    for adoption in &compose_outcome.adopted {
+                        let _ = observation_store
+                            .supersede_component(&adoption.id.to_string(), "被 Compose 修正覆盖");
+                    }
                 }
                 summary_parts.push(compose_outcome.summary);
             }
@@ -714,6 +728,11 @@ fn record_change_observations(
         }
         if target_signal_ids.is_empty() {
             continue;
+        }
+        if let Err(error) =
+            store.supersede_component(&adoption.id.to_string(), "被后续 RSI 写入覆盖")
+        {
+            log::warn!(target: crate::LOG_TARGET, "旧 observation 标记 superseded 失败：{}", error.message());
         }
         let observation = crate::domain::change_observation::ChangeObservation::new_applied(
             adoption.id.to_string(),

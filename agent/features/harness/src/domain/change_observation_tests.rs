@@ -175,3 +175,27 @@ fn observation_stores_signal_hash_and_redacted_display() {
     assert_eq!(observation.target_signal_ids[0], "retry_pattern:Bash");
     assert_eq!(observation.baseline_signal_ids[0], "oversized_result:Bash");
 }
+
+#[test]
+fn later_write_supersedes_previous_observation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let observation = ChangeObservation::new_applied(
+        "guardrails/default".to_string(),
+        "cycle-1".to_string(),
+        body_hash("old"),
+        body_hash("new"),
+        vec!["retry_pattern:Bash".to_string()],
+        Vec::new(),
+        vec!["run-1".to_string()],
+    );
+    store.append(&observation).expect("append");
+    let count = store
+        .supersede_component("guardrails/default", "被后续写入覆盖")
+        .expect("supersede");
+    assert_eq!(count, 1);
+    assert_eq!(
+        store.load().unwrap()[0].status,
+        ObservationStatus::Superseded
+    );
+}

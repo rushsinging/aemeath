@@ -1166,6 +1166,8 @@ pub fn run_rsi_review_approve(id: &str, resolve: Option<&str>, reason: Option<&s
         };
     }
     if !candidate.evidence.is_empty() {
+        let _ = rsi_observation_store()
+            .supersede_component(&candidate.target_component, "被 review 写入覆盖");
         let observation = harness::domain::change_observation::ChangeObservation::new_applied(
             candidate.target_component.clone(),
             review_cycle,
