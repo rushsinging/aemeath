@@ -199,3 +199,52 @@ fn later_write_supersedes_previous_observation() {
         ObservationStatus::Superseded
     );
 }
+
+#[test]
+fn newer_snapshot_supersedes_instead_of_stale() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    let mut registry = FakeRegistry::with_entries(vec![(id(), content("A"))]);
+    versions
+        .capture(&registry, &id(), "cycle-1", "upsert")
+        .expect("capture 1");
+    registry.write(&id(), &content("B")).expect("write B");
+    versions
+        .capture(&registry, &id(), "cycle-2", "upsert")
+        .expect("capture 2");
+    let target = "retry_pattern:Bash:cargo test".to_string();
+    store
+        .append(&ChangeObservation::new_applied(
+            id().to_string(),
+            "cycle-1".to_string(),
+            body_hash("old"),
+            body_hash("A"),
+            vec![target.clone()],
+            Vec::new(),
+            vec!["run-old".to_string()],
+        ))
+        .expect("append");
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RetryPattern,
+            signal_id: target,
+            summary: "new".to_string(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "proj/s.dataset".to_string(),
+                run_id: "run-new".to_string(),
+                step_id: "step-1".to_string(),
+            }],
+        }],
+    };
+
+    evaluate_and_rollback(&store, &mut registry, &versions, &evidence);
+    assert_eq!(
+        store.load().unwrap()[0].status,
+        ObservationStatus::Superseded
+    );
+    assert_eq!(registry.content_of(&id()).unwrap().body, "B");
+}

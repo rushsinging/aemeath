@@ -72,6 +72,9 @@ pub(crate) const COMPONENT_AUDIT_MAX_RULES: usize = 40;
 /// 组件维护审计：单条 rule token 上限。
 pub(crate) const COMPONENT_AUDIT_MAX_RULE_TOKENS: usize = 600;
 
+/// 组件维护审计：单条 rule 字符上限（防把多条规则堆进一条）。
+pub(crate) const COMPONENT_AUDIT_MAX_RULE_CHARS: usize = 1000;
+
 /// 组件维护审计：body token 达到预算的百分比阈值。
 pub(crate) const COMPONENT_AUDIT_BODY_BUDGET_PERCENT: usize = 70;
 

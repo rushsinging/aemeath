@@ -5,7 +5,8 @@
 //! 只看 raw；宿主用 normalized 做计数、重复与回归门禁。
 
 use crate::constants::{
-    COMPONENT_AUDIT_BODY_BUDGET_PERCENT, COMPONENT_AUDIT_MAX_RULES, COMPONENT_AUDIT_MAX_RULE_TOKENS,
+    COMPONENT_AUDIT_BODY_BUDGET_PERCENT, COMPONENT_AUDIT_MAX_RULES, COMPONENT_AUDIT_MAX_RULE_CHARS,
+    COMPONENT_AUDIT_MAX_RULE_TOKENS,
 };
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
 use crate::domain::improvement::component_body_budget_tokens;
@@ -72,10 +73,12 @@ impl AuditSnapshot {
             .iter()
             .filter_map(|rule| {
                 let tokens = share::token_budget::estimate_tokens(&rule.raw);
-                (tokens > COMPONENT_AUDIT_MAX_RULE_TOKENS).then_some(OversizedRule {
-                    line_index: rule.line_start,
-                    tokens,
-                })
+                (tokens > COMPONENT_AUDIT_MAX_RULE_TOKENS
+                    || rule.raw.chars().count() > COMPONENT_AUDIT_MAX_RULE_CHARS)
+                    .then_some(OversizedRule {
+                        line_index: rule.line_start,
+                        tokens,
+                    })
             })
             .collect();
         Self {
@@ -312,3 +315,7 @@ pub fn audit_component(
         triggers,
     })
 }
+
+#[cfg(test)]
+#[path = "component_audit_tests.rs"]
+mod tests;

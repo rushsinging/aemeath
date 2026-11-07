@@ -325,8 +325,13 @@ pub fn evaluate_and_rollback(
                 }
             };
             if body_hash(&current.body) != value.after_hash {
-                value.status = ObservationStatus::Stale;
-                value.rollback_reason = Some("组件已被外部修改，未自动回滚".to_string());
+                if has_newer_snapshot(version_store, &id, &value.snapshot_cycle) {
+                    value.status = ObservationStatus::Superseded;
+                    value.rollback_reason = Some("被后续版本写入覆盖".to_string());
+                } else {
+                    value.status = ObservationStatus::Stale;
+                    value.rollback_reason = Some("组件已被外部修改，未自动回滚".to_string());
+                }
                 continue;
             }
             match version_store.load(&id, Some(&value.snapshot_cycle)) {
@@ -366,6 +371,18 @@ pub fn evaluate_and_rollback(
         summaries.push(format!("变更观察保存失败：{}", error.message()));
     }
     summaries
+}
+
+fn has_newer_snapshot(
+    version_store: &ComponentVersionStore,
+    id: &crate::domain::component::ComponentId,
+    snapshot_cycle: &str,
+) -> bool {
+    version_store
+        .history(id)
+        .ok()
+        .and_then(|history| history.into_iter().next())
+        .is_some_and(|latest| latest.cycle_id.as_str() > snapshot_cycle)
 }
 
 fn observation_verdict_prompt(
@@ -485,8 +502,13 @@ pub async fn evaluate_and_rollback_with_llm(
                 }
             };
             if body_hash(&current.body) != value.after_hash {
-                value.status = ObservationStatus::Stale;
-                value.rollback_reason = Some("组件已被外部修改，未自动回滚".to_string());
+                if has_newer_snapshot(version_store, &id, &value.snapshot_cycle) {
+                    value.status = ObservationStatus::Superseded;
+                    value.rollback_reason = Some("被后续版本写入覆盖".to_string());
+                } else {
+                    value.status = ObservationStatus::Stale;
+                    value.rollback_reason = Some("组件已被外部修改，未自动回滚".to_string());
+                }
                 continue;
             }
             match version_store.load(&id, Some(&value.snapshot_cycle)) {
