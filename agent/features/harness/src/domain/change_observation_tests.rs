@@ -37,6 +37,7 @@ fn write_then_target_reappears_rolls_back() {
         body_hash("# Guardrails\n\n- new rule\n"),
         vec![target.clone()],
         Vec::new(),
+        vec!["run-old".to_string()],
     );
     store.append(&observation).expect("append");
     registry
@@ -51,7 +52,11 @@ fn write_then_target_reappears_rolls_back() {
             summary: "same command failed".to_string(),
             excerpt: None,
             occurrences: 1,
-            sources: Vec::new(),
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "proj/s.dataset".to_string(),
+                run_id: "run-new".to_string(),
+                step_id: "step-1".to_string(),
+            }],
         }],
     };
     let summaries = evaluate_and_rollback(&store, &mut registry, &versions, &evidence);
@@ -85,6 +90,7 @@ fn external_modification_marks_stale_without_overwrite() {
             body_hash("new"),
             vec![target.clone()],
             Vec::new(),
+            vec!["run-old".to_string()],
         ))
         .expect("append");
     let evidence = EvidenceBundle {
@@ -95,7 +101,11 @@ fn external_modification_marks_stale_without_overwrite() {
             summary: "same command failed".to_string(),
             excerpt: None,
             occurrences: 1,
-            sources: Vec::new(),
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "proj/s.dataset".to_string(),
+                run_id: "run-new".to_string(),
+                step_id: "step-1".to_string(),
+            }],
         }],
     };
     evaluate_and_rollback(&store, &mut registry, &versions, &evidence);
@@ -104,4 +114,47 @@ fn external_modification_marks_stale_without_overwrite() {
         "# Guardrails\n\n- external rule\n"
     );
     assert_eq!(store.load().unwrap()[0].status, ObservationStatus::Stale);
+}
+
+#[test]
+fn historical_run_does_not_count_as_reappearance() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    let mut registry =
+        FakeRegistry::with_entries(vec![(id(), content("# Guardrails\n\n- new rule\n"))]);
+    let target = "retry_pattern:Bash:cargo test".to_string();
+    store
+        .append(&ChangeObservation::new_applied(
+            id().to_string(),
+            "cycle-1".to_string(),
+            body_hash("old"),
+            body_hash("# Guardrails\n\n- new rule\n"),
+            vec![target.clone()],
+            Vec::new(),
+            vec!["run-old".to_string()],
+        ))
+        .expect("append");
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RetryPattern,
+            signal_id: target,
+            summary: "historical".to_string(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "proj/s.dataset".to_string(),
+                run_id: "run-old".to_string(),
+                step_id: "step-1".to_string(),
+            }],
+        }],
+    };
+
+    let summaries = evaluate_and_rollback(&store, &mut registry, &versions, &evidence);
+    assert!(summaries.is_empty(), "{summaries:?}");
+    assert_eq!(
+        store.load().unwrap()[0].status,
+        ObservationStatus::Observing
+    );
 }

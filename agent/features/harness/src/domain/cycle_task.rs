@@ -704,6 +704,14 @@ fn record_change_observations(
             .iter()
             .map(|binding| binding.signal_id.clone())
             .collect();
+        let mut baseline_run_ids = Vec::new();
+        for signal in &evidence.signals {
+            for source in &signal.sources {
+                if !baseline_run_ids.contains(&source.run_id) {
+                    baseline_run_ids.push(source.run_id.clone());
+                }
+            }
+        }
         if target_signal_ids.is_empty() {
             continue;
         }
@@ -718,6 +726,7 @@ fn record_change_observations(
                 .iter()
                 .map(|signal| signal.signal_id.clone())
                 .collect(),
+            baseline_run_ids,
         );
         if let Err(error) = store.append(&observation) {
             log::warn!(target: crate::LOG_TARGET, "写入变更观察失败：{}", error.message());

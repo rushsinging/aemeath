@@ -37,6 +37,9 @@ pub struct ChangeObservation {
     pub after_hash: String,
     pub target_signal_ids: Vec<String>,
     pub baseline_signal_ids: Vec<String>,
+    /// 写入时已经处理过的 run；下一轮只有新 run 才能作为复现证据。
+    #[serde(default)]
+    pub baseline_run_ids: Vec<String>,
     pub observation_cycles: u32,
     pub status: ObservationStatus,
     pub created_at_secs: u64,
@@ -52,6 +55,7 @@ impl ChangeObservation {
         after_hash: String,
         target_signal_ids: Vec<String>,
         baseline_signal_ids: Vec<String>,
+        baseline_run_ids: Vec<String>,
     ) -> Self {
         Self {
             id: ChangeObservationId::new_v7(),
@@ -61,6 +65,7 @@ impl ChangeObservation {
             after_hash,
             target_signal_ids,
             baseline_signal_ids,
+            baseline_run_ids,
             observation_cycles: 0,
             status: ObservationStatus::Observing,
             created_at_secs: now_secs(),
@@ -172,6 +177,36 @@ fn signal_tool(signal_id: &str) -> &str {
     signal_id.split(':').nth(1).unwrap_or("")
 }
 
+fn evidence_from_new_runs(
+    observation: &ChangeObservation,
+    evidence: &EvidenceBundle,
+) -> EvidenceBundle {
+    if observation.baseline_run_ids.is_empty() {
+        // legacy 记录没有 run waterline：无法区分历史与新证据，保持安全不裁决。
+        return EvidenceBundle::default();
+    }
+    let mut fresh = EvidenceBundle {
+        sessions_covered: 0,
+        signals: Vec::new(),
+    };
+    for signal in &evidence.signals {
+        let sources: Vec<_> = signal
+            .sources
+            .iter()
+            .filter(|source| !observation.baseline_run_ids.contains(&source.run_id))
+            .cloned()
+            .collect();
+        if sources.is_empty() {
+            continue;
+        }
+        let mut signal = signal.clone();
+        signal.sources = sources;
+        fresh.signals.push(signal);
+        fresh.sessions_covered += 1;
+    }
+    fresh
+}
+
 fn relevant_activity(observation: &ChangeObservation, evidence: &EvidenceBundle) -> bool {
     let tools: Vec<&str> = observation
         .target_signal_ids
@@ -210,6 +245,8 @@ pub fn evaluate_and_rollback(
     {
         value.last_evaluated_at_secs = Some(now_secs());
         value.observation_cycles = value.observation_cycles.saturating_add(1);
+        let fresh = evidence_from_new_runs(value, evidence);
+        let evidence = &fresh;
         if target_reappeared(value, evidence) {
             let Some(id) = crate::parse_component_id(&value.component) else {
                 value.status = ObservationStatus::Stale;
@@ -350,6 +387,8 @@ pub async fn evaluate_and_rollback_with_llm(
     {
         value.last_evaluated_at_secs = Some(now_secs());
         value.observation_cycles = value.observation_cycles.saturating_add(1);
+        let fresh = evidence_from_new_runs(value, evidence);
+        let evidence = &fresh;
         let target_present = target_reappeared(value, evidence);
         let rollback = if target_present {
             true

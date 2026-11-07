@@ -1173,6 +1173,7 @@ pub fn run_rsi_review_approve(id: &str, resolve: Option<&str>, reason: Option<&s
             harness::domain::change_observation::body_hash(&candidate.proposed_body),
             candidate.evidence.clone(),
             candidate.evidence.clone(),
+            Vec::new(),
         );
         if let Err(error) = rsi_observation_store().append(&observation) {
             log::warn!(target: crate::LOG_TARGET, "写入 change 观察失败：{}", error.message());
