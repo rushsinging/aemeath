@@ -35,7 +35,12 @@ pub struct ChangeObservation {
     pub snapshot_cycle: String,
     pub before_hash: String,
     pub after_hash: String,
+    /// 脱敏后的展示用 signal id。
     pub target_signal_ids: Vec<String>,
+    /// signal id 的稳定 hash，用于匹配；不保存原始命令。
+    #[serde(default)]
+    pub target_signal_hashes: Vec<String>,
+    /// 脱敏后的 baseline 展示。
     pub baseline_signal_ids: Vec<String>,
     /// 写入时已经处理过的 run；下一轮只有新 run 才能作为复现证据。
     #[serde(default)]
@@ -57,6 +62,18 @@ impl ChangeObservation {
         baseline_signal_ids: Vec<String>,
         baseline_run_ids: Vec<String>,
     ) -> Self {
+        let target_signal_hashes = target_signal_ids
+            .iter()
+            .map(|signal| signal_hash(signal))
+            .collect();
+        let target_signal_ids = target_signal_ids
+            .iter()
+            .map(|signal| display_signal_id(signal))
+            .collect();
+        let baseline_signal_ids = baseline_signal_ids
+            .iter()
+            .map(|signal| display_signal_id(signal))
+            .collect();
         Self {
             id: ChangeObservationId::new_v7(),
             component,
@@ -64,6 +81,7 @@ impl ChangeObservation {
             before_hash,
             after_hash,
             target_signal_ids,
+            target_signal_hashes,
             baseline_signal_ids,
             baseline_run_ids,
             observation_cycles: 0,
@@ -84,6 +102,18 @@ fn now_secs() -> u64 {
 
 pub fn body_hash(body: &str) -> String {
     utils::stable_sha256_hex(b"aemeath.harness.change.v1\0", &[body.as_bytes()])
+}
+
+fn signal_hash(signal_id: &str) -> String {
+    utils::stable_sha256_hex(b"aemeath.harness.signal-id.v1\0", &[signal_id.as_bytes()])
+}
+
+fn display_signal_id(signal_id: &str) -> String {
+    let mut parts = signal_id.split(':');
+    match (parts.next(), parts.next()) {
+        (Some(kind), Some(tool)) => format!("{kind}:{tool}"),
+        _ => crate::domain::redaction::redact_sensitive_text(signal_id),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -221,10 +251,17 @@ fn relevant_activity(observation: &ChangeObservation, evidence: &EvidenceBundle)
 }
 
 fn target_reappeared(observation: &ChangeObservation, evidence: &EvidenceBundle) -> bool {
-    evidence
-        .signals
-        .iter()
-        .any(|signal| observation.target_signal_ids.contains(&signal.signal_id))
+    if observation.target_signal_hashes.is_empty() {
+        // legacy 记录：旧字段保存的是原始 id。
+        return evidence
+            .signals
+            .iter()
+            .any(|signal| observation.target_signal_ids.contains(&signal.signal_id));
+    }
+    evidence.signals.iter().any(|signal| {
+        let hash = signal_hash(&signal.signal_id);
+        observation.target_signal_hashes.contains(&hash)
+    })
 }
 
 /// 评估并回滚；返回可读摘要。失败只返回错误摘要，不阻断主周期。

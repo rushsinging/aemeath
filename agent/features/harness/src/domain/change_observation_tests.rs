@@ -158,3 +158,20 @@ fn historical_run_does_not_count_as_reappearance() {
         ObservationStatus::Observing
     );
 }
+
+#[test]
+fn observation_stores_signal_hash_and_redacted_display() {
+    let observation = ChangeObservation::new_applied(
+        "tool-guidance/default".to_string(),
+        "cycle-1".to_string(),
+        body_hash("old"),
+        body_hash("new"),
+        vec!["retry_pattern:Bash:{\"command\":\"curl -H sk-secret-123\"}".to_string()],
+        vec!["oversized_result:Bash".to_string()],
+        vec!["run-1".to_string()],
+    );
+    assert_eq!(observation.target_signal_hashes.len(), 1);
+    assert!(!observation.target_signal_ids[0].contains("sk-secret-123"));
+    assert_eq!(observation.target_signal_ids[0], "retry_pattern:Bash");
+    assert_eq!(observation.baseline_signal_ids[0], "oversized_result:Bash");
+}
