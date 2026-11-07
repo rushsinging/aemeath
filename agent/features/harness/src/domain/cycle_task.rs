@@ -405,11 +405,18 @@ impl RsiTask for HarnessRsiCycleTask {
                 )
                 .await
                 {
-                    if let Some(observation_store) = self.observation_store.as_deref() {
-                        for adoption in &compose_outcome.adopted {
-                            let _ = observation_store.supersede_component(
-                                &adoption.id.to_string(),
-                                "被 Compose 修正覆盖",
+                    if !self.dry_run {
+                        if let (Some(observation_store), Some(version_store)) = (
+                            self.observation_store.as_deref(),
+                            self.version_store.as_deref(),
+                        ) {
+                            record_change_observations(
+                                observation_store,
+                                registry,
+                                version_store,
+                                &compose_outcome.adopted,
+                                &cycle_id,
+                                &observation_evidence,
                             );
                         }
                     }
@@ -547,6 +554,7 @@ impl RsiTask for HarnessRsiCycleTask {
             }
         }
         // #2065 A：周期 Compose 汇总块——纵观全部采纳仲裁矛盾/合并/精炼
+        let mut compose_applied = false;
         if !all_adoptions.is_empty() {
             if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
                 registry,
@@ -565,16 +573,31 @@ impl RsiTask for HarnessRsiCycleTask {
                 if self.dry_run {
                     report_lines.push(format!("    {}", compose_outcome.summary));
                 }
-                if let Some(observation_store) = self.observation_store.as_deref() {
-                    for adoption in &compose_outcome.adopted {
-                        let _ = observation_store
-                            .supersede_component(&adoption.id.to_string(), "被 Compose 修正覆盖");
+                if !self.dry_run && !compose_outcome.adopted.is_empty() {
+                    compose_applied = true;
+                    if let (Some(observation_store), Some(version_store)) = (
+                        self.observation_store.as_deref(),
+                        self.version_store.as_deref(),
+                    ) {
+                        let mut merged = crate::domain::evidence::EvidenceBundle::default();
+                        for evidence in &block_evidences {
+                            merged.signals.extend(evidence.signals.iter().cloned());
+                            merged.sessions_covered += evidence.sessions_covered;
+                        }
+                        record_change_observations(
+                            observation_store,
+                            registry,
+                            version_store,
+                            &compose_outcome.adopted,
+                            &cycle_id,
+                            &merged,
+                        );
                     }
                 }
                 summary_parts.push(compose_outcome.summary);
             }
         }
-        if !self.dry_run {
+        if !self.dry_run && !compose_applied {
             if let (Some(observation_store), Some(version_store)) = (
                 self.observation_store.as_deref(),
                 self.version_store.as_deref(),
