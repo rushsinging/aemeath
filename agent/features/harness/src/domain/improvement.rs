@@ -9,8 +9,12 @@ use crate::constants::{
     ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS,
     RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS,
 };
-use crate::domain::changeset::{apply_change_set_with_policy, AppliedEdit, ChangeSet, WritePolicy};
+use crate::domain::candidate::{CandidateRisk, CandidateScope, RsiCandidate, RsiCandidateStore};
+use crate::domain::changeset::{
+    apply_change_set_with_policy, AppliedEdit, ChangeSet, ComponentEdit, WritePolicy,
+};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
+use crate::domain::component_audit::is_user_level_component;
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
@@ -120,6 +124,17 @@ pub struct ImprovementMaterials {
     pub evidence: crate::domain::evidence::EvidenceBundle,
 }
 
+/// LLM 对写入方式的决策：默认自动，review 才进入候选队列。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionDecision {
+    #[default]
+    Auto,
+    Review,
+    Shadow,
+    Reject,
+}
+
 /// 逐块提案的 LLM 应答信封：NEVER 裸 ChangeSet——LLM 需要能表达
 /// 「证据不支持任何变更」，该表达是合法结果而非失败。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,6 +146,8 @@ pub enum BlockProposal {
         reason: String,
         #[serde(default)]
         signal_ids: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         change_set: ChangeSet,
     },
     /// 无变更：证据不支持任何编辑（合法结果）。
@@ -468,12 +485,17 @@ pub fn build_execution_prompt(
   7800 tokens；超预算会再压缩一轮，NEVER 硬截断。
 - 每条编辑的 reason MUST 引用该任务的 target_signal。
 
+promotion 契约：
+- auto：低风险、证据充分，host 校验后直接写入
+- review：不确定、影响面大或需要人工确认
+- reject：不建议写入
+
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","reason":"<依据，引用 signal id>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<依据，引用 signal id>","promotion":"auto","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -509,6 +531,8 @@ pub enum FixedComponentExecutionProposal {
     Propose {
         reason: String,
         evidence_refs: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         #[serde(default)]
         body: Option<String>,
         #[serde(default)]
@@ -612,6 +636,11 @@ pub fn build_block_prompt(
   破坏性操作无确认、失败后不诊断根因只重试。
 - **结论质量**：空泛建议、无证据断言、不复述关键约束就动手。
 
+promotion 契约：
+  - auto：低风险、证据充分，host 校验后直接写入
+  - review：不确定、影响面大或需要人工确认
+  - reject：不建议写入
+
 编辑契约：
   - 提案只携带要变更的组件（未提及的组件自动保持原样）
   - evidence_refs 必须非空，且每个 ref 都来自上方证据块（E0/E1…）；未知引用会作废整份提案
@@ -619,8 +648,8 @@ pub fn build_block_prompt(
   - patch 的 old_string/anchor MUST 唯一且非空；patch 只改目标片段
 
   只输出一个 JSON 对象，格式三选一：
-  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
-  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"promotion":"auto","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"promotion":"auto","change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -660,6 +689,8 @@ enum RawBlockProposal {
         evidence_refs: Vec<String>,
         #[serde(default)]
         signal_ids: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         change_set: ChangeSet,
     },
     NoChange {
@@ -697,6 +728,7 @@ pub fn parse_block_proposal_with_refs(
             reason,
             evidence_refs,
             signal_ids,
+            promotion,
             change_set,
         } => {
             if !evidence_refs.is_empty() && !signal_ids.is_empty() {
@@ -734,6 +766,7 @@ pub fn parse_block_proposal_with_refs(
             Ok(BlockProposal::Propose {
                 reason,
                 signal_ids,
+                promotion,
                 change_set,
             })
         }
@@ -1363,6 +1396,7 @@ async fn compact_block_proposal_budgets(
     let BlockProposal::Propose {
         reason,
         signal_ids,
+        promotion,
         mut change_set,
     } = proposal
     else {
@@ -1396,7 +1430,7 @@ async fn compact_block_proposal_budgets(
 - 输出仍是完整正文。
 
 只输出一个 JSON 对象：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<压缩后的完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
@@ -1431,12 +1465,92 @@ async fn compact_block_proposal_budgets(
     Some(BlockProposal::Propose {
         reason,
         signal_ids,
+        promotion,
         change_set,
     })
 }
 
 /// 单块执行：LLM 提案 → 解析 → registry 预检/落盘。
 /// 返回 (applied, outcome_label)；解析失败或校验作废都只作废该块。
+fn candidate_projects_for(
+    signal_ids: &[String],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Vec<String> {
+    let mut projects = Vec::new();
+    for signal in &evidence.signals {
+        if !signal_ids.contains(&signal.signal_id) {
+            continue;
+        }
+        for source in &signal.sources {
+            let project = source
+                .session_id
+                .split('/')
+                .next()
+                .unwrap_or("unknown")
+                .to_string();
+            if project != "unknown" && !projects.contains(&project) {
+                projects.push(project);
+            }
+        }
+    }
+    projects
+}
+
+/// 全局组件提案进入待审候选；返回 true 表示已排队、NEVER 直写。
+fn enqueue_global_candidates(
+    store: &RsiCandidateStore,
+    registry: &dyn ComponentRegistry,
+    change_set: &ChangeSet,
+    signal_ids: &[String],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Result<bool, HarnessError> {
+    if !change_set
+        .edits
+        .iter()
+        .any(|edit| is_user_level_component(edit.id()))
+    {
+        return Ok(false);
+    }
+    if !change_set
+        .edits
+        .iter()
+        .all(|edit| is_user_level_component(edit.id()))
+    {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            "全局候选与项目编辑混合，MUST 拆分后才能 review",
+        ));
+    }
+    let projects = candidate_projects_for(signal_ids, evidence);
+    for edit in &change_set.edits {
+        let id = edit.id();
+        let current = registry.read(id)?;
+        let proposed = match edit {
+            ComponentEdit::Upsert { content, .. } => content.body.clone(),
+            ComponentEdit::Patch { operations, .. } => {
+                crate::domain::changeset::apply_patch_operations(&current.body, operations)?
+            }
+            ComponentEdit::Delete { .. } => {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    "全局组件删除不能进入候选",
+                ))
+            }
+        };
+        let candidate = RsiCandidate::new_pending(
+            CandidateScope::Global,
+            id.to_string(),
+            current.body,
+            proposed,
+            signal_ids.to_vec(),
+            projects.clone(),
+            CandidateRisk::Medium,
+        );
+        store.append(&candidate)?;
+    }
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_block(
     registry: &mut dyn ComponentRegistry,
@@ -1451,6 +1565,7 @@ async fn run_block(
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     block_index: usize,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> (Option<AcceptedBlock>, &'static str) {
     // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
     // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
@@ -1556,9 +1671,13 @@ async fn run_block(
         BlockProposal::Propose {
             reason,
             signal_ids,
+            promotion,
             change_set,
         } => {
             let evidence_bindings = evidence_bindings_for(&signal_ids, evidence, cycle_ref);
+            if promotion == PromotionDecision::Reject {
+                return (None, "拒绝（LLM 判断不写入）");
+            }
             if dry_run {
                 // 预演（#2050）：逐条校验（含整份作废预检）但不落盘、
                 // 不写 lesson、不推游标；预览行供 preview 文件。
@@ -1631,6 +1750,35 @@ async fn run_block(
                 } else {
                     (None, "预演（将作废）")
                 };
+            }
+            if promotion == PromotionDecision::Review {
+                if let Some(candidate_store) = candidate_store {
+                    match enqueue_global_candidates(
+                        candidate_store,
+                        registry,
+                        &change_set,
+                        &signal_ids,
+                        evidence,
+                    ) {
+                        Ok(true) => {
+                            if let Some(recorder) = recorder {
+                                recorder.record(
+                                    &crate::domain::events::RsiCycleEvent::ProposalParsed {
+                                        block_index,
+                                        reason: reason.clone(),
+                                        edits: change_set.edits.len(),
+                                    },
+                                );
+                            }
+                            return (None, "待确认");
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            log::warn!(target: crate::LOG_TARGET, "候选入队失败：{}", error.message());
+                            return (None, "作废（候选入队失败）");
+                        }
+                    }
+                }
             }
             // #2074：采纳前逐 edit 快照旧内容（回滚依据；失败仅 warn——NEVER
             // 阻断采纳，但会丢失该次回滚能力）
@@ -1923,7 +2071,7 @@ pub async fn run_diagnosis_cycle(
         }
         report_lines.push(format!(
             "  [强度] {} → {}（{}）",
-            verdict.signal_id,
+            crate::domain::redaction::redact_sensitive_text(&verdict.signal_id),
             verdict.tier.as_str(),
             verdict.rationale
         ));
@@ -2006,7 +2154,11 @@ pub async fn run_diagnosis_cycle(
     for issue in &summary.issues {
         report_lines.push(format!(
             "  [诊断汇总] {} ← {}（×{}）：{} → {}",
-            issue.component, issue.target_signal, issue.occurrences, issue.problem, issue.direction
+            issue.component,
+            crate::domain::redaction::redact_sensitive_text(&issue.target_signal),
+            issue.occurrences,
+            issue.problem,
+            issue.direction
         ));
     }
     Ok(summary)
@@ -2027,6 +2179,74 @@ pub async fn run_two_phase_cycle(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
     lesson_store: &LessonStore,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    run_two_phase_cycle_inner(
+        registry,
+        llm,
+        lesson_store,
+        config,
+        evidence,
+        context_reader,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        history,
+        cycle_id,
+        None,
+    )
+    .await
+}
+
+/// 带候选库的 TwoPhase 入口：全局执行提案进入 pending review。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_two_phase_cycle_with_candidates(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+    candidate_store: Option<&RsiCandidateStore>,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    run_two_phase_cycle_inner(
+        registry,
+        llm,
+        lesson_store,
+        config,
+        evidence,
+        context_reader,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        history,
+        cycle_id,
+        candidate_store,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_two_phase_cycle_inner(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
     _config: &RsiConfig,
     evidence: crate::domain::evidence::EvidenceBundle,
     context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
@@ -2036,6 +2256,7 @@ pub async fn run_two_phase_cycle(
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
     history: &mut crate::domain::strength::SignalHistory,
     cycle_id: &str,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<RunTwoPhaseOutcome, HarnessError> {
     let cycle_ref = cycle_id.to_string();
     let lessons = lesson_store.load_active()?;
@@ -2082,7 +2303,7 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [强度] {} → {}（{}）",
-            verdict.signal_id,
+            crate::domain::redaction::redact_sensitive_text(&verdict.signal_id),
             verdict.tier.as_str(),
             verdict.rationale
         ));
@@ -2123,7 +2344,8 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → {}（唯一候选）",
-                    fact.signal.signal_id, component
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
+                    component
                 ));
                 route_plans.push(TwoPhaseRoutePlan {
                     fact,
@@ -2141,7 +2363,7 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → candidates: {}",
-                    fact.signal.signal_id,
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
                     candidates
                         .iter()
                         .map(|id| id.to_string())
@@ -2160,7 +2382,8 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → unresolved（{}）",
-                    fact.signal.signal_id, reason
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
+                    reason
                 ));
             }
         }
@@ -2366,7 +2589,8 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [route] {} → {}（diagnosis）",
-            plan.fact.signal.signal_id, component
+            crate::domain::redaction::redact_sensitive_text(&plan.fact.signal.signal_id),
+            component
         ));
         diagnosed_issues.push(DiagnosedIssue {
             component: component.to_string(),
@@ -2392,6 +2616,7 @@ pub async fn run_two_phase_cycle(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut pending = 0usize;
     let mut adoption_records = Vec::new();
     let mut grouped: std::collections::BTreeMap<
         ComponentId,
@@ -2426,7 +2651,11 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [execution] fixed component {component_id} ← {}",
-            signal_ids.join(", ")
+            signal_ids
+                .iter()
+                .map(|signal_id| crate::domain::redaction::redact_sensitive_text(signal_id))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         let issue_block = issues
             .iter()
@@ -2471,8 +2700,8 @@ pub async fn run_two_phase_cycle(
   NEVER 硬截断。
 
 只输出一个 JSON 对象，格式三选一：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<完整正文>"}}
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
 {{"decision":"no_change","reason":"<一句话>"}}
 不要输出 JSON 以外的任何文字。"#,
             component_scope = component_scope_label(&component_id),
@@ -2530,6 +2759,7 @@ pub async fn run_two_phase_cycle(
             Ok(FixedComponentExecutionProposal::Propose {
                 reason,
                 evidence_refs,
+                promotion,
                 body,
                 operations,
             }) => {
@@ -2608,6 +2838,7 @@ pub async fn run_two_phase_cycle(
                             id: component_id.clone(),
                             operations,
                         },
+                        promotion,
                     )
                 } else {
                     let Some(mut final_body) = body else {
@@ -2644,7 +2875,7 @@ pub async fn run_two_phase_cycle(
 - 输出仍是完整正文。
 
 只输出一个 JSON 对象：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<压缩后的完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
@@ -2729,6 +2960,7 @@ pub async fn run_two_phase_cycle(
                             id: component_id.clone(),
                             content: new_content,
                         },
+                        promotion,
                     )
                 }
             }
@@ -2748,7 +2980,11 @@ pub async fn run_two_phase_cycle(
                 continue;
             }
         };
-        let (reason, edit) = execution;
+        let (reason, edit, promotion) = execution;
+        if promotion == PromotionDecision::Reject {
+            discarded += issues.len();
+            continue;
+        }
         let change_set = ChangeSet {
             edits: vec![edit.clone()],
         };
@@ -2799,6 +3035,20 @@ pub async fn run_two_phase_cycle(
             continue;
         }
 
+        if promotion == PromotionDecision::Review {
+            if let Some(candidate_store) = candidate_store {
+                if enqueue_global_candidates(
+                    candidate_store,
+                    registry,
+                    &change_set,
+                    &signal_ids,
+                    &evidence,
+                )? {
+                    pending += 1;
+                    continue;
+                }
+            }
+        }
         if let Some(version_store) = version_store {
             if let Err(error) =
                 version_store.capture(registry, &component_id, &cycle_ref, edit.action())
@@ -2846,7 +3096,10 @@ pub async fn run_two_phase_cycle(
     }
 
     let prefix = if dry_run { "（dry-run）" } else { "" };
-    let summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    let mut summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    if pending > 0 {
+        summary.push_str(&format!(" / 待确认 {pending}"));
+    }
     Ok(RunTwoPhaseOutcome {
         outcome: CycleOutcome {
             summary,
@@ -2910,6 +3163,7 @@ pub async fn run_improvement_cycle(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -2940,6 +3194,7 @@ pub async fn run_improvement_cycle(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut pending = 0usize;
     let mut adoption_records: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
     for (block_index, chunk) in chunks.iter().enumerate() {
         let (block_adoptions, label) = run_block(
@@ -2955,6 +3210,7 @@ pub async fn run_improvement_cycle(
             recorder,
             block_index,
             version_store,
+            candidate_store,
         )
         .await;
         if let Some(accepted) = block_adoptions {
@@ -2973,6 +3229,7 @@ pub async fn run_improvement_cycle(
         match label {
             "采纳" => adopted += 1,
             "无变更" => no_change += 1,
+            "待确认" => pending += 1,
             // 预演 label（将采纳/将作废）由 preview_lines 呈现详情，
             // 计数只归入对应桶（#2050）
             "预演（将采纳）" => adopted += 1,
@@ -2982,8 +3239,12 @@ pub async fn run_improvement_cycle(
         log::info!(target: crate::LOG_TARGET, "改进块完成：{label}");
     }
     let prefix = if dry_run { "（dry-run）" } else { "" };
+    let mut summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    if pending > 0 {
+        summary.push_str(&format!(" / 待确认 {pending}"));
+    }
     Ok(CycleOutcome {
-        summary: format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
+        summary,
         adopted: adoption_records,
     })
 }
@@ -3450,7 +3711,7 @@ pub async fn run_compose_phase(
 
 编辑契约同改进块（omitted-is-inherited；upsert 的 content.body 为
 完整正文）。只输出一个 JSON 对象，格式二选一（NEVER 输出其他形态）：
-{{"decision":"propose","reason":"<仲裁依据，一句话>","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<仲裁依据，一句话>","promotion":"auto","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#,
         adoptions = adoptions_block.join("\n"),
@@ -3474,6 +3735,7 @@ pub async fn run_compose_phase(
         Ok(BlockProposal::Propose {
             reason,
             signal_ids,
+            promotion: _,
             change_set,
         }) => {
             let evidence_by_component =

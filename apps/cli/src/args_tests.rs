@@ -195,3 +195,38 @@ fn cli_rejects_retired_scoring_serve_top_level() {
         "`aemeath scoring serve` 已退役，应解析失败"
     );
 }
+
+#[test]
+fn rsi_review_subcommands_parse() {
+    let cli = Cli::try_parse_from(["aemeath", "rsi", "review"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Rsi {
+            command: RsiCommands::Review { command: None }
+        })
+    ));
+
+    let cli = Cli::try_parse_from([
+        "aemeath",
+        "rsi",
+        "review",
+        "approve",
+        "rsc_test",
+        "--yes",
+        "--resolve",
+        "global",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Rsi {
+            command: RsiCommands::Review {
+                command: Some(RsiReviewCommands::Approve {
+                    yes: true,
+                    resolve: Some(_),
+                    ..
+                })
+            }
+        })
+    ));
+}

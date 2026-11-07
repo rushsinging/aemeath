@@ -2,10 +2,11 @@
 //!
 //! 试点范围：guardrails/tool-guidance/overlay。LLM 只输出规则级
 //! keep/merge/delete 决策；宿主校验覆盖完整性并重建完整 body，避免
-//! “整份重写”导致规则被静默丢失或压成残片。
+//! “整份重写”导致规则被静默丢失或压成残片。超预算 body 按规则块维护。
 
 use crate::application::ComponentRegistry;
-use crate::constants::ERROR_DOMAIN;
+use crate::constants::{COMPONENT_MAINTENANCE_CHUNK_RULES, ERROR_DOMAIN};
+use crate::domain::candidate::{CandidateRisk, CandidateScope, RsiCandidate, RsiCandidateStore};
 use crate::domain::changeset::{
     apply_change_set_with_policy, ChangeSet, ComponentEdit, WritePolicy,
 };
@@ -16,7 +17,7 @@ use crate::domain::component_audit::{
 use crate::domain::errors::HarnessError;
 use crate::domain::events::RsiCycleEvent;
 use crate::domain::improvement::{
-    complete_with_usage_event, component_body_budget_tokens, RsiLlmPort,
+    complete_with_usage_event, component_body_budget_tokens, PromotionDecision, RsiLlmPort,
 };
 use crate::domain::versioning::ComponentVersionStore;
 use serde::Deserialize;
@@ -26,6 +27,8 @@ use serde::Deserialize;
 enum MaintenanceProposal {
     Compact {
         reason: String,
+        #[serde(default)]
+        promotion: PromotionDecision,
         rules: Vec<MaintenanceRuleEdit>,
     },
     NoChange {
@@ -39,6 +42,32 @@ enum MaintenanceRuleEdit {
     Keep { source: Vec<usize> },
     Merge { source: Vec<usize>, text: String },
     Delete { source: Vec<usize>, reason: String },
+}
+
+struct MaintenanceFailure {
+    action: &'static str,
+    message: String,
+}
+
+impl MaintenanceFailure {
+    fn llm(message: impl Into<String>) -> Self {
+        Self {
+            action: "llm_failed",
+            message: message.into(),
+        }
+    }
+    fn parse(message: impl Into<String>) -> Self {
+        Self {
+            action: "parse_failed",
+            message: message.into(),
+        }
+    }
+    fn rejected(message: impl Into<String>) -> Self {
+        Self {
+            action: "rejected",
+            message: message.into(),
+        }
+    }
 }
 
 fn trigger_name(trigger: AuditTrigger) -> &'static str {
@@ -97,6 +126,71 @@ fn clean_merge_text(text: &str) -> String {
     trimmed.to_string()
 }
 
+fn build_prompt(
+    component: &str,
+    triggers: &str,
+    units: &[AuditRuleUnit],
+    body: Option<&str>,
+    chunked: bool,
+    max_output_rules: Option<usize>,
+) -> String {
+    let numbered = units
+        .iter()
+        .map(|rule| {
+            format!(
+                "[R{}] section={} | {}",
+                rule.index,
+                rule.section_path.join(" > "),
+                rule.raw
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body_block = body
+        .map(|body| format!("当前正文：\n{body}\n\n"))
+        .unwrap_or_default();
+    let chunk_note = if chunked {
+        let target = max_output_rules.unwrap_or(1);
+        format!(
+            "当前为分块维护：只处理下列规则；其他规则由其他分块处理。\n本块 MUST 压缩到最多 {target} 条规则，且每条规则 MUST 保留可执行语义，禁止只输出占位词。\n\n"
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        r#"你是 harness 组件维护器。当前组件需要压缩，但只能在原文范围内合并重复、删除冗余、压缩超长规则；NEVER 新增规则，NEVER 改变原有规则语义。
+
+组件：{component}
+触发原因：{triggers}
+{chunk_note}规则数量：{rule_count}
+{body_block}规则单元：
+{rules}
+
+硬性要求：
+- 每条规则 R0..R{n} MUST 被 keep/merge/delete 恰好覆盖一次；
+- delete MUST 给出理由；
+- merge 只输出合并后的单行规则文本，MUST 保留来源规则的可执行语义；
+- NEVER 新增来源之外的知识；
+- 只输出紧凑 JSON。
+
+输出格式：
+{{"decision":"compact","reason":"<一句话>","promotion":"auto|review|reject","rules":[
+  {{"action":"keep","source":[0]}},
+  {{"action":"merge","source":[1,2],"text":"<合并后的单行规则>"}},
+  {{"action":"delete","source":[3],"reason":"<理由>"}}
+]}}
+没有可维护变化时输出：
+{{"decision":"no_change","reason":"<一句话>"}}"#,
+        component = component,
+        triggers = triggers,
+        chunk_note = chunk_note,
+        rule_count = units.len(),
+        n = units.len().saturating_sub(1),
+        body_block = body_block,
+        rules = numbered,
+    )
+}
+
 fn validate_rule_edits(
     edits: &[MaintenanceRuleEdit],
     units: &[AuditRuleUnit],
@@ -126,35 +220,197 @@ fn validate_rule_edits(
             }
             covered[*index] = true;
         }
-        match edit {
-            MaintenanceRuleEdit::Merge { text, .. } => {
-                let cleaned = clean_merge_text(text);
-                if cleaned.is_empty() || cleaned.contains('\n') {
-                    return Err("merge 必须输出单行非空规则".to_string());
-                }
-                let source_max = source
-                    .iter()
-                    .filter_map(|index| units.get(*index))
-                    .map(|unit| share::token_budget::estimate_tokens(&unit.raw))
-                    .max()
-                    .unwrap_or(0);
-                let text_tokens = share::token_budget::estimate_tokens(&cleaned);
-                if source_max > 50 && text_tokens < 8 {
-                    return Err("merge 规则被压缩成无语义残片".to_string());
-                }
+        if let MaintenanceRuleEdit::Merge { text, .. } = edit {
+            let cleaned = clean_merge_text(text);
+            if cleaned.is_empty() || cleaned.contains('\n') {
+                return Err("merge 必须输出单行非空规则".to_string());
             }
-            MaintenanceRuleEdit::Delete { reason, .. } => {
-                if reason.trim().is_empty() {
-                    return Err("delete 必须给出理由".to_string());
-                }
+            let source_max = source
+                .iter()
+                .filter_map(|index| units.get(*index))
+                .map(|unit| share::token_budget::estimate_tokens(&unit.raw))
+                .max()
+                .unwrap_or(0);
+            let text_tokens = share::token_budget::estimate_tokens(&cleaned);
+            if source_max > 50 && text_tokens < 8 {
+                return Err("merge 规则被压缩成无语义残片".to_string());
             }
-            MaintenanceRuleEdit::Keep { .. } => {}
+        }
+        if let MaintenanceRuleEdit::Delete { reason, .. } = edit {
+            if reason.trim().is_empty() {
+                return Err("delete 必须给出理由".to_string());
+            }
         }
     }
     if let Some(index) = covered.iter().position(|value| !value) {
         return Err(format!("规则 R{index} 未被覆盖"));
     }
     Ok(())
+}
+
+fn map_edits(edits: Vec<MaintenanceRuleEdit>, mapping: &[usize]) -> Vec<MaintenanceRuleEdit> {
+    edits
+        .into_iter()
+        .map(|edit| match edit {
+            MaintenanceRuleEdit::Keep { source } => MaintenanceRuleEdit::Keep {
+                source: source
+                    .into_iter()
+                    .filter_map(|index| mapping.get(index).copied())
+                    .collect(),
+            },
+            MaintenanceRuleEdit::Merge { source, text } => MaintenanceRuleEdit::Merge {
+                source: source
+                    .into_iter()
+                    .filter_map(|index| mapping.get(index).copied())
+                    .collect(),
+                text,
+            },
+            MaintenanceRuleEdit::Delete { source, reason } => MaintenanceRuleEdit::Delete {
+                source: source
+                    .into_iter()
+                    .filter_map(|index| mapping.get(index).copied())
+                    .collect(),
+                reason,
+            },
+        })
+        .collect()
+}
+
+fn keep_all(units: &[AuditRuleUnit], mapping: &[usize]) -> Vec<MaintenanceRuleEdit> {
+    units
+        .iter()
+        .enumerate()
+        .filter_map(|(local, _)| {
+            mapping.get(local).map(|global| MaintenanceRuleEdit::Keep {
+                source: vec![*global],
+            })
+        })
+        .collect()
+}
+
+async fn collect_single_edits(
+    llm: &dyn RsiLlmPort,
+    component: &str,
+    triggers: &str,
+    body: &str,
+    units: &[AuditRuleUnit],
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<Option<(String, PromotionDecision, Vec<MaintenanceRuleEdit>)>, MaintenanceFailure> {
+    let prompt = build_prompt(component, triggers, units, Some(body), false, None);
+    let completion = complete_with_usage_event(llm, &prompt, "maintenance_compose", 0, recorder)
+        .await
+        .map_err(|error| MaintenanceFailure::llm(format!("LLM 调用失败（{}）", error.message())))?;
+    let proposal = parse_proposal(&completion.text)
+        .map_err(|error| MaintenanceFailure::parse(format!("解析失败（{}）", error.message())))?;
+    match proposal {
+        MaintenanceProposal::NoChange { reason } => {
+            let _ = reason;
+            Ok(None)
+        }
+        MaintenanceProposal::Compact {
+            reason,
+            promotion,
+            rules,
+        } => {
+            validate_rule_edits(&rules, units).map_err(|message| {
+                MaintenanceFailure::rejected(format!("规则覆盖校验失败（{message}）"))
+            })?;
+            Ok(Some((reason, promotion, rules)))
+        }
+    }
+}
+
+async fn collect_chunked_edits(
+    llm: &dyn RsiLlmPort,
+    component: &str,
+    triggers: &str,
+    units: &[AuditRuleUnit],
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<Option<(String, PromotionDecision, Vec<MaintenanceRuleEdit>)>, MaintenanceFailure> {
+    let mut all_edits = Vec::new();
+    let mut reasons = Vec::new();
+    let mut any_compact = false;
+    let mut promotion = PromotionDecision::Auto;
+    for (chunk_index, chunk) in units.chunks(COMPONENT_MAINTENANCE_CHUNK_RULES).enumerate() {
+        let mapping: Vec<usize> = chunk.iter().map(|unit| unit.index).collect();
+        let local_units: Vec<AuditRuleUnit> = chunk
+            .iter()
+            .enumerate()
+            .map(|(local, unit)| {
+                let mut local_unit = unit.clone();
+                local_unit.index = local;
+                local_unit
+            })
+            .collect();
+        let target_rules = local_units.len().div_ceil(6).max(1);
+        let prompt = build_prompt(
+            component,
+            triggers,
+            &local_units,
+            None,
+            true,
+            Some(target_rules),
+        );
+        let completion =
+            complete_with_usage_event(llm, &prompt, "maintenance_compose", chunk_index, recorder)
+                .await
+                .map_err(|error| {
+                    MaintenanceFailure::llm(format!(
+                        "分块 {chunk_index} LLM 调用失败（{}）",
+                        error.message()
+                    ))
+                })?;
+        let proposal = parse_proposal(&completion.text).map_err(|error| {
+            MaintenanceFailure::parse(format!(
+                "分块 {chunk_index} 解析失败（{}）",
+                error.message()
+            ))
+        })?;
+        match proposal {
+            MaintenanceProposal::NoChange { reason } => {
+                let _ = reason;
+                all_edits.extend(keep_all(&local_units, &mapping));
+            }
+            MaintenanceProposal::Compact {
+                reason,
+                promotion: chunk_promotion,
+                rules,
+            } => {
+                if chunk_promotion == PromotionDecision::Reject {
+                    promotion = PromotionDecision::Reject;
+                } else if (chunk_promotion == PromotionDecision::Review
+                    || chunk_promotion == PromotionDecision::Shadow)
+                    && promotion != PromotionDecision::Reject
+                {
+                    promotion = chunk_promotion;
+                }
+                validate_rule_edits(&rules, &local_units).map_err(|message| {
+                    MaintenanceFailure::rejected(format!(
+                        "分块 {chunk_index} 规则覆盖校验失败（{message}）"
+                    ))
+                })?;
+                let output_rules = rules
+                    .iter()
+                    .map(|edit| match edit {
+                        MaintenanceRuleEdit::Keep { .. } | MaintenanceRuleEdit::Merge { .. } => 1,
+                        MaintenanceRuleEdit::Delete { .. } => 0,
+                    })
+                    .sum::<usize>();
+                if output_rules > target_rules {
+                    return Err(MaintenanceFailure::rejected(format!(
+                        "分块 {chunk_index} 压缩后仍有 {output_rules} 条规则，超过目标 {target_rules}"
+                    )));
+                }
+                any_compact = true;
+                reasons.push(reason);
+                all_edits.extend(map_edits(rules, &mapping));
+            }
+        }
+    }
+    if !any_compact {
+        return Ok(None);
+    }
+    Ok(Some((reasons.join("；"), promotion, all_edits)))
 }
 
 fn rebuild_body(
@@ -205,6 +461,7 @@ pub async fn run_maintenance_compose_phase(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&ComponentVersionStore>,
+    candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<Vec<String>, HarnessError> {
     let mut summaries = Vec::new();
     for finding in findings {
@@ -219,105 +476,62 @@ pub async fn run_maintenance_compose_phase(
             ));
             continue;
         }
-        let numbered = units
-            .iter()
-            .map(|rule| {
-                format!(
-                    "[R{}] section={} | {}",
-                    rule.index,
-                    rule.section_path.join(" > "),
-                    rule.raw
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
         let triggers = finding
             .triggers
             .iter()
             .map(|trigger| trigger_name(*trigger))
             .collect::<Vec<_>>()
             .join(", ");
-        let prompt = format!(
-            r#"你是 harness 组件维护器。当前组件需要压缩，但只能在原文范围内合并重复、删除冗余、压缩超长规则；NEVER 新增规则，NEVER 改变原有规则语义。
-
-组件：{component}
-触发原因：{triggers}
-规则数量：{rule_count}
-当前正文：
-{body}
-
-规则单元：
-{rules}
-
-硬性要求：
-- 每条规则 R0..R{n} MUST 被 keep/merge/delete 恰好覆盖一次；
-- delete MUST 给出理由；
-- merge 只输出合并后的单行规则文本，MUST 保留来源规则的可执行语义；
-- NEVER 新增来源之外的知识；
-- 只输出紧凑 JSON。
-
-输出格式：
-{{"decision":"compact","reason":"<一句话>","rules":[
-  {{"action":"keep","source":[0]}},
-  {{"action":"merge","source":[1,2],"text":"<合并后的单行规则>"}},
-  {{"action":"delete","source":[3],"reason":"<理由>"}}
-]}}
-没有可维护变化时输出：
-{{"decision":"no_change","reason":"<一句话>"}}"#,
-            component = finding.component,
-            triggers = triggers,
-            rule_count = units.len(),
-            n = units.len().saturating_sub(1),
-            body = current.body,
-            rules = numbered,
-        );
-        let completion =
-            match complete_with_usage_event(llm, &prompt, "maintenance_compose", 0, recorder).await
-            {
-                Ok(completion) => completion,
-                Err(error) => {
-                    if let Some(recorder) = recorder {
-                        recorder.record(&RsiCycleEvent::MaintenanceComposeResult {
-                            component: finding.component.to_string(),
-                            action: "llm_failed".to_string(),
-                            before_tokens: finding.body_tokens,
-                            after_tokens: finding.body_tokens,
-                            before_rules: finding.rule_count,
-                            after_rules: finding.rule_count,
-                            reason: error.message().chars().take(120).collect(),
-                        });
-                    }
-                    summaries.push(format!(
-                        "维护 Compose：{} LLM 调用失败（跳过）",
-                        finding.component
-                    ));
-                    continue;
-                }
-            };
-        let proposal = match parse_proposal(&completion.text) {
-            Ok(proposal) => proposal,
-            Err(error) => {
-                if let Some(recorder) = recorder {
-                    recorder.record(&RsiCycleEvent::MaintenanceComposeResult {
-                        component: finding.component.to_string(),
-                        action: "parse_failed".to_string(),
-                        before_tokens: finding.body_tokens,
-                        after_tokens: finding.body_tokens,
-                        before_rules: finding.rule_count,
-                        after_rules: finding.rule_count,
-                        reason: error.message().chars().take(120).collect(),
-                    });
-                }
-                summaries.push(format!(
-                    "维护 Compose：{} 解析失败（跳过）",
-                    finding.component
-                ));
-                continue;
+        let budget = component_body_budget_tokens(&finding.component);
+        if finding.body_tokens > budget.saturating_mul(2) {
+            if let Some(recorder) = recorder {
+                recorder.record(&RsiCycleEvent::MaintenanceComposeResult {
+                    component: finding.component.to_string(),
+                    action: "skipped_oversized".to_string(),
+                    before_tokens: finding.body_tokens,
+                    after_tokens: finding.body_tokens,
+                    before_rules: finding.rule_count,
+                    after_rules: finding.rule_count,
+                    reason: format!(
+                        "body {} tokens 超过可维护上限 {}",
+                        finding.body_tokens,
+                        budget * 2
+                    ),
+                });
             }
+            summaries.push(format!(
+                "维护 Compose：{} 超预算过大（{} > {} tokens），跳过维护",
+                finding.component,
+                finding.body_tokens,
+                budget * 2
+            ));
+            continue;
+        }
+        let chunked =
+            finding.body_tokens > budget && units.len() > COMPONENT_MAINTENANCE_CHUNK_RULES;
+        let collected = if chunked {
+            collect_chunked_edits(
+                llm,
+                &finding.component.to_string(),
+                &triggers,
+                &units,
+                recorder,
+            )
+            .await
+        } else {
+            collect_single_edits(
+                llm,
+                &finding.component.to_string(),
+                &triggers,
+                &current.body,
+                &units,
+                recorder,
+            )
+            .await
         };
-        let (reason, edits) = match proposal {
-            MaintenanceProposal::Compact { reason, rules } => (reason, rules),
-            MaintenanceProposal::NoChange { reason } => {
+        let (reason, promotion, edits) = match collected {
+            Ok(Some(value)) => value,
+            Ok(None) => {
                 if let Some(recorder) = recorder {
                     recorder.record(&RsiCycleEvent::MaintenanceComposeResult {
                         component: finding.component.to_string(),
@@ -326,25 +540,39 @@ pub async fn run_maintenance_compose_phase(
                         after_tokens: finding.body_tokens,
                         before_rules: finding.rule_count,
                         after_rules: finding.rule_count,
-                        reason: reason.chars().take(120).collect(),
+                        reason: "模型判定无需维护".to_string(),
                     });
                 }
                 summaries.push(format!("维护 Compose：{} 无变更", finding.component));
                 continue;
             }
-        };
-        if let Err(message) = validate_rule_edits(&edits, &units) {
-            if let Some(recorder) = recorder {
-                recorder.record(&RsiCycleEvent::MaintenanceComposeResult {
-                    component: finding.component.to_string(),
-                    action: "rejected".to_string(),
-                    before_tokens: finding.body_tokens,
-                    after_tokens: finding.body_tokens,
-                    before_rules: finding.rule_count,
-                    after_rules: finding.rule_count,
-                    reason: message.chars().take(120).collect(),
-                });
+            Err(failure) => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&RsiCycleEvent::MaintenanceComposeResult {
+                        component: finding.component.to_string(),
+                        action: failure.action.to_string(),
+                        before_tokens: finding.body_tokens,
+                        after_tokens: finding.body_tokens,
+                        before_rules: finding.rule_count,
+                        after_rules: finding.rule_count,
+                        reason: failure.message.chars().take(120).collect(),
+                    });
+                }
+                summaries.push(format!(
+                    "维护 Compose：{} {}",
+                    finding.component, failure.message
+                ));
+                continue;
             }
+        };
+        if promotion == PromotionDecision::Reject {
+            summaries.push(format!(
+                "维护 Compose：{} LLM 判断不写入",
+                finding.component
+            ));
+            continue;
+        }
+        if let Err(message) = validate_rule_edits(&edits, &units) {
             summaries.push(format!(
                 "维护 Compose：{} 规则覆盖校验失败（{}）",
                 finding.component, message
@@ -362,9 +590,7 @@ pub async fn run_maintenance_compose_phase(
             }
         };
         let after = AuditSnapshot::from_body(&body);
-        let budget = component_body_budget_tokens(&finding.component);
-        let no_change = body == current.body;
-        if no_change {
+        if body == current.body {
             summaries.push(format!("维护 Compose：{} 无实际改善", finding.component));
             continue;
         }
@@ -392,6 +618,36 @@ pub async fn run_maintenance_compose_phase(
                 finding.component
             ));
             continue;
+        }
+        if (promotion == PromotionDecision::Review || promotion == PromotionDecision::Shadow)
+            && !dry_run
+        {
+            if let Some(candidate_store) = candidate_store {
+                let candidate = RsiCandidate::new_pending(
+                    CandidateScope::Global,
+                    finding.component.to_string(),
+                    current.body.clone(),
+                    body.clone(),
+                    finding
+                        .triggers
+                        .iter()
+                        .map(|trigger| trigger_name(*trigger).to_string())
+                        .collect(),
+                    Vec::new(),
+                    CandidateRisk::Medium,
+                );
+                candidate_store.append(&candidate).map_err(|error| {
+                    HarnessError::storage(
+                        ERROR_DOMAIN,
+                        format!("候选写入失败：{}", error.message()),
+                    )
+                })?;
+                summaries.push(format!(
+                    "维护 Compose：{} 待确认（{}）",
+                    finding.component, candidate.id
+                ));
+                continue;
+            }
         }
         let new_content = ComponentContent {
             frontmatter: current.frontmatter.clone(),
