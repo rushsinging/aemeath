@@ -296,6 +296,7 @@ pub fn evaluate_and_rollback(
     registry: &mut dyn ComponentRegistry,
     version_store: &ComponentVersionStore,
     evidence: &EvidenceBundle,
+    lesson_store: Option<&crate::domain::lesson::LessonStore>,
 ) -> Vec<String> {
     let mut values = match store.load() {
         Ok(values) => values,
@@ -339,6 +340,9 @@ pub fn evaluate_and_rollback(
                     Ok(_) => {
                         value.status = ObservationStatus::RolledBack;
                         value.rollback_reason = Some("目标 signal 再次出现".to_string());
+                        if let Some(lesson_store) = lesson_store {
+                            let _ = lesson_store.retire_for_component(&id);
+                        }
                         summaries.push(format!(
                             "变更观察：{} 目标 signal 复现，已自动回滚（{}）",
                             value.component, value.id
@@ -455,6 +459,7 @@ pub async fn evaluate_and_rollback_with_llm(
     version_store: &ComponentVersionStore,
     evidence: &EvidenceBundle,
     llm: &dyn RsiLlmPort,
+    lesson_store: Option<&crate::domain::lesson::LessonStore>,
 ) -> Vec<String> {
     let mut values = match store.load() {
         Ok(values) => values,
@@ -520,6 +525,9 @@ pub async fn evaluate_and_rollback_with_llm(
                         } else {
                             "LLM 判定变更无效".to_string()
                         });
+                        if let Some(lesson_store) = lesson_store {
+                            let _ = lesson_store.retire_for_component(&id);
+                        }
                         summaries.push(format!(
                             "变更观察：{} 已自动回滚（{}）",
                             value.component, value.id

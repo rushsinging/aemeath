@@ -206,6 +206,7 @@ impl RsiTask for HarnessRsiCycleTask {
                         version_store,
                         &merged,
                         self.llm.as_ref(),
+                        Some(self.lesson_store.as_ref()),
                     )
                     .await;
             }
