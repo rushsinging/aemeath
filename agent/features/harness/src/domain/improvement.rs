@@ -1972,6 +1972,14 @@ fn record_adopted_lesson(
                     .first()
                     .map(|binding| binding.signal_id.clone())
                     .unwrap_or_default();
+                entry.verification.baseline_run_ids = entry
+                    .evidence
+                    .iter()
+                    .filter_map(|binding| binding.source.as_ref())
+                    .map(|source| source.run_id.clone())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
                 let entry_id = entry.id.clone();
                 let entry_signal = entry
                     .evidence

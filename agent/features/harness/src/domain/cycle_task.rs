@@ -179,10 +179,13 @@ impl RsiTask for HarnessRsiCycleTask {
                     .map(|signal| signal.signal_id.clone())
             })
             .collect();
-        let has_new_evidence = !current_signals.is_empty()
-            || block_evidences
-                .iter()
-                .any(|evidence| evidence.sessions_covered > 0);
+        let mut current_evidence = crate::domain::evidence::EvidenceBundle::default();
+        for evidence in &block_evidences {
+            current_evidence
+                .signals
+                .extend(evidence.signals.iter().cloned());
+            current_evidence.sessions_covered += evidence.sessions_covered;
+        }
 
         // 自动观察：下一周期先验收上轮写入；失败自动回滚，再进入新变更。
         let mut observation_summaries = Vec::new();
@@ -218,16 +221,15 @@ impl RsiTask for HarnessRsiCycleTask {
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|lesson| {
-                    crate::domain::lesson::judge_verification(
+                    crate::domain::lesson::judge_verification_with_evidence(
                         lesson,
-                        &current_signals,
-                        has_new_evidence,
+                        &current_evidence,
                     )
                 })
                 .collect::<Vec<_>>()
         } else {
             self.lesson_store
-                .verify_pending(&current_signals, has_new_evidence, now_secs)
+                .verify_pending_with_evidence(&current_evidence, now_secs)
                 .unwrap_or_default()
         };
         // #2092 lesson review：过期清理（长期未被引用的 Active lesson 退役）

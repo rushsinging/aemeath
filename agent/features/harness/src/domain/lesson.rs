@@ -35,6 +35,8 @@ pub struct EvidenceBinding {
 #[serde(rename_all = "snake_case")]
 pub enum LessonStatus {
     Active,
+    /// 被同组件的新 lesson 取代。
+    Superseded,
     Retired,
 }
 
@@ -61,6 +63,9 @@ pub struct LessonVerification {
     /// 判定时刻（Unix 秒；0 = 未判定——幂等键）。
     #[serde(default)]
     pub checked_at: u64,
+    /// 采纳时已经处理过的 run；验证只看之后的新 run。
+    #[serde(default)]
+    pub baseline_run_ids: Vec<String>,
 }
 
 /// 单条经验。
@@ -176,6 +181,61 @@ pub fn judge_verification(
     })
 }
 
+fn fresh_signal_ids(
+    lesson: &LessonEntry,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Vec<String> {
+    if lesson.verification.baseline_run_ids.is_empty() {
+        return Vec::new();
+    }
+    evidence
+        .signals
+        .iter()
+        .filter(|signal| {
+            signal.sources.iter().any(|source| {
+                !lesson
+                    .verification
+                    .baseline_run_ids
+                    .contains(&source.run_id)
+            })
+        })
+        .map(|signal| signal.signal_id.clone())
+        .collect()
+}
+
+/// 带 run waterline 的验证判定：只统计 baseline 之后的新 run。
+pub fn judge_verification_with_evidence(
+    lesson: &LessonEntry,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> Option<VerificationOutcome> {
+    if lesson.status != LessonStatus::Active
+        || lesson.verification.status != VerificationStatus::Pending
+        || lesson.verification.target_signal.trim().is_empty()
+        || lesson.verification.checked_at != 0
+    {
+        return None;
+    }
+    let fresh = fresh_signal_ids(lesson, evidence);
+    if fresh.is_empty() {
+        // 无新 run：不能判定生效，也不能判定无效。
+        return None;
+    }
+    let target = lesson.verification.target_signal.as_str();
+    let still_present = fresh.iter().any(|signal| {
+        signal == target || signal.contains(target) || target.contains(signal.as_str())
+    });
+    Some(VerificationOutcome {
+        lesson_id: lesson.id.clone(),
+        component_kind: lesson.component_kind.clone(),
+        target_signal: lesson.verification.target_signal.clone(),
+        status: if still_present {
+            VerificationStatus::Ineffective
+        } else {
+            VerificationStatus::Verified
+        },
+    })
+}
+
 /// JSONL 文件经验库。
 pub struct LessonStore {
     path: PathBuf,
@@ -256,7 +316,7 @@ impl LessonStore {
         let mut rewritten = Vec::with_capacity(entries.len());
         for mut entry in entries {
             if entry.status == LessonStatus::Active && entry.id.ends_with(&suffix) {
-                entry.status = LessonStatus::Retired;
+                entry.status = LessonStatus::Superseded;
                 retired_count += 1;
             }
             rewritten.push(entry);
@@ -297,6 +357,29 @@ impl LessonStore {
         let mut rewritten = Vec::with_capacity(entries.len());
         for mut entry in entries {
             if let Some(outcome) = judge_verification(&entry, current_signals, has_new_evidence) {
+                entry.verification.status = outcome.status;
+                entry.verification.checked_at = now;
+                outcomes.push(outcome);
+            }
+            rewritten.push(entry);
+        }
+        if !outcomes.is_empty() {
+            self.rewrite_all(&rewritten)?;
+        }
+        Ok(outcomes)
+    }
+
+    /// 带 run waterline 的验证入口：历史 run 不参与判定。
+    pub fn verify_pending_with_evidence(
+        &self,
+        evidence: &crate::domain::evidence::EvidenceBundle,
+        now: u64,
+    ) -> Result<Vec<VerificationOutcome>, HarnessError> {
+        let entries = self.load_all()?;
+        let mut outcomes = Vec::new();
+        let mut rewritten = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            if let Some(outcome) = judge_verification_with_evidence(&entry, evidence) {
                 entry.verification.status = outcome.status;
                 entry.verification.checked_at = now;
                 outcomes.push(outcome);
