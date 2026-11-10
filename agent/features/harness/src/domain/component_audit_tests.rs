@@ -32,7 +32,7 @@ fn oversized_single_rule_triggers() {
 
 #[test]
 fn overlong_rule_chars_trigger() {
-    let body = format!("# Guardrails\n\n- {}\n", "a".repeat(1100));
+    let body = format!("# Guardrails\n\n- {}\n", "a".repeat(401));
     let finding = audit_component(&id(ComponentKind::Guardrails, "default"), &content(body))
         .expect("overlong rule");
     assert!(finding.triggers.contains(&AuditTrigger::OversizedRule));
