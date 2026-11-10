@@ -6,7 +6,7 @@
 
 use crate::application::ComponentRegistry;
 use crate::constants::{COMPONENT_MAINTENANCE_CHUNK_RULES, ERROR_DOMAIN};
-use crate::domain::candidate::{CandidateRisk, CandidateScope, RsiCandidate, RsiCandidateStore};
+use crate::domain::candidate::RsiCandidateStore;
 use crate::domain::changeset::{
     apply_change_set_with_policy, ChangeSet, ComponentEdit, WritePolicy,
 };
@@ -175,7 +175,7 @@ fn build_prompt(
 - 只输出紧凑 JSON。
 
 输出格式：
-{{"decision":"compact","reason":"<一句话>","promotion":"auto|review|reject","rules":[
+{{"decision":"compact","reason":"<一句话>","promotion":"auto|reject","rules":[
   {{"action":"keep","source":[0]}},
   {{"action":"merge","source":[1,2],"text":"<合并后的单行规则>"}},
   {{"action":"delete","source":[3],"reason":"<理由>"}}
@@ -463,7 +463,7 @@ pub async fn run_maintenance_compose_phase(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&ComponentVersionStore>,
-    candidate_store: Option<&RsiCandidateStore>,
+    _candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<Vec<String>, HarnessError> {
     let mut summaries = Vec::new();
     for finding in findings {
@@ -625,36 +625,6 @@ pub async fn run_maintenance_compose_phase(
                 finding.component
             ));
             continue;
-        }
-        if (promotion == PromotionDecision::Review || promotion == PromotionDecision::Shadow)
-            && !dry_run
-        {
-            if let Some(candidate_store) = candidate_store {
-                let candidate = RsiCandidate::new_pending(
-                    CandidateScope::Global,
-                    finding.component.to_string(),
-                    current.body.clone(),
-                    body.clone(),
-                    finding
-                        .triggers
-                        .iter()
-                        .map(|trigger| trigger_name(*trigger).to_string())
-                        .collect(),
-                    Vec::new(),
-                    CandidateRisk::Medium,
-                );
-                candidate_store.append(&candidate).map_err(|error| {
-                    HarnessError::storage(
-                        ERROR_DOMAIN,
-                        format!("候选写入失败：{}", error.message()),
-                    )
-                })?;
-                summaries.push(format!(
-                    "维护 Compose：{} 待确认（{}）",
-                    finding.component, candidate.id
-                ));
-                continue;
-            }
         }
         let new_content = ComponentContent {
             frontmatter: current.frontmatter.clone(),

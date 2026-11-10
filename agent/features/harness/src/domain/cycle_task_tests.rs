@@ -688,7 +688,7 @@ async fn dry_run_write_gate_rejects_duplicate_evidence_edit() {
 }
 
 #[tokio::test]
-async fn global_maintenance_creates_pending_candidate_without_writing() {
+async fn global_maintenance_applies_without_review() {
     let bloated = format!("# Guardrails\n\n- {}\n", "规则".repeat(1200));
     let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
         FakeRegistry::with_entries(vec![(guardrails_id(), body_content(&bloated))]),
@@ -718,17 +718,18 @@ async fn global_maintenance_creates_pending_candidate_without_writing() {
     .with_candidate_store(store.clone());
 
     let outcome = task.run_cycle().await.expect("cycle");
-    assert!(outcome.summary.contains("待确认"), "{}", outcome.summary);
-    let pending = store.pending().expect("pending");
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].target_component, guardrails_id().to_string());
-    assert_eq!(
-        registry
-            .lock()
-            .await
-            .read(&guardrails_id())
-            .expect("read")
-            .body,
-        bloated
+    assert!(
+        outcome.summary.contains("维护 Compose"),
+        "{}",
+        outcome.summary
     );
+    assert!(store.pending().expect("pending").is_empty());
+    let body = registry
+        .lock()
+        .await
+        .read(&guardrails_id())
+        .expect("read")
+        .body;
+    assert_ne!(body, bloated, "维护应直接写入，不再进入 review");
+    assert!(body.contains("读取错误与输出后再重试"));
 }

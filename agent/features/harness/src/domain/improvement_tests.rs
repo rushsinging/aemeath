@@ -1114,7 +1114,7 @@ fn dry_run_edit_summary_carries_scale_and_highlights() {
 }
 
 #[tokio::test]
-async fn evidence_proposal_for_global_component_becomes_pending_candidate() {
+async fn evidence_proposal_for_global_component_writes_without_review() {
     let mentioned = id("mentioned");
     let mut registry = FakeRegistry::with_entries(vec![(mentioned.clone(), body_content("old"))]);
     let llm = ScriptedLlm::new(vec![
@@ -1145,15 +1145,8 @@ async fn evidence_proposal_for_global_component_becomes_pending_candidate() {
     .await
     .expect("周期必须成功");
 
-    assert!(outcome.summary.contains("待确认 1"), "{}", outcome.summary);
-    assert!(outcome.adopted.is_empty());
-    assert_eq!(
-        registry.content_of(&mentioned).unwrap().body,
-        "old",
-        "候选不能直写组件"
-    );
-    let pending = candidate_store.pending().expect("pending");
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].target_component, mentioned.to_string());
-    assert_eq!(pending[0].proposed_body, "new");
+    assert!(outcome.summary.contains("采纳 1"), "{}", outcome.summary);
+    assert!(!outcome.adopted.is_empty());
+    assert_eq!(registry.content_of(&mentioned).unwrap().body, "new");
+    assert!(candidate_store.pending().expect("pending").is_empty());
 }
