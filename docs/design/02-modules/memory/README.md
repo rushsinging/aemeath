@@ -109,11 +109,12 @@ Slash `/memory` 命令（`list` / `add` / `delete` / `pin` / `search` / `compact
 | 文档 | 内容 |
 |---|---|
 | [01-domain-model.md](01-domain-model.md) | MemoryEntry 聚合、Layer/Category/Source、不变量、scoring/dedup/eviction/archive |
-| [02-retrieval-and-injection.md](02-retrieval-and-injection.md) | 检索策略、BM25 升级路径(#551)、注入格式、similarity_threshold 单一去重用途 |
+| [02-retrieval-and-injection.md](02-retrieval-and-injection.md) | 检索策略（自动注入 / query-aware / per-message 召回与评分门控）、BM25 升级路径(#551)、注入格式、similarity_threshold 单一去重用途 |
 | [03-reflection.md](03-reflection.md) | ReflectionEngine、MemorySuggestion、触发条件、prompt/output/apply、与 Runtime 职责边界 |
 | [04-ports-and-adapters.md](04-ports-and-adapters.md) | MemoryPort / ReflectionWorkflow / ReflectionHistoryStore、NoOpMemory、Storage 边界、project-aware Composition 装配 |
 | [05-hindsight-research.md](05-hindsight-research.md) | 外部系统 Hindsight 调研（长期保留参考）：设计优势与边界、记忆架构（类型体系 / 组织维度 / 分层设计律）、记忆链路（形态演进与失效重算）、retain 摄入、数据模型、检索融合、巩固机制与心智模型 |
 | [06-event-stream.md](06-event-stream.md) | 生产事件流（append-only jsonl、含内容决策现场、19 落点）与 reflection-history 真 append-only；本期无查询/报告面 |
+| [07-sag2-research.md](07-sag2-research.md) | 外部系统 SAG2 调研（长期保留参考）：BM25 + 判定模型的无向量多跳检索、判定语义与扩展循环、成本形态、七条方向性借鉴与不适用边界（不含落点评估） |
 
 ## 8. 相关文档
 
@@ -133,3 +134,4 @@ Slash `/memory` 命令（`list` / `add` / `delete` / `pin` / `search` / `compact
 | 2026-07-14 | 统一自动注入与显式查询的 typed result envelope，纠正 BM25 与 query-independent injection_score 的收益边界 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 冻结 Memory Target 物理结构：write/retrieve/compact/reflection 统一进入私有 `capabilities/`，跨切片 MemoryEntry 不变量保留最小 model，Storage integration 就近归 mutation 切片 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-10-10 | 新增事件流与 reflection-history append-only 目标态文档（06）；文档导航补链 | Memory 生产遥测 |
+| 2026-11-07 | 新增 07 SAG2 调研（外部系统长期参考）；02 导航描述补 per-message 召回 | 外部系统调研 |

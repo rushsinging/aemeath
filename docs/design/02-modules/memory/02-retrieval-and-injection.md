@@ -6,12 +6,13 @@
 
 ## 1. 检索模式
 
-Memory BC 提供两种检索模式，分别服务不同消费场景：
+Memory BC 提供三种检索模式，分别服务不同消费场景：
 
 | 模式 | 方法 | 场景 | 排序依据 |
 |---|---|---|---|
 | **自动注入** | `retrieve_for_inject(&MemoryQuery)` | 每轮 LLM 调用前自动注入 | eligibility 硬过滤 + injection_score |
 | **Query-aware 检索** | `search(&MemorySearchQuery)` | `MemorySearch` 工具（显式检索）或管理查询 | relevance 主排序 + search_tie_break_score |
+| **Per-message 召回** | `recall_relevant(...)`（Runtime 消费） | 每条用户消息到达时召回并门控注入 | 词法候选 → System One 重排 → 概率阈值门 → token 预算 |
 
 ### 1.1 自动注入检索
 
@@ -37,6 +38,19 @@ fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
 - archived、被取代、outdated 与 TTL-expired 条目仍可由用户显式检索，并通过 hit metadata（含 `superseded_by`）无损表达状态。
 - 先按 query relevance 降序排列；仅 relevance 平分时使用 `search_tie_break_score`，**NEVER** 调用要求 injection eligibility 的 `injection_score`。
 - search 同样不 touch、不落盘；返回 `mode = ExplicitSearch` 且每个 hit 携 relevance。
+
+### 1.3 Per-message 召回（评分门控）
+
+与自动注入的分工：自动注入是 query-independent 的确定性排序，每个 Session 只做一次；per-message 召回按**每条用户消息**取一次，带评分门控与 token 预算，产物是该 turn 的召回快照（不参与跨 turn 排序稳定性）。
+
+- **词法候选**：`search` 取 `recall_limit = 20`，`include_archive = false`、`exclude_stale = true`、`confirm_hits = false`——候选不续期，确认由后续显式检索完成。
+- **评分**：候选数 ≥2 走 System One **Choice** 重排（参与重排数 `RERANK_TOP_N = 10`，单条 criteria ≤500 字符）；恰好 1 个候选时无法构成 Choice，改走 **Noul** 相关性判定（`RECALL_SINGLE_NOUL_INSTRUCTIONS`）。
+- **门控**：取重排结果 top-1 的概率与 `MEMORY_RECALL_THRESHOLD = 0.5` 比较，不足则本 turn 不注入。该概率是候选集内归一化的相对值，**不是绝对可信度**——候选集变化会使其漂移。
+- **预算**：注入 `top_k = 3`，召回时多取一倍（6 条）供预算截断时递补；逐条累加估算 token，超过 `MEMORY_RECALL_BUDGET_TOKENS = 2_500` 即停止，单条预览上限 `MEMORY_RECALL_PREVIEW_TOKENS = 500`。
+- **失败语义**：词法零命中、评分不可用、门控不过、预算内无条目——四种情况一律**本 turn 静默缺席**，NEVER 阻断主对话。
+- **观测**：每次召回写一条 `PerMessageRecall` 事件（候选、命中数、limit、概率序列），见 [06-event-stream.md](06-event-stream.md)。
+
+**口径说明**：per-message 召回发生在每个 turn 边界、频率远高于自动注入，因此固定为**单次评分 + 固定预算**，不引入多轮判定；门控只回答"这一 turn 要不要注入"，排序仍由重排结果决定。
 
 ## 2. 检索分层（#551）
 
@@ -200,6 +214,8 @@ Compact 成功提交后         →  下一次 build window 重新检索并替�
 | R9 | 结论入选时来源让位，未入选时来源照常 | 覆盖式让位：结论段优先填充，已选结论的 evidence 在第二段让位；不设降权系数、不设结论配额 |
 | R10 | 注入内容在 Session 内稳定 | 首次注入后冻结，仅 compact 成功提交后刷新；`injection_score` 的 query-independent 语义不被排序分组破坏 |
 | R6 | search 平分使用 search_tie_break_score | archived/outdated/TTL hit NEVER 调 injection_score |
+| R11 | per-message 召回只读、不续期 | `confirm_hits = false`：候选命中不刷新确认字段；召回产物不改变落盘排序 |
+| R12 | 召回门控失败一律 fail-open | 零命中 / 评分不可用 / 概率不足 / 预算内无条目 → 本 turn 静默缺席，NEVER 阻断主对话 |
 
 ## 8. 相关文档
 
@@ -209,11 +225,13 @@ Compact 成功提交后         →  下一次 build window 重新检索并替�
 - 端口与适配器（MemoryPort.search）：[04-ports-and-adapters.md](04-ports-and-adapters.md)
 - Context Management（注入位置归 CM）：[../context-management/01-session.md](../context-management/01-session.md)
 - #551 Memory search 升级：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- 外部系统调研（SAG2，判定语义与扩展循环的方向性借鉴）：[07-sag2-research.md](07-sag2-research.md)
 
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-11-07 | 补 §1.3 Per-message 召回（词法候选 / Choice 重排 / 相对概率阈值门 / 2,500 token 预算 / fail-open）与不变量 R11–R12；检索模式表补第三行；相关文档补 07 | 外部系统调研（SAG2）|
 | 2026-09-30 | 删除「已知信息缺口」节：其中两条 Memory 使用策略（不得覆盖系统/安全/当前用户指令；`superseded_by` 非空仅可检索不注入）已下沉至系统提示 `i18n/prompt/system.rs` 的 `# Core contract`，缺口闭合 | #1805 |
 | 2026-08-21 | 闭合 archive/restore 与 typed eviction；将 access 字段治理为 confirmation 语义；增加稳定 ID tie-break、注入 token budget、LLM 使用策略和无正文诊断指标 | Memory governance |
 | 2026-08-11 | 在单一 Tier 1 BM25 tokenizer 中加入连续 Han 字符 bigram，补齐中文短语与中英代码混排召回，不引入词典或第二检索路径 | Chinese lexical retrieval |
