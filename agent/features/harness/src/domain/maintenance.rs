@@ -170,6 +170,7 @@ fn build_prompt(
 - 每条规则 R0..R{n} MUST 被 keep/merge/delete 恰好覆盖一次；
 - delete MUST 给出理由；
 - merge 只输出合并后的单行规则文本，MUST 保留来源规则的可执行语义；
+- 每条输出规则 MUST 不超过 {max_rule_chars} 字符；超长规则必须拆分为多条或压缩，禁止保留超长规则；
 - NEVER 新增来源之外的知识；
 - 只输出紧凑 JSON。
 
@@ -183,6 +184,7 @@ fn build_prompt(
 {{"decision":"no_change","reason":"<一句话>"}}"#,
         component = component,
         triggers = triggers,
+        max_rule_chars = crate::constants::COMPONENT_AUDIT_MAX_RULE_CHARS,
         chunk_note = chunk_note,
         rule_count = units.len(),
         n = units.len().saturating_sub(1),
@@ -594,10 +596,15 @@ pub async fn run_maintenance_compose_phase(
             summaries.push(format!("维护 Compose：{} 无实际改善", finding.component));
             continue;
         }
+        let oversized_ok = if finding.triggers.contains(&AuditTrigger::OversizedRule) {
+            after.oversized_rules.is_empty()
+        } else {
+            after.oversized_rules.len() <= finding.oversized_rules.len()
+        };
         let valid = headings(&current.body) == headings(&body)
             && after.rule_count <= finding.rule_count
             && after.body_tokens <= finding.body_tokens
-            && after.oversized_rules.len() <= finding.oversized_rules.len()
+            && oversized_ok
             && after.duplicate_rules <= finding.duplicate_rules
             && after.empty_rules == 0
             && after.body_tokens <= budget;
