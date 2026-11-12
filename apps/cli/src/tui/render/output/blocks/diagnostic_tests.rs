@@ -41,3 +41,47 @@ fn test_diagnostic_no_trailing_newline_no_extra_blank() {
     assert_eq!(block.lines.len(), 1);
     assert_eq!(block.lines[0].plain, "plain");
 }
+
+#[test]
+fn test_diagnostic_long_url_wraps_within_width() {
+    // #2196 follow-up：升级提示含长 URL，必须按可用宽度换行而不是单行溢出。
+    let text = "[aemeath v0.1.1 is available (you have v0.0.0-abc); run `aemeath update` to upgrade | https://github.com/rushsinging/aemeath/releases/tag/v0.1.1]";
+    let view = TextBlockView {
+        key: "u".into(),
+        text: text.into(),
+        style: SemanticStyle::Muted,
+    };
+    let block = render_diagnostic("u", &view, &RenderCtx::for_width(40));
+
+    assert!(
+        block.lines.len() > 1,
+        "长 URL 提示必须换行: {:?}",
+        block
+            .lines
+            .iter()
+            .map(|l| l.plain.clone())
+            .collect::<Vec<_>>()
+    );
+    for line in block.lines.iter() {
+        let width: usize = line
+            .plain
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum();
+        assert!(width <= 40, "行宽 {width} 超出 40: {:?}", line.plain);
+    }
+}
+
+#[test]
+fn test_diagnostic_respects_explicit_newlines() {
+    let view = TextBlockView {
+        key: "m".into(),
+        text: "first\nsecond".into(),
+        style: SemanticStyle::Muted,
+    };
+    let block = render_diagnostic("m", &view, &RenderCtx::for_width(80));
+
+    assert_eq!(block.lines.len(), 2);
+    assert_eq!(block.lines[0].plain, "first");
+    assert_eq!(block.lines[1].plain, "second");
+}

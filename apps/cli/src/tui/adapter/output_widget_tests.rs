@@ -66,7 +66,15 @@ fn test_output_area_render_document_clamps_zero_fallback_width_to_one() {
         0,
         crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
     );
-    assert_eq!(document.total_lines(), 2);
+    // 宽度回退到 1：SystemNotice 现在也参与换行，故每行不超过 1 列（而非整行溢出）。
+    assert!(document.total_lines() >= 2);
+    for line in document.iter_lines() {
+        assert!(
+            line.plain.chars().count() <= 1,
+            "zero-width fallback 必须 clamp 到 1 列: {:?}",
+            line.plain
+        );
+    }
 }
 
 #[test]

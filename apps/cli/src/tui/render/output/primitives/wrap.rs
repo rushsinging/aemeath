@@ -18,6 +18,27 @@ pub fn wrap_spans_to_rendered_lines(
     wrap_spans_with_prefix(spans, max_width, None, WrapMode::Char)
 }
 
+/// 把一段纯文本按宽度换行（Word 模式），保留文本自身的显式换行。
+///
+/// 这是提示类文本块（SystemNotice / DiagnosticNotice / HookNotice）的**唯一**换行实现：
+/// 它们此前各自 `text.lines()` 一行一条输出、完全忽略宽度，导致长 URL 单行溢出。
+pub fn wrap_styled_text(
+    text: &str,
+    style: ratatui::style::Style,
+    max_width: usize,
+) -> Vec<RenderedLine> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        out.extend(wrap_spans_with_prefix(
+            vec![Span::styled(line.to_string(), style)],
+            max_width,
+            None,
+            WrapMode::Word,
+        ));
+    }
+    out
+}
+
 pub fn wrap_spans_with_prefix(
     spans: Vec<Span<'static>>,
     max_width: usize,

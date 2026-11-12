@@ -62,6 +62,8 @@ impl OutputArea {
             return;
         }
 
+        // 宽度真相源是本帧 frame（`area.width`）：每帧刷新，不受 resize 事件是否漏报影响。
+        // document 的重建在 App::draw 内、拿到 frame 之后按同一宽度触发。
         let new_width = (area.width as usize).saturating_sub(2);
         if new_width != self.term_width {
             self.term_width = new_width;

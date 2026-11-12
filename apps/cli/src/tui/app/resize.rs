@@ -4,11 +4,17 @@ use crate::tui::app::state::TerminalSize;
 impl App {
     pub(crate) fn handle_resize(&mut self, width: u16, height: u16) {
         let size = TerminalSize { width, height };
-        if self.layout.last_terminal_size == Some(size) {
+        let expected_text_width = (width as usize).saturating_sub(2);
+        if self.layout.last_terminal_size == Some(size)
+            && self.output_area.term_width == expected_text_width
+        {
             return;
         }
 
         self.layout.last_terminal_size = Some(size);
+        // 垂直布局不变式：output 区域宽度恒等于终端宽度。这里立即同步 rect，使紧随
+        // resize 之后的 document 重建拿到新宽度，而不是等 draw 结束后的 update_areas。
+        self.layout.output_area_rect.width = width;
         self.output_area.handle_resize(width);
         let visible_height = crate::tui::app::update::output_visible_height(
             self.layout

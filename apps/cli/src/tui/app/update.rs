@@ -730,6 +730,8 @@ impl App {
     }
 
     pub(crate) fn output_document_width(&self) -> u16 {
+        // 宽度真相源：本帧 output 区域（`App::draw` 在拿到 frame 后立即同步到 rect，
+        // 再触发 document 重建）。不要改成读 draw 之前的事件/轮询状态——那条路径会漏报。
         self.layout
             .output_area_rect
             .width

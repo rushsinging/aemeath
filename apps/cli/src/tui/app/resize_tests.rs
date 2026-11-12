@@ -101,13 +101,12 @@ fn duplicate_resize_does_not_process_again() {
     app.view_state.output.last_document_total_lines = 20;
     app.view_state.output.scroll_offset = 7;
     app.view_state.output.auto_scroll = false;
-    app.output_area.term_width = 7;
 
     app.handle_resize(80, 24);
 
     assert_eq!(app.view_state.output.scroll_offset, 7);
     assert!(!app.view_state.output.auto_scroll);
-    assert_eq!(app.output_area.term_width, 7);
+    assert_eq!(app.output_area.term_width, 78);
     assert_eq!(
         app.layout.last_terminal_size,
         Some(TerminalSize {
@@ -115,4 +114,28 @@ fn duplicate_resize_does_not_process_again() {
             height: 24,
         })
     );
+}
+
+#[test]
+fn resize_repairs_term_width_when_it_lagged_behind_terminal_size() {
+    // #2196 follow-up：同尺寸重复事件若发现 term_width 与终端宽度不一致（document 宽度
+    // 落后于 frame），必须重新对齐，而不是因 last_terminal_size 相同就 early-return。
+    let mut app = test_app();
+    app.handle_resize(80, 24);
+    app.output_area.term_width = 7;
+    app.output_area.set_plain_document_lines(20);
+
+    app.handle_resize(80, 24);
+
+    assert_eq!(app.output_area.term_width, 78);
+}
+
+#[test]
+fn resize_syncs_output_rect_width_immediately() {
+    // document 重建发生在 draw 之前：rect 必须在 resize 时就同步为终端宽度，
+    // 否则窗口变化后的第一次重建仍用旧宽度（frame 宽 / 内容窄的混排）。
+    let mut app = test_app();
+    app.handle_resize(100, 30);
+    assert_eq!(app.layout.output_area_rect.width, 100);
+    assert_eq!(app.output_document_width(), 98);
 }
