@@ -38,11 +38,17 @@ impl DatasetSessionManagement {
         self.reader
             .load(project_dir, id)
             .await
-            .map_err(map_reader_error)
+            .map_err(|error| map_reader_error(id, error))
     }
 }
 
+/// dataset 读取错误 → 会话管理错误。
+///
+/// 「两处都不存在」是 `NotFound`，与「存在但 manifest/成员解码失败」的
+/// `Corrupt` 严格区分：外部（startup `--resume`、终端会话恢复）据此给出
+/// 正确提示，NEVER 把不存在的会话报成「数据损坏」。
 fn map_reader_error(
+    id: &str,
     error: crate::domain::session::SessionGenerationWireError,
 ) -> SessionManagementError {
     match error {
@@ -50,6 +56,9 @@ fn map_reader_error(
             version,
             ..
         } => SessionManagementError::UnsupportedFutureVersion(version),
+        crate::domain::session::SessionGenerationWireError::NotFound => {
+            SessionManagementError::NotFound(id.to_string())
+        }
         other => SessionManagementError::Corrupt(other.to_string()),
     }
 }
@@ -80,7 +89,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .reader
             .load_for_resume(Some(&project_dir), id)
             .await
-            .map_err(map_reader_error)?;
+            .map_err(|error| map_reader_error(id, error))?;
         if !session_matches_project(&prepared.active_session, project) {
             return Err(SessionManagementError::ProjectMismatch(id.to_string()));
         }
@@ -102,7 +111,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         self.reader
             .load_display_history_steps(Some(&project_dir), id, generation_revision, member_names)
             .await
-            .map_err(map_reader_error)
+            .map_err(|error| map_reader_error(id, error))
     }
 
     /// 按 project 分目录布局：dataset key 首段为本项目目录段的直接采纳；
@@ -272,3 +281,7 @@ impl DatasetSessionManagement {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "dataset_session_management_tests.rs"]
+mod tests;

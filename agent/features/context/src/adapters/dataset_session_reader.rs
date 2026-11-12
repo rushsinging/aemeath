@@ -11,7 +11,7 @@ use storage::{
 use crate::adapters::{
     AtomicBlobSessionStore, DatasetCanonicalSessionWriter, LegacySessionDecoder,
 };
-use crate::application::SessionPersistenceService;
+use crate::application::{SessionLoadError, SessionPersistenceService};
 use crate::domain::session::{
     CanonicalSession, CommittedRunSlice, DisplayHistoryStepIndexData, DisplayHistoryStepWindowData,
     RunStepCursor, SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError,
@@ -302,14 +302,14 @@ impl DatasetSessionReader {
         session_id: &str,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
         let Some(blob) = &self.legacy_blob else {
-            return Err(SessionGenerationWireError::InvalidManifest(
-                "Session generation 不存在".to_string(),
-            ));
+            // dataset 全部候选未命中且没有 legacy 存储可回退：会话不存在，
+            // NEVER 伪装成 manifest 损坏。
+            return Err(SessionGenerationWireError::NotFound);
         };
         let candidates =
             legacy_blob_persistence_candidates(Arc::clone(blob), project_dir, session_id)?;
         let mut loaded_session = None;
-        let mut last_error = None;
+        let mut last_error: Option<SessionLoadError> = None;
         for persistence in candidates {
             match persistence.load().await {
                 Ok(session) => {
@@ -319,13 +319,16 @@ impl DatasetSessionReader {
                 Err(error) => last_error = Some(error),
             }
         }
-        let session = loaded_session.ok_or_else(|| {
-            SessionGenerationWireError::InvalidManifest(
-                last_error
-                    .map(|error| error.to_string())
-                    .unwrap_or_else(|| "legacy session 不存在".to_string()),
-            )
-        })?;
+        let session = match loaded_session {
+            Some(session) => session,
+            None => {
+                return Err(match last_error {
+                    Some(SessionLoadError::NotFound) => SessionGenerationWireError::NotFound,
+                    Some(error) => SessionGenerationWireError::InvalidManifest(error.to_string()),
+                    None => SessionGenerationWireError::NotFound,
+                });
+            }
+        };
         DatasetCanonicalSessionWriter::new(Arc::clone(&self.dataset))
             .save_initial(&session)
             .await
