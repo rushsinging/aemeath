@@ -104,3 +104,62 @@ fn cmd_click_on_markdown_link_opens_url_after_full_render() {
         effects
     );
 }
+
+/// #2196：markdown 文件路径以行内代码形式出现时必须可点击（用户实际场景）。
+#[test]
+fn inline_code_markdown_path_produces_clickable_linkspan() {
+    const PLAN: &str = "docs/snapshots/plans/2026-11-12-kubernetes-cluster-ready-plan.md";
+    let mut harness = TuiScenarioHarness::new(120, 30);
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
+        context: context(),
+        delta: format!("plan saved: `{PLAN}` ready"),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: context(),
+        text: format!("plan saved: `{PLAN}` ready"),
+    });
+    harness.runtime_event(TuiRuntimeEvent::Done {
+        context: context(),
+        duration_ms: None,
+    });
+    harness.render();
+
+    let (logic_idx, gutter_cols, col_start) = harness
+        .app
+        .output_area
+        .document()
+        .iter_lines()
+        .enumerate()
+        .find_map(|(idx, line)| {
+            line.links
+                .iter()
+                .find(|ls| ls.url == PLAN)
+                .map(|ls| (idx, line.gutter_cols, ls.col_start))
+        })
+        .expect("inline code markdown path should become a LinkSpan");
+
+    let screen_row = harness
+        .app
+        .output_area
+        .screen_line_map
+        .iter()
+        .position(|(idx, _, _)| *idx == logic_idx)
+        .expect("logic_idx should be in screen_line_map") as u16;
+    let click_col = (gutter_cols + col_start + 2) as u16;
+    let output_area = harness.app.layout.output_area_rect;
+    let mouse = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: output_area.x + click_col,
+        row: output_area.y + screen_row,
+        modifiers: KeyModifiers::SUPER,
+    };
+    let effects = harness.app.handle_mouse_event(mouse, output_area);
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            crate::tui::effect::effect::Effect::OpenUrl { url } if url == PLAN
+        )),
+        "Cmd+Click on inline code path should produce OpenUrl effect, got: {effects:?}"
+    );
+}

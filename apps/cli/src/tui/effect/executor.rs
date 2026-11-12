@@ -1,6 +1,10 @@
 use crate::tui::app::event::UiEvent;
 use crate::tui::app::App;
+use crate::tui::effect::constants::OPEN_COMMAND_TIMEOUT;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
+use crate::tui::effect::open_target::{
+    interpret_open_output, resolve_open_target, OpenTargetError,
+};
 use crate::tui::effect::session::processing;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::interaction::{
@@ -146,7 +150,7 @@ impl App {
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
             Effect::ResetRuntimeState => self.reset_runtime_state(),
-            Effect::OpenUrl { url } => self.open_url_effect(&url),
+            Effect::OpenUrl { url } => self.open_url_effect(&url).await,
             Effect::SendTerminalNotification { title, body } => {
                 self.send_terminal_notification_effect(&title, &body)
             }
@@ -582,35 +586,53 @@ impl App {
     }
 
     /// 用系统默认程序打开 URL 或本地文件路径（Cmd+Click markdown link / 行内代码路径）。
-    fn open_url_effect(&mut self, url: &str) {
-        // 安全校验：允许 http/https URL 和本地文件路径
-        let is_url = url.starts_with("http://") || url.starts_with("https://");
-        let is_path = url.contains('/')
-            || url.contains('\\')
-            || url.ends_with(".rs")
-            || url.ends_with(".toml")
-            || url.ends_with(".md")
-            || url.ends_with(".json");
-        if !is_url && !is_path {
-            self.set_transient_notice(StatusNotice::warning(format!("无法识别的链接目标: {url}")));
-            return;
-        }
-
-        // 本地相对路径：优先用 workspace_root / path_base 解析，回退到 session cwd
-        let resolved = if !is_url && !std::path::Path::new(url).is_absolute() {
-            let base = self
-                .model
-                .workspace_provider
-                .workspace_root()
-                .or_else(|| self.model.workspace_provider.path_base())
-                .or_else(|| self.model.workspace_provider.cwd())
-                .map(std::path::PathBuf::from)
-                .or_else(|| std::env::current_dir().ok());
-            base.map(|b| b.join(url).to_string_lossy().into_owned())
-        } else {
-            None
+    ///
+    /// 两个不变量（#2196）：
+    /// 1. 本地路径必须先通过存在性校验，找不到就明确报「文件不存在」，**不得**先回「已打开」；
+    /// 2. 系统打开器的退出码要参与判定——`open`/`xdg-open` 对不存在目标只写 stderr 并返回非 0，
+    ///    spawn 成功不等于打开成功。
+    async fn open_url_effect(&mut self, url: &str) {
+        let process_cwd = std::env::current_dir().ok();
+        let target = {
+            let provider = &self.model.workspace_provider;
+            resolve_open_target(
+                url,
+                provider.workspace_root(),
+                provider.path_base(),
+                provider.cwd(),
+                process_cwd.as_deref(),
+            )
         };
-        let target = resolved.as_deref().unwrap_or(url);
+
+        let target = match target {
+            Ok(target) => target,
+            Err(OpenTargetError::Unrecognized(raw)) => {
+                self.set_transient_notice(StatusNotice::warning(format!(
+                    "无法识别的链接目标: {raw}"
+                )));
+                return;
+            }
+            Err(OpenTargetError::NotFound {
+                requested,
+                candidates,
+            }) => {
+                let candidates: Vec<String> = candidates
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect();
+                crate::tui::log_warn!(
+                    "本地路径不存在: requested={requested} candidates={candidates:?}"
+                );
+                let hint = candidates
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| requested.clone());
+                self.set_transient_notice(StatusNotice::warning(format!("文件不存在: {hint}")));
+                return;
+            }
+        };
+
+        let spawn_arg = target.spawn_arg();
 
         #[cfg(target_os = "macos")]
         let cmd = "open";
@@ -619,23 +641,39 @@ impl App {
         #[cfg(target_os = "windows")]
         let cmd = "cmd";
 
-        let mut command = std::process::Command::new(cmd);
+        let mut command = tokio::process::Command::new(cmd);
         #[cfg(target_os = "windows")]
-        command.args(["/C", "start", target]);
+        command.args(["/C", "start", spawn_arg.as_str()]);
         #[cfg(not(target_os = "windows"))]
-        command.arg(target);
-        let result = match utils::configure_std_noninteractive(&mut command) {
-            Ok(()) => command.spawn(),
-            Err(error) => Err(error),
+        command.arg(&spawn_arg);
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+
+        if let Err(error) = utils::configure_tokio_noninteractive(&mut command) {
+            crate::tui::log_warn!("打开失败: {error}");
+            self.set_transient_notice(StatusNotice::warning(format!("打开失败: {error}")));
+            return;
+        }
+
+        let opened = match tokio::time::timeout(OPEN_COMMAND_TIMEOUT, command.output()).await {
+            // 打开器已退出：以退出码与 stderr 为准。
+            Ok(Ok(output)) => interpret_open_output(
+                output.status.success(),
+                output.status.code(),
+                &output.stderr,
+            ),
+            Ok(Err(error)) => Err(error.to_string()),
+            // 打开器仍在运行（部分 Linux 实现会跟随应用生命周期）：视为已发起。
+            Err(_) => Ok(()),
         };
 
-        match result {
-            Ok(_) => {
+        match opened {
+            Ok(()) => {
                 self.set_transient_notice(StatusNotice::success(format!("已打开: {url}")));
             }
-            Err(e) => {
-                crate::tui::log_warn!("打开失败: {e}");
-                self.set_transient_notice(StatusNotice::warning(format!("打开失败: {e}")));
+            Err(reason) => {
+                crate::tui::log_warn!("打开失败: url={url} reason={reason}");
+                self.set_transient_notice(StatusNotice::warning(format!("打开失败: {reason}")));
             }
         }
     }

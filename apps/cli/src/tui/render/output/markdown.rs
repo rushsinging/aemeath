@@ -252,7 +252,9 @@ fn push_code_with_link(
 }
 
 /// 判断行内代码内容是否看起来是文件路径。
-fn looks_like_file_path(s: &str) -> bool {
+///
+/// 同时供 TUI 打开目标识别复用（#2196），保持「可点击」与「可打开」同一判据。
+pub(crate) fn looks_like_file_path(s: &str) -> bool {
     if s.is_empty() || s.contains(' ') || s.contains('\n') {
         return false;
     }

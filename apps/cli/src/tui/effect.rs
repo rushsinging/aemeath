@@ -4,6 +4,7 @@ pub mod completion;
 mod constants;
 pub mod effect;
 pub mod executor;
+pub(crate) mod open_target;
 pub mod session;
 pub mod spawn_guard;
 pub mod terminal_notification;
