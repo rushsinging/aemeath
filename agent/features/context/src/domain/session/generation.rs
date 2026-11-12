@@ -1252,6 +1252,10 @@ impl SessionStepMember {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionGenerationWireError {
+    /// 数据集与 legacy blob 两处都没有该会话：语义是「不存在」，
+    /// 与「已存在但解码失败」的损坏严格区分，供上层映射为 `NotFound`。
+    #[error("Session 不存在")]
+    NotFound,
     #[error("Session generation schema version {version} is newer than supported")]
     UnsupportedFutureVersion {
         version: u32,

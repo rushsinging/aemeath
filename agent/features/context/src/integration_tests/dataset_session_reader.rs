@@ -706,3 +706,61 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     assert_eq!(restored, checkpoint);
     assert!(crate::compact::ContinuationCheckpoint::parse(&restored).is_ok());
 }
+
+/// 数据集与 legacy blob 两处都没有该会话时，语义是「不存在」。
+///
+/// 契约：`NotFound` 与「已存在但解码失败」的 `InvalidManifest`（上层
+/// `Corrupt`）严格区分，NEVER 把从未落盘的会话 id 报成数据损坏。
+#[tokio::test]
+async fn dataset_reader_reports_not_found_when_dataset_and_legacy_are_absent() {
+    let root = tempfile::tempdir().expect("temporary root");
+
+    // 有 legacy 存储，但两处都没有目标会话。
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::wire_file_system_blob(root.path()).expect("blob adapter");
+    let error = DatasetSessionReader::new(dataset.clone(), Some(blob))
+        .load_for_resume(None, "never-persisted")
+        .await
+        .err()
+        .expect("missing session must be rejected");
+    assert!(
+        matches!(error, crate::SessionGenerationWireError::NotFound),
+        "两处都缺 → 期望 NotFound，实际 {error:?}"
+    );
+
+    // 完全没有 legacy 存储可回退：同样是不存在。
+    let error = DatasetSessionReader::new(dataset, None)
+        .load_for_resume(None, "never-persisted")
+        .await
+        .err()
+        .expect("missing session must be rejected");
+    assert!(
+        matches!(error, crate::SessionGenerationWireError::NotFound),
+        "无 legacy 存储 → 期望 NotFound，实际 {error:?}"
+    );
+}
+
+/// 会话管理门面：resume 一个从未落盘的会话必须报 `NotFound`。
+#[tokio::test]
+async fn dataset_session_management_maps_missing_session_to_not_found() {
+    use crate::SessionManagementPort as _;
+
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::wire_file_system_blob(root.path()).expect("blob adapter");
+    let management = crate::DatasetSessionManagement::new(dataset, blob);
+    let project = share::session_types::ProjectIdentityData {
+        initial_cwd: "/tmp/never-persisted-project".to_string(),
+        git_common_dir: None,
+    };
+
+    match management
+        .load_for_resume("never-persisted", &project)
+        .await
+    {
+        Err(crate::SessionManagementError::NotFound(id)) => assert_eq!(id, "never-persisted"),
+        other => panic!("期望 NotFound，实际 {other:?}"),
+    }
+}
