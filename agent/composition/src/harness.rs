@@ -1337,7 +1337,26 @@ pub fn run_rsi_rollback(component: &str, cycle: Option<&str>) -> RsiRunExit {
         }
     };
     match harness::domain::versioning::rollback_component(&mut **guard, &id, &snapshot) {
-        Ok(message) => RsiRunExit::Done { summary: message },
+        Ok(message) => {
+            let lesson_store = harness::domain::lesson::LessonStore::new(
+                share::config::paths::global_harness_dir().join("library.jsonl"),
+            );
+            let retired = lesson_store
+                .retire_for_component(&id)
+                .unwrap_or_else(|error| {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "回滚后 lesson supersede 失败：{error}"
+                    );
+                    0
+                });
+            let message = if retired > 0 {
+                format!("{message}；已 supersede {retired} 条 lesson")
+            } else {
+                message
+            };
+            RsiRunExit::Done { summary: message }
+        }
         Err(error) => RsiRunExit::Failure {
             message: format!("回滚失败：{}", error.message()),
             exit_code: 1,

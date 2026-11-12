@@ -160,6 +160,53 @@ async fn two_phase_patch_updates_only_anchored_fragment() {
 }
 
 #[tokio::test]
+async fn two_phase_rejects_same_component_semantic_duplicate() {
+    let target = tool_guidance();
+    let original =
+        "# Tool Guidance\n- 同一调用签名不得原样重复；重试前必须核对错误、参数与状态。\n";
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content(original))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Bash 失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重试纪律","direction":"补 patch","route_reason":"工具纪律"}]}"#.to_string(),
+        serde_json::json!({
+            "decision": "propose",
+            "reason": "补重试纪律",
+            "evidence_refs": ["E0"],
+            "operations": [{"op":"replace_exact","old_string":"- 同一调用签名不得原样重复；重试前必须核对错误、参数与状态。","new_string":"- 同一调用签名不得原样重复；重试前必须核对错误、参数与状态。\n- Bash 同签名重复调用不得再次发起。"}]
+        })
+        .to_string(),
+        r#"{"verdicts":[{"index":0,"verdict":"duplicate","reason":"新增规则是已有重试纪律的复述"}]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        single_project_evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "采纳 0 / 无变更 0 / 作废 1");
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some(original.to_string()),
+        "同组件语义重复 MUST 整份拒绝，且不写入"
+    );
+}
+
+#[tokio::test]
 async fn two_phase_tool_signal_never_writes_project_overlay() {
     let project = ComponentId {
         kind: ComponentKind::SystemPromptOverlay,

@@ -12,6 +12,7 @@ use crate::constants::{
 use crate::domain::candidate::RsiCandidateStore;
 use crate::domain::changeset::{apply_change_set_with_policy, AppliedEdit, ChangeSet, WritePolicy};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
+use crate::domain::component_audit::parse_audit_rules;
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
@@ -1220,6 +1221,125 @@ async fn reconcile_cross_scope_duplicates(
         }
     }
     Ok(removed_rules)
+}
+
+/// 同组件内新增规则与既有规则的语义重复门禁。
+/// 以 CJK bigram/词法相似度召回候选，再交给 LLM 只做结构化判定；
+/// duplicate/conflict 整份提案拒绝，specialization/distinct 放行。
+async fn same_component_duplicate_gate(
+    target: &ComponentId,
+    existing_body: &str,
+    proposed_body: &str,
+    block_index: usize,
+    llm: &dyn RsiLlmPort,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<bool, HarnessError> {
+    if existing_body.trim().is_empty() || proposed_body.trim().is_empty() {
+        return Ok(true);
+    }
+    let existing = parse_audit_rules(existing_body);
+    let proposed = parse_audit_rules(proposed_body);
+    if existing.is_empty() || proposed.is_empty() {
+        return Ok(true);
+    }
+    let mut pairs: Vec<(String, String, f64)> = Vec::new();
+    for new_rule in &proposed {
+        if existing
+            .iter()
+            .any(|old_rule| old_rule.normalized == new_rule.normalized)
+        {
+            pairs.push((
+                existing
+                    .iter()
+                    .find(|old_rule| old_rule.normalized == new_rule.normalized)
+                    .map(|rule| rule.raw.clone())
+                    .unwrap_or_default(),
+                new_rule.raw.clone(),
+                1.0,
+            ));
+            continue;
+        }
+        let best = existing
+            .iter()
+            .map(|old_rule| {
+                (
+                    old_rule.raw.clone(),
+                    share::memory::dedup::jaccard_similarity(
+                        &old_rule.normalized,
+                        &new_rule.normalized,
+                    ),
+                )
+            })
+            .max_by(|left, right| left.1.total_cmp(&right.1));
+        if let Some((old_rule, score)) = best {
+            if score >= 0.08 {
+                pairs.push((old_rule, new_rule.raw.clone(), score));
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return Ok(true);
+    }
+    pairs.truncate(12);
+    let pair_text = pairs
+        .iter()
+        .enumerate()
+        .map(|(index, (old_rule, new_rule, score))| {
+            format!(
+                "[pair {index}] similarity={score:.2}\n- 已有规则：{}\n- 新增规则：{}",
+                old_rule.chars().take(600).collect::<String>(),
+                new_rule.chars().take(600).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let prompt = format!(
+        r#"你是 harness 组件规则去重器。目标组件：{target}
+判断每条新增规则与已有规则的关系：
+- duplicate：语义等价，新增规则只是复述已有规则；
+- conflict：语义相互矛盾；
+- specialization：新增规则是对已有规则的具体补充，保留两者有价值；
+- distinct：主题不同。
+只输出 JSON 对象：
+{{"verdicts":[{{"index":0,"verdict":"duplicate","reason":"<不超过80字符>"}}]}}
+verdicts MUST 覆盖全部 pair。
+
+{pair_text}
+"#
+    );
+    let completion = complete_with_usage_event(
+        llm,
+        &prompt,
+        "same_component_duplicate_gate",
+        block_index,
+        recorder,
+    )
+    .await?;
+    let Some(adjudications) = parse_adjudications(&completion.text).ok() else {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            "同组件去重仲裁解析失败（fail-closed，不落盘）",
+        ));
+    };
+    for adjudication in adjudications {
+        if matches!(
+            adjudication.verdict,
+            DuplicateVerdict::Duplicate | DuplicateVerdict::Conflict
+        ) {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "same_component_duplicate".to_string(),
+                    message: format!("{}: {}", adjudication.verdict.as_str(), adjudication.reason)
+                        .chars()
+                        .take(200)
+                        .collect(),
+                });
+            }
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// 新增提案的宿主硬门禁：目标 body 与相反 scope 的既有规则语义重复时，
@@ -2735,6 +2855,19 @@ async fn run_two_phase_cycle_inner(
                         discarded += issues.len();
                         continue;
                     }
+                    if !same_component_duplicate_gate(
+                        &component_id,
+                        &content.body,
+                        &patched_content.body,
+                        block_index,
+                        llm,
+                        recorder,
+                    )
+                    .await?
+                    {
+                        discarded += issues.len();
+                        continue;
+                    }
                     if !cross_scope_duplicate_gate(
                         &component_id,
                         &patched_content.body,
@@ -2854,6 +2987,19 @@ async fn run_two_phase_cycle_inner(
                                 },
                             );
                         }
+                        discarded += issues.len();
+                        continue;
+                    }
+                    if !same_component_duplicate_gate(
+                        &component_id,
+                        &content.body,
+                        &new_content.body,
+                        block_index,
+                        llm,
+                        recorder,
+                    )
+                    .await?
+                    {
                         discarded += issues.len();
                         continue;
                     }
