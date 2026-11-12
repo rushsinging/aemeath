@@ -326,6 +326,15 @@ impl App {
                 return;
             }
 
+            // #2196：frame 宽度是 document 宽度的唯一真相源。宽度变化时在本帧、
+            // 渲染之前就按新宽度重建 document；否则会画出「frame 已变宽 / 历史内容仍按旧宽度
+            // 换行」的混排，且 idle 时没有下一轮事件来修正（只有下次有变化才恢复）。
+            if self.layout.output_area_rect.width != 0
+                && self.layout.output_area_rect.width != chunks[0].width
+            {
+                self.layout.output_area_rect.width = chunks[0].width;
+                let _ = self.refresh_output_document_from_model();
+            }
             let live_status = self.live_status_view_model();
             let mut status_view = self.status_view_model();
             let buf = f.buffer_mut();
