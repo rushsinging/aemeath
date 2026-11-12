@@ -2513,7 +2513,20 @@ async fn run_two_phase_cycle_inner(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut unresolved = 0usize;
     let mut adoption_records = Vec::new();
+    let mut routed_signals: std::collections::BTreeMap<
+        ComponentId,
+        std::collections::BTreeSet<String>,
+    > = std::collections::BTreeMap::new();
+    for plan in &route_plans {
+        for candidate in &plan.candidates {
+            routed_signals
+                .entry(candidate.clone())
+                .or_default()
+                .insert(plan.fact.signal.signal_id.clone());
+        }
+    }
     let mut grouped: std::collections::BTreeMap<
         ComponentId,
         Vec<&crate::domain::improvement::AggregatedIssue>,
@@ -2523,6 +2536,13 @@ async fn run_two_phase_cycle_inner(
             discarded += 1;
             continue;
         };
+        if !routed_signals
+            .get(&id)
+            .is_some_and(|signals| signals.contains(&issue.target_signal))
+        {
+            unresolved += 1;
+            continue;
+        }
         grouped.entry(id).or_default().push(issue);
     }
 
@@ -2978,7 +2998,10 @@ async fn run_two_phase_cycle_inner(
     }
 
     let prefix = if dry_run { "（dry-run）" } else { "" };
-    let summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    let mut summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    if unresolved > 0 {
+        summary.push_str(&format!(" / 未路由 {unresolved}"));
+    }
     Ok(RunTwoPhaseOutcome {
         outcome: CycleOutcome {
             summary,
