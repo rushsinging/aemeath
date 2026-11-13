@@ -267,3 +267,7 @@ pub(crate) fn run(options: ExportOptions) -> Result<(), String> {
 #[cfg(test)]
 #[path = "cases_tests.rs"]
 mod cases_tests;
+
+#[cfg(test)]
+#[path = "cases_contract_tests.rs"]
+mod cases_contract_tests;
