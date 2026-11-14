@@ -668,7 +668,17 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
             share::config::paths::global_harness_dir().join("versions"),
         ),
     ))
-    .with_history_path(share::config::paths::global_harness_dir().join("signal-history.json"));
+    .with_history_path(share::config::paths::global_harness_dir().join("signal-history.json"))
+    .with_candidate_store(std::sync::Arc::new(
+        harness::domain::candidate::RsiCandidateStore::new(
+            share::config::paths::global_harness_dir().join("candidates.jsonl"),
+        ),
+    ))
+    .with_observation_store(std::sync::Arc::new(
+        harness::domain::change_observation::ChangeObservationStore::new(
+            share::config::paths::global_harness_dir().join("changes.jsonl"),
+        ),
+    ));
     let mut task = task;
     if dry_run {
         task = task.with_dry_run();
@@ -926,6 +936,274 @@ fn write_dry_run_preview(summary: &str) {
     }
 }
 
+fn rsi_candidate_store() -> harness::domain::candidate::RsiCandidateStore {
+    harness::domain::candidate::RsiCandidateStore::new(
+        share::config::paths::global_harness_dir().join("candidates.jsonl"),
+    )
+}
+
+fn rsi_observation_store() -> harness::domain::change_observation::ChangeObservationStore {
+    harness::domain::change_observation::ChangeObservationStore::new(
+        share::config::paths::global_harness_dir().join("changes.jsonl"),
+    )
+}
+
+fn render_candidate(candidate: &harness::domain::candidate::RsiCandidate) -> String {
+    let conflict = candidate
+        .conflict
+        .as_ref()
+        .map(|conflict| format!("{}：{}", conflict.kind, conflict.detail))
+        .unwrap_or_else(|| "无".to_string());
+    format!(
+        "id: {}\nscope: {:?}\ntarget: {}\nrisk: {:?}\nprojects: {}\nevidence: {}\nconflict: {}\n\n--- base ---\n{}\n--- proposed ---\n{}",
+        candidate.id,
+        candidate.scope,
+        candidate.target_component,
+        candidate.risk,
+        candidate.projects.join(", "),
+        candidate.evidence.join(", "),
+        conflict,
+        candidate.base_body,
+        candidate.proposed_body
+    )
+}
+
+/// `rsi review list`：列出待审候选。
+pub fn run_rsi_review_list(json: bool) -> RsiRunExit {
+    let store = rsi_candidate_store();
+    let pending = match store.pending() {
+        Ok(pending) => pending,
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("读取候选失败：{}", error.message()),
+                exit_code: 1,
+            }
+        }
+    };
+    if json {
+        return match serde_json::to_string_pretty(&pending) {
+            Ok(summary) => RsiRunExit::Done { summary },
+            Err(error) => RsiRunExit::Failure {
+                message: format!("候选序列化失败：{error}"),
+                exit_code: 1,
+            },
+        };
+    }
+    if pending.is_empty() {
+        return RsiRunExit::Done {
+            summary: "（无待审候选）".to_string(),
+        };
+    }
+    let mut lines = vec!["ID\tSCOPE\tTARGET\tRISK\tPROJECTS".to_string()];
+    for candidate in pending {
+        lines.push(format!(
+            "{}\t{:?}\t{}\t{:?}\t{}",
+            candidate.id,
+            candidate.scope,
+            candidate.target_component,
+            candidate.risk,
+            candidate.projects.join(",")
+        ));
+    }
+    RsiRunExit::Done {
+        summary: lines.join("\n"),
+    }
+}
+
+/// `rsi review show <id>`：展示候选详情。
+pub fn run_rsi_review_show(id: &str) -> RsiRunExit {
+    let store = rsi_candidate_store();
+    match store.find(id) {
+        Ok(Some(candidate)) => RsiRunExit::Done {
+            summary: render_candidate(&candidate),
+        },
+        Ok(None) => RsiRunExit::Failure {
+            message: format!("候选不存在：{id}"),
+            exit_code: 1,
+        },
+        Err(error) => RsiRunExit::Failure {
+            message: format!("读取候选失败：{}", error.message()),
+            exit_code: 1,
+        },
+    }
+}
+
+/// `rsi review approve <id>`：重新校验后写入组件并关闭候选。
+pub fn run_rsi_review_approve(id: &str, resolve: Option<&str>, reason: Option<&str>) -> RsiRunExit {
+    let store = rsi_candidate_store();
+    let candidate = match store.find(id) {
+        Ok(Some(candidate)) => candidate,
+        Ok(None) => {
+            return RsiRunExit::Failure {
+                message: format!("候选不存在：{id}"),
+                exit_code: 1,
+            }
+        }
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("读取候选失败：{}", error.message()),
+                exit_code: 1,
+            }
+        }
+    };
+    if candidate.status != harness::domain::candidate::CandidateStatus::Pending {
+        return RsiRunExit::Failure {
+            message: format!("候选状态不是 pending：{:?}", candidate.status),
+            exit_code: 1,
+        };
+    }
+    if candidate.conflict.is_some() {
+        match resolve {
+            Some("project") => {
+                let _ = store.update(
+                    id,
+                    harness::domain::candidate::CandidateStatus::Rejected,
+                    Some("用户选择项目特化，不写 global".to_string()),
+                );
+                return RsiRunExit::Done {
+                    summary: "已按项目特化处理，未写入 global".to_string(),
+                };
+            }
+            Some("global") => {}
+            _ => {
+                return RsiRunExit::Failure {
+                    message: "候选存在冲突，必须显式指定 --resolve global|project".to_string(),
+                    exit_code: 1,
+                }
+            }
+        }
+    }
+    let config = match load_global_config_layered() {
+        Ok(config) => config,
+        Err(message) => {
+            return RsiRunExit::Failure {
+                message,
+                exit_code: 2,
+            }
+        }
+    };
+    let Some(component_id) = harness::parse_component_id(&candidate.target_component) else {
+        return RsiRunExit::Failure {
+            message: format!("候选目标组件无效：{}", candidate.target_component),
+            exit_code: 1,
+        };
+    };
+    let registry = match wire_component_registry(&config) {
+        Ok(registry) => registry,
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("装配组件 registry 失败：{}", error.message()),
+                exit_code: 2,
+            }
+        }
+    };
+    let mut guard = match registry.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return RsiRunExit::Failure {
+                message: "registry 锁不可用".to_string(),
+                exit_code: 1,
+            }
+        }
+    };
+    let current = match guard.read(&component_id) {
+        Ok(content) => content,
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("读取目标组件失败：{}", error.message()),
+                exit_code: 1,
+            }
+        }
+    };
+    if current.body != candidate.base_body {
+        let _ = store.update(
+            id,
+            harness::domain::candidate::CandidateStatus::Stale,
+            Some("目标组件已变化".to_string()),
+        );
+        return RsiRunExit::Failure {
+            message: "目标组件已变化，候选标记 stale；请重新生成".to_string(),
+            exit_code: 1,
+        };
+    }
+    let version_store = harness::domain::versioning::ComponentVersionStore::new(
+        share::config::paths::global_harness_dir().join("versions"),
+    );
+    let review_cycle = format!("review-{id}");
+    if let Err(error) = version_store.capture(&**guard, &component_id, &review_cycle, "upsert") {
+        return RsiRunExit::Failure {
+            message: format!("写前快照失败：{}", error.message()),
+            exit_code: 1,
+        };
+    }
+    let change_set = harness::domain::changeset::ChangeSet {
+        edits: vec![harness::domain::changeset::ComponentEdit::Upsert {
+            id: component_id,
+            content: harness::domain::component::ComponentContent {
+                frontmatter: current.frontmatter,
+                body: candidate.proposed_body.clone(),
+            },
+        }],
+    };
+    if let Err(error) = harness::domain::changeset::apply_change_set_with_policy(
+        &mut **guard,
+        &change_set,
+        harness::domain::changeset::WritePolicy::ProseMaintenance,
+    ) {
+        return RsiRunExit::Failure {
+            message: format!("写入门禁拒绝：{}", error.message()),
+            exit_code: 1,
+        };
+    }
+    if let Err(error) = store.update(
+        id,
+        harness::domain::candidate::CandidateStatus::Active,
+        reason.map(str::to_string),
+    ) {
+        return RsiRunExit::Failure {
+            message: format!("候选状态更新失败：{}", error.message()),
+            exit_code: 1,
+        };
+    }
+    if !candidate.evidence.is_empty() {
+        let _ = rsi_observation_store()
+            .supersede_component(&candidate.target_component, "被 review 写入覆盖");
+        let observation = harness::domain::change_observation::ChangeObservation::new_applied(
+            candidate.target_component.clone(),
+            review_cycle,
+            harness::domain::change_observation::body_hash(&candidate.base_body),
+            harness::domain::change_observation::body_hash(&candidate.proposed_body),
+            candidate.evidence.clone(),
+            candidate.evidence.clone(),
+            Vec::new(),
+        );
+        if let Err(error) = rsi_observation_store().append(&observation) {
+            log::warn!(target: crate::LOG_TARGET, "写入 change 观察失败：{}", error.message());
+        }
+    }
+    RsiRunExit::Done {
+        summary: format!("已写入 {}（候选 {}）", candidate.target_component, id),
+    }
+}
+
+/// `rsi review reject <id>`。
+pub fn run_rsi_review_reject(id: &str, reason: &str) -> RsiRunExit {
+    let store = rsi_candidate_store();
+    match store.update(
+        id,
+        harness::domain::candidate::CandidateStatus::Rejected,
+        Some(reason.to_string()),
+    ) {
+        Ok(_) => RsiRunExit::Done {
+            summary: format!("已拒绝候选 {id}"),
+        },
+        Err(error) => RsiRunExit::Failure {
+            message: format!("拒绝候选失败：{}", error.message()),
+            exit_code: 1,
+        },
+    }
+}
+
 /// `rsi history [--component <kind>/<name>]`（#2074）：列组件快照历史。
 pub fn run_rsi_history(component: Option<&str>) -> RsiRunExit {
     let config = match load_global_config_layered() {
@@ -1059,7 +1337,26 @@ pub fn run_rsi_rollback(component: &str, cycle: Option<&str>) -> RsiRunExit {
         }
     };
     match harness::domain::versioning::rollback_component(&mut **guard, &id, &snapshot) {
-        Ok(message) => RsiRunExit::Done { summary: message },
+        Ok(message) => {
+            let lesson_store = harness::domain::lesson::LessonStore::new(
+                share::config::paths::global_harness_dir().join("library.jsonl"),
+            );
+            let retired = lesson_store
+                .retire_for_component(&id)
+                .unwrap_or_else(|error| {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "回滚后 lesson supersede 失败：{error}"
+                    );
+                    0
+                });
+            let message = if retired > 0 {
+                format!("{message}；已 supersede {retired} 条 lesson")
+            } else {
+                message
+            };
+            RsiRunExit::Done { summary: message }
+        }
         Err(error) => RsiRunExit::Failure {
             message: format!("回滚失败：{}", error.message()),
             exit_code: 1,

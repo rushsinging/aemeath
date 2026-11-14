@@ -537,6 +537,7 @@ async fn zero_adoption_cycle_still_runs_maintenance_compose() {
     let response = serde_json::json!({
         "decision": "compact",
         "reason": "压缩超长规则",
+        "promotion": "review",
         "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
     })
     .to_string();
@@ -578,6 +579,7 @@ async fn dry_run_maintenance_keeps_underlying_component_unchanged() {
     let response = serde_json::json!({
         "decision": "compact",
         "reason": "压缩超长规则",
+        "promotion": "review",
         "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
     })
     .to_string();
@@ -683,4 +685,51 @@ async fn dry_run_write_gate_rejects_duplicate_evidence_edit() {
         .read(&guardrails_id())
         .expect("read guardrails");
     assert_eq!(guardrails.body, original, "dry-run 拒绝后不得写入");
+}
+
+#[tokio::test]
+async fn global_maintenance_applies_without_review() {
+    let bloated = format!("# Guardrails\n\n- {}\n", "规则".repeat(1200));
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
+        FakeRegistry::with_entries(vec![(guardrails_id(), body_content(&bloated))]),
+    );
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+    let candidate_dir = tempfile::tempdir().expect("candidate dir");
+    let store = Arc::new(crate::domain::candidate::RsiCandidateStore::new(
+        candidate_dir.path().join("candidates.jsonl"),
+    ));
+    let response = serde_json::json!({
+        "decision": "compact",
+        "reason": "压缩超长规则",
+        "promotion": "review",
+        "rules": [{"action": "merge", "source": [0], "text": "读取错误与输出后再重试，未诊断前禁止原样重复调用。"}]
+    })
+    .to_string();
+    let llm = PromptRecordingLlm::new(vec![response]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry.clone(),
+        llm,
+        lesson_store,
+        RsiConfig::default(),
+    )
+    .with_evidence_stream(Box::new(FakeEvidenceStream::default()))
+    .with_candidate_store(store.clone());
+
+    let outcome = task.run_cycle().await.expect("cycle");
+    assert!(
+        outcome.summary.contains("维护 Compose"),
+        "{}",
+        outcome.summary
+    );
+    assert!(store.pending().expect("pending").is_empty());
+    let body = registry
+        .lock()
+        .await
+        .read(&guardrails_id())
+        .expect("read")
+        .body;
+    assert_ne!(body, bloated, "维护应直接写入，不再进入 review");
+    assert!(body.contains("读取错误与输出后再重试"));
 }

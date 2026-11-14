@@ -200,7 +200,14 @@ impl RsiEventRecorder {
             )
         })?;
         let path = self.today_path();
-        let line = serde_json::to_string(event).map_err(|error| {
+        let mut value = serde_json::to_value(event).map_err(|error| {
+            HarnessError::invalid(
+                crate::constants::ERROR_DOMAIN,
+                format!("事件序列化失败：{error}"),
+            )
+        })?;
+        crate::domain::redaction::redact_json_value(&mut value);
+        let line = serde_json::to_string(&value).map_err(|error| {
             HarnessError::invalid(
                 crate::constants::ERROR_DOMAIN,
                 format!("事件序列化失败：{error}"),
@@ -376,5 +383,28 @@ mod tests {
         assert_eq!(civil_from_days(days), (2026, 10, 24));
         assert!(name_with_day("2026-10-24.jsonl").is_some());
         assert!(name_with_day("notes.txt").is_none());
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn record_redacts_secret_signal_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let recorder = RsiEventRecorder::new(dir.path());
+        recorder.record(&RsiCycleEvent::RouteCandidates {
+            block_index: 0,
+            signal_id: "retry_pattern:Bash:{\"command\":\"curl -H sk-secret-123\"}".into(),
+            candidates: vec!["tool-guidance/default".into()],
+            reason: "Bearer token-456".into(),
+        });
+        let raw =
+            std::fs::read_to_string(dir.path().join(format!("{}.jsonl", current_date_string())))
+                .unwrap();
+        assert!(!raw.contains("sk-secret-123"), "{raw}");
+        assert!(!raw.contains("token-456"), "{raw}");
+        assert!(raw.contains("sk-***"), "{raw}");
     }
 }

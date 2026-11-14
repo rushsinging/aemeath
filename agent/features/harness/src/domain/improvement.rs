@@ -9,8 +9,10 @@ use crate::constants::{
     ERROR_DOMAIN, EVIDENCE_EXCERPT_BOUND, RSI_BUILTIN_COMPONENT_BODY_BUDGET_TOKENS,
     RSI_OVERLAY_COMPONENT_BODY_BUDGET_TOKENS,
 };
+use crate::domain::candidate::RsiCandidateStore;
 use crate::domain::changeset::{apply_change_set_with_policy, AppliedEdit, ChangeSet, WritePolicy};
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
+use crate::domain::component_audit::parse_audit_rules;
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
 use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore};
@@ -120,6 +122,17 @@ pub struct ImprovementMaterials {
     pub evidence: crate::domain::evidence::EvidenceBundle,
 }
 
+/// LLM 对写入方式的决策：默认自动，review 才进入候选队列。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionDecision {
+    #[default]
+    Auto,
+    Review,
+    Shadow,
+    Reject,
+}
+
 /// 逐块提案的 LLM 应答信封：NEVER 裸 ChangeSet——LLM 需要能表达
 /// 「证据不支持任何变更」，该表达是合法结果而非失败。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,6 +144,8 @@ pub enum BlockProposal {
         reason: String,
         #[serde(default)]
         signal_ids: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         change_set: ChangeSet,
     },
     /// 无变更：证据不支持任何编辑（合法结果）。
@@ -468,12 +483,17 @@ pub fn build_execution_prompt(
   7800 tokens；超预算会再压缩一轮，NEVER 硬截断。
 - 每条编辑的 reason MUST 引用该任务的 target_signal。
 
+promotion 契约：
+- auto：低风险、证据充分，host 校验后直接写入
+- review：不确定、影响面大或需要人工确认
+- reject：不建议写入
+
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","reason":"<依据，引用 signal id>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<依据，引用 signal id>","promotion":"auto","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -509,6 +529,8 @@ pub enum FixedComponentExecutionProposal {
     Propose {
         reason: String,
         evidence_refs: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         #[serde(default)]
         body: Option<String>,
         #[serde(default)]
@@ -612,6 +634,11 @@ pub fn build_block_prompt(
   破坏性操作无确认、失败后不诊断根因只重试。
 - **结论质量**：空泛建议、无证据断言、不复述关键约束就动手。
 
+promotion 契约：
+  - auto：低风险、证据充分，host 校验后直接写入
+  - review：不确定、影响面大或需要人工确认
+  - reject：不建议写入
+
 编辑契约：
   - 提案只携带要变更的组件（未提及的组件自动保持原样）
   - evidence_refs 必须非空，且每个 ref 都来自上方证据块（E0/E1…）；未知引用会作废整份提案
@@ -619,8 +646,8 @@ pub fn build_block_prompt(
   - patch 的 old_string/anchor MUST 唯一且非空；patch 只改目标片段
 
   只输出一个 JSON 对象，格式三选一：
-  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
-  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"promotion":"auto","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"tool-guidance","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+  {{"decision":"propose","reason":"<提案依据，一句话>","evidence_refs":["E0"],"promotion":"auto","change_set":{{"edits":[{{"action":"patch","id":{{"kind":"system-prompt-overlay","name":"<项目段>"}},"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -660,6 +687,8 @@ enum RawBlockProposal {
         evidence_refs: Vec<String>,
         #[serde(default)]
         signal_ids: Vec<String>,
+        #[serde(default)]
+        promotion: PromotionDecision,
         change_set: ChangeSet,
     },
     NoChange {
@@ -697,6 +726,7 @@ pub fn parse_block_proposal_with_refs(
             reason,
             evidence_refs,
             signal_ids,
+            promotion,
             change_set,
         } => {
             if !evidence_refs.is_empty() && !signal_ids.is_empty() {
@@ -734,6 +764,7 @@ pub fn parse_block_proposal_with_refs(
             Ok(BlockProposal::Propose {
                 reason,
                 signal_ids,
+                promotion,
                 change_set,
             })
         }
@@ -1192,6 +1223,125 @@ async fn reconcile_cross_scope_duplicates(
     Ok(removed_rules)
 }
 
+/// 同组件内新增规则与既有规则的语义重复门禁。
+/// 以 CJK bigram/词法相似度召回候选，再交给 LLM 只做结构化判定；
+/// duplicate/conflict 整份提案拒绝，specialization/distinct 放行。
+async fn same_component_duplicate_gate(
+    target: &ComponentId,
+    existing_body: &str,
+    proposed_body: &str,
+    block_index: usize,
+    llm: &dyn RsiLlmPort,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+) -> Result<bool, HarnessError> {
+    if existing_body.trim().is_empty() || proposed_body.trim().is_empty() {
+        return Ok(true);
+    }
+    let existing = parse_audit_rules(existing_body);
+    let proposed = parse_audit_rules(proposed_body);
+    if existing.is_empty() || proposed.is_empty() {
+        return Ok(true);
+    }
+    let mut pairs: Vec<(String, String, f64)> = Vec::new();
+    for new_rule in &proposed {
+        if existing
+            .iter()
+            .any(|old_rule| old_rule.normalized == new_rule.normalized)
+        {
+            pairs.push((
+                existing
+                    .iter()
+                    .find(|old_rule| old_rule.normalized == new_rule.normalized)
+                    .map(|rule| rule.raw.clone())
+                    .unwrap_or_default(),
+                new_rule.raw.clone(),
+                1.0,
+            ));
+            continue;
+        }
+        let best = existing
+            .iter()
+            .map(|old_rule| {
+                (
+                    old_rule.raw.clone(),
+                    share::memory::dedup::jaccard_similarity(
+                        &old_rule.normalized,
+                        &new_rule.normalized,
+                    ),
+                )
+            })
+            .max_by(|left, right| left.1.total_cmp(&right.1));
+        if let Some((old_rule, score)) = best {
+            if score >= 0.08 {
+                pairs.push((old_rule, new_rule.raw.clone(), score));
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return Ok(true);
+    }
+    pairs.truncate(12);
+    let pair_text = pairs
+        .iter()
+        .enumerate()
+        .map(|(index, (old_rule, new_rule, score))| {
+            format!(
+                "[pair {index}] similarity={score:.2}\n- 已有规则：{}\n- 新增规则：{}",
+                old_rule.chars().take(600).collect::<String>(),
+                new_rule.chars().take(600).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let prompt = format!(
+        r#"你是 harness 组件规则去重器。目标组件：{target}
+判断每条新增规则与已有规则的关系：
+- duplicate：语义等价，新增规则只是复述已有规则；
+- conflict：语义相互矛盾；
+- specialization：新增规则是对已有规则的具体补充，保留两者有价值；
+- distinct：主题不同。
+只输出 JSON 对象：
+{{"verdicts":[{{"index":0,"verdict":"duplicate","reason":"<不超过80字符>"}}]}}
+verdicts MUST 覆盖全部 pair。
+
+{pair_text}
+"#
+    );
+    let completion = complete_with_usage_event(
+        llm,
+        &prompt,
+        "same_component_duplicate_gate",
+        block_index,
+        recorder,
+    )
+    .await?;
+    let Some(adjudications) = parse_adjudications(&completion.text).ok() else {
+        return Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            "同组件去重仲裁解析失败（fail-closed，不落盘）",
+        ));
+    };
+    for adjudication in adjudications {
+        if matches!(
+            adjudication.verdict,
+            DuplicateVerdict::Duplicate | DuplicateVerdict::Conflict
+        ) {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "same_component_duplicate".to_string(),
+                    message: format!("{}: {}", adjudication.verdict.as_str(), adjudication.reason)
+                        .chars()
+                        .take(200)
+                        .collect(),
+                });
+            }
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// 新增提案的宿主硬门禁：目标 body 与相反 scope 的既有规则语义重复时，
 /// duplicate/conflict 一律拒绝；specialization/distinct 放行。
 async fn cross_scope_duplicate_gate(
@@ -1363,6 +1513,7 @@ async fn compact_block_proposal_budgets(
     let BlockProposal::Propose {
         reason,
         signal_ids,
+        promotion,
         mut change_set,
     } = proposal
     else {
@@ -1396,7 +1547,7 @@ async fn compact_block_proposal_budgets(
 - 输出仍是完整正文。
 
 只输出一个 JSON 对象：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<压缩后的完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
@@ -1431,6 +1582,7 @@ async fn compact_block_proposal_budgets(
     Some(BlockProposal::Propose {
         reason,
         signal_ids,
+        promotion,
         change_set,
     })
 }
@@ -1451,6 +1603,7 @@ async fn run_block(
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     block_index: usize,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    _candidate_store: Option<&RsiCandidateStore>,
 ) -> (Option<AcceptedBlock>, &'static str) {
     // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
     // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
@@ -1556,9 +1709,13 @@ async fn run_block(
         BlockProposal::Propose {
             reason,
             signal_ids,
+            promotion,
             change_set,
         } => {
             let evidence_bindings = evidence_bindings_for(&signal_ids, evidence, cycle_ref);
+            if promotion == PromotionDecision::Reject {
+                return (None, "拒绝（LLM 判断不写入）");
+            }
             if dry_run {
                 // 预演（#2050）：逐条校验（含整份作废预检）但不落盘、
                 // 不写 lesson、不推游标；预览行供 preview 文件。
@@ -1824,6 +1981,14 @@ fn record_adopted_lesson(
                     .first()
                     .map(|binding| binding.signal_id.clone())
                     .unwrap_or_default();
+                entry.verification.baseline_run_ids = entry
+                    .evidence
+                    .iter()
+                    .filter_map(|binding| binding.source.as_ref())
+                    .map(|source| source.run_id.clone())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
                 let entry_id = entry.id.clone();
                 let entry_signal = entry
                     .evidence
@@ -1923,7 +2088,7 @@ pub async fn run_diagnosis_cycle(
         }
         report_lines.push(format!(
             "  [强度] {} → {}（{}）",
-            verdict.signal_id,
+            crate::domain::redaction::redact_sensitive_text(&verdict.signal_id),
             verdict.tier.as_str(),
             verdict.rationale
         ));
@@ -2006,7 +2171,11 @@ pub async fn run_diagnosis_cycle(
     for issue in &summary.issues {
         report_lines.push(format!(
             "  [诊断汇总] {} ← {}（×{}）：{} → {}",
-            issue.component, issue.target_signal, issue.occurrences, issue.problem, issue.direction
+            issue.component,
+            crate::domain::redaction::redact_sensitive_text(&issue.target_signal),
+            issue.occurrences,
+            issue.problem,
+            issue.direction
         ));
     }
     Ok(summary)
@@ -2027,6 +2196,74 @@ pub async fn run_two_phase_cycle(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
     lesson_store: &LessonStore,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    run_two_phase_cycle_inner(
+        registry,
+        llm,
+        lesson_store,
+        config,
+        evidence,
+        context_reader,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        history,
+        cycle_id,
+        None,
+    )
+    .await
+}
+
+/// 带候选库的 TwoPhase 入口：全局执行提案进入 pending review。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_two_phase_cycle_with_candidates(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
+    candidate_store: Option<&RsiCandidateStore>,
+) -> Result<RunTwoPhaseOutcome, HarnessError> {
+    run_two_phase_cycle_inner(
+        registry,
+        llm,
+        lesson_store,
+        config,
+        evidence,
+        context_reader,
+        dry_run,
+        preview_lines,
+        recorder,
+        version_store,
+        history,
+        cycle_id,
+        candidate_store,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_two_phase_cycle_inner(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
     _config: &RsiConfig,
     evidence: crate::domain::evidence::EvidenceBundle,
     context_reader: &dyn crate::domain::stream_port::EvidenceStreamPort,
@@ -2036,6 +2273,7 @@ pub async fn run_two_phase_cycle(
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
     history: &mut crate::domain::strength::SignalHistory,
     cycle_id: &str,
+    _candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<RunTwoPhaseOutcome, HarnessError> {
     let cycle_ref = cycle_id.to_string();
     let lessons = lesson_store.load_active()?;
@@ -2082,7 +2320,7 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [强度] {} → {}（{}）",
-            verdict.signal_id,
+            crate::domain::redaction::redact_sensitive_text(&verdict.signal_id),
             verdict.tier.as_str(),
             verdict.rationale
         ));
@@ -2123,7 +2361,8 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → {}（唯一候选）",
-                    fact.signal.signal_id, component
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
+                    component
                 ));
                 route_plans.push(TwoPhaseRoutePlan {
                     fact,
@@ -2141,7 +2380,7 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → candidates: {}",
-                    fact.signal.signal_id,
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
                     candidates
                         .iter()
                         .map(|id| id.to_string())
@@ -2160,7 +2399,8 @@ pub async fn run_two_phase_cycle(
                 }
                 preview_lines.push(format!(
                     "  [route] {} → unresolved（{}）",
-                    fact.signal.signal_id, reason
+                    crate::domain::redaction::redact_sensitive_text(&fact.signal.signal_id),
+                    reason
                 ));
             }
         }
@@ -2366,7 +2606,8 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [route] {} → {}（diagnosis）",
-            plan.fact.signal.signal_id, component
+            crate::domain::redaction::redact_sensitive_text(&plan.fact.signal.signal_id),
+            component
         ));
         diagnosed_issues.push(DiagnosedIssue {
             component: component.to_string(),
@@ -2392,7 +2633,20 @@ pub async fn run_two_phase_cycle(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut unresolved = 0usize;
     let mut adoption_records = Vec::new();
+    let mut routed_signals: std::collections::BTreeMap<
+        ComponentId,
+        std::collections::BTreeSet<String>,
+    > = std::collections::BTreeMap::new();
+    for plan in &route_plans {
+        for candidate in &plan.candidates {
+            routed_signals
+                .entry(candidate.clone())
+                .or_default()
+                .insert(plan.fact.signal.signal_id.clone());
+        }
+    }
     let mut grouped: std::collections::BTreeMap<
         ComponentId,
         Vec<&crate::domain::improvement::AggregatedIssue>,
@@ -2402,6 +2656,13 @@ pub async fn run_two_phase_cycle(
             discarded += 1;
             continue;
         };
+        if !routed_signals
+            .get(&id)
+            .is_some_and(|signals| signals.contains(&issue.target_signal))
+        {
+            unresolved += 1;
+            continue;
+        }
         grouped.entry(id).or_default().push(issue);
     }
 
@@ -2426,7 +2687,11 @@ pub async fn run_two_phase_cycle(
         }
         preview_lines.push(format!(
             "  [execution] fixed component {component_id} ← {}",
-            signal_ids.join(", ")
+            signal_ids
+                .iter()
+                .map(|signal_id| crate::domain::redaction::redact_sensitive_text(signal_id))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         let issue_block = issues
             .iter()
@@ -2471,8 +2736,8 @@ pub async fn run_two_phase_cycle(
   NEVER 硬截断。
 
 只输出一个 JSON 对象，格式三选一：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<完整正文>"}}
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","operations":[{{"op":"replace_exact","old_string":"<唯一旧片段>","new_string":"<新片段>"}}]}}
 {{"decision":"no_change","reason":"<一句话>"}}
 不要输出 JSON 以外的任何文字。"#,
             component_scope = component_scope_label(&component_id),
@@ -2530,6 +2795,7 @@ pub async fn run_two_phase_cycle(
             Ok(FixedComponentExecutionProposal::Propose {
                 reason,
                 evidence_refs,
+                promotion,
                 body,
                 operations,
             }) => {
@@ -2589,6 +2855,19 @@ pub async fn run_two_phase_cycle(
                         discarded += issues.len();
                         continue;
                     }
+                    if !same_component_duplicate_gate(
+                        &component_id,
+                        &content.body,
+                        &patched_content.body,
+                        block_index,
+                        llm,
+                        recorder,
+                    )
+                    .await?
+                    {
+                        discarded += issues.len();
+                        continue;
+                    }
                     if !cross_scope_duplicate_gate(
                         &component_id,
                         &patched_content.body,
@@ -2608,6 +2887,7 @@ pub async fn run_two_phase_cycle(
                             id: component_id.clone(),
                             operations,
                         },
+                        promotion,
                     )
                 } else {
                     let Some(mut final_body) = body else {
@@ -2644,7 +2924,7 @@ pub async fn run_two_phase_cycle(
 - 输出仍是完整正文。
 
 只输出一个 JSON 对象：
-{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"body":"<压缩后的完整正文>"}}
+{{"decision":"propose","reason":"<一句话>","evidence_refs":["E0"],"promotion":"auto","body":"<压缩后的完整正文>"}}
 或：
 {{"decision":"no_change","reason":"<无法在预算内保留语义>"}}
 不要输出 JSON 以外的任何文字。"#,
@@ -2710,6 +2990,19 @@ pub async fn run_two_phase_cycle(
                         discarded += issues.len();
                         continue;
                     }
+                    if !same_component_duplicate_gate(
+                        &component_id,
+                        &content.body,
+                        &new_content.body,
+                        block_index,
+                        llm,
+                        recorder,
+                    )
+                    .await?
+                    {
+                        discarded += issues.len();
+                        continue;
+                    }
                     if !cross_scope_duplicate_gate(
                         &component_id,
                         &new_content.body,
@@ -2729,6 +3022,7 @@ pub async fn run_two_phase_cycle(
                             id: component_id.clone(),
                             content: new_content,
                         },
+                        promotion,
                     )
                 }
             }
@@ -2748,7 +3042,11 @@ pub async fn run_two_phase_cycle(
                 continue;
             }
         };
-        let (reason, edit) = execution;
+        let (reason, edit, promotion) = execution;
+        if promotion == PromotionDecision::Reject {
+            discarded += issues.len();
+            continue;
+        }
         let change_set = ChangeSet {
             edits: vec![edit.clone()],
         };
@@ -2846,7 +3144,10 @@ pub async fn run_two_phase_cycle(
     }
 
     let prefix = if dry_run { "（dry-run）" } else { "" };
-    let summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    let mut summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
+    if unresolved > 0 {
+        summary.push_str(&format!(" / 未路由 {unresolved}"));
+    }
     Ok(RunTwoPhaseOutcome {
         outcome: CycleOutcome {
             summary,
@@ -2910,6 +3211,7 @@ pub async fn run_improvement_cycle(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    _candidate_store: Option<&RsiCandidateStore>,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -2955,6 +3257,7 @@ pub async fn run_improvement_cycle(
             recorder,
             block_index,
             version_store,
+            _candidate_store,
         )
         .await;
         if let Some(accepted) = block_adoptions {
@@ -2982,8 +3285,9 @@ pub async fn run_improvement_cycle(
         log::info!(target: crate::LOG_TARGET, "改进块完成：{label}");
     }
     let prefix = if dry_run { "（dry-run）" } else { "" };
+    let summary = format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}");
     Ok(CycleOutcome {
-        summary: format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
+        summary,
         adopted: adoption_records,
     })
 }
@@ -3450,7 +3754,7 @@ pub async fn run_compose_phase(
 
 编辑契约同改进块（omitted-is-inherited；upsert 的 content.body 为
 完整正文）。只输出一个 JSON 对象，格式二选一（NEVER 输出其他形态）：
-{{"decision":"propose","reason":"<仲裁依据，一句话>","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"propose","reason":"<仲裁依据，一句话>","promotion":"auto","signal_ids":[],"change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#,
         adoptions = adoptions_block.join("\n"),
@@ -3474,6 +3778,7 @@ pub async fn run_compose_phase(
         Ok(BlockProposal::Propose {
             reason,
             signal_ids,
+            promotion: _,
             change_set,
         }) => {
             let evidence_by_component =

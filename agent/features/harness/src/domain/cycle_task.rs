@@ -30,6 +30,11 @@ pub struct HarnessRsiCycleTask {
     version_store: Option<std::sync::Arc<crate::domain::versioning::ComponentVersionStore>>,
     /// 跨周期信号累计文件（#2092 强度门禁的持久状态）。
     history_path: std::path::PathBuf,
+    /// 待审候选库：全局维护变更先入候选，不直接落盘。
+    candidate_store: Option<std::sync::Arc<crate::domain::candidate::RsiCandidateStore>>,
+    /// 写入变更观察库：后续周期验收，失败自动回滚。
+    observation_store:
+        Option<std::sync::Arc<crate::domain::change_observation::ChangeObservationStore>>,
 }
 
 impl HarnessRsiCycleTask {
@@ -49,12 +54,32 @@ impl HarnessRsiCycleTask {
             recorder: None,
             version_store: None,
             history_path: std::path::PathBuf::new(),
+            candidate_store: None,
+            observation_store: None,
         }
     }
 
     /// 注入跨周期信号累计文件路径（#2092）。
     pub fn with_history_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.history_path = path.into();
+        self
+    }
+
+    /// 注入待审候选库：全局维护变更进入 review 闭环。
+    pub fn with_candidate_store(
+        mut self,
+        store: std::sync::Arc<crate::domain::candidate::RsiCandidateStore>,
+    ) -> Self {
+        self.candidate_store = Some(store);
+        self
+    }
+
+    /// 注入写入变更观察库。
+    pub fn with_observation_store(
+        mut self,
+        store: std::sync::Arc<crate::domain::change_observation::ChangeObservationStore>,
+    ) -> Self {
+        self.observation_store = Some(store);
         self
     }
 
@@ -154,10 +179,38 @@ impl RsiTask for HarnessRsiCycleTask {
                     .map(|signal| signal.signal_id.clone())
             })
             .collect();
-        let has_new_evidence = !current_signals.is_empty()
-            || block_evidences
-                .iter()
-                .any(|evidence| evidence.sessions_covered > 0);
+        let mut current_evidence = crate::domain::evidence::EvidenceBundle::default();
+        for evidence in &block_evidences {
+            current_evidence
+                .signals
+                .extend(evidence.signals.iter().cloned());
+            current_evidence.sessions_covered += evidence.sessions_covered;
+        }
+
+        // 自动观察：下一周期先验收上轮写入；失败自动回滚，再进入新变更。
+        let mut observation_summaries = Vec::new();
+        if !self.dry_run {
+            if let (Some(observation_store), Some(version_store)) = (
+                self.observation_store.as_deref(),
+                self.version_store.as_deref(),
+            ) {
+                let mut merged = crate::domain::evidence::EvidenceBundle::default();
+                for evidence in &block_evidences {
+                    merged.signals.extend(evidence.signals.iter().cloned());
+                    merged.sessions_covered += evidence.sessions_covered;
+                }
+                observation_summaries =
+                    crate::domain::change_observation::evaluate_and_rollback_with_llm(
+                        observation_store,
+                        registry,
+                        version_store,
+                        &merged,
+                        self.llm.as_ref(),
+                        Some(self.lesson_store.as_ref()),
+                    )
+                    .await;
+            }
+        }
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_secs())
@@ -169,16 +222,15 @@ impl RsiTask for HarnessRsiCycleTask {
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|lesson| {
-                    crate::domain::lesson::judge_verification(
+                    crate::domain::lesson::judge_verification_with_evidence(
                         lesson,
-                        &current_signals,
-                        has_new_evidence,
+                        &current_evidence,
                     )
                 })
                 .collect::<Vec<_>>()
         } else {
             self.lesson_store
-                .verify_pending(&current_signals, has_new_evidence, now_secs)
+                .verify_pending_with_evidence(&current_evidence, now_secs)
                 .unwrap_or_default()
         };
         // #2092 lesson review：过期清理（长期未被引用的 Active lesson 退役）
@@ -305,7 +357,8 @@ impl RsiTask for HarnessRsiCycleTask {
                 ));
             }
             let mut history = load_signal_history(&self.history_path);
-            let run = crate::domain::improvement::run_two_phase_cycle(
+            let observation_evidence = merged_evidence.clone();
+            let run = crate::domain::improvement::run_two_phase_cycle_with_candidates(
                 registry,
                 self.llm.as_ref(),
                 &self.lesson_store,
@@ -318,12 +371,28 @@ impl RsiTask for HarnessRsiCycleTask {
                 self.version_store.as_deref(),
                 &mut history,
                 &cycle_id,
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await?;
             if !self.dry_run {
                 save_signal_history(&self.history_path, &history);
             }
             let mut outcome = run.outcome;
+            if !self.dry_run {
+                if let (Some(observation_store), Some(version_store)) = (
+                    self.observation_store.as_deref(),
+                    self.version_store.as_deref(),
+                ) {
+                    record_change_observations(
+                        observation_store,
+                        registry,
+                        version_store,
+                        &outcome.adopted,
+                        &cycle_id,
+                        &observation_evidence,
+                    );
+                }
+            }
             if !outcome.adopted.is_empty() {
                 if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
                     registry,
@@ -339,6 +408,21 @@ impl RsiTask for HarnessRsiCycleTask {
                 )
                 .await
                 {
+                    if !self.dry_run {
+                        if let (Some(observation_store), Some(version_store)) = (
+                            self.observation_store.as_deref(),
+                            self.version_store.as_deref(),
+                        ) {
+                            record_change_observations(
+                                observation_store,
+                                registry,
+                                version_store,
+                                &compose_outcome.adopted,
+                                &cycle_id,
+                                &observation_evidence,
+                            );
+                        }
+                    }
                     outcome.adopted.extend(compose_outcome.adopted);
                     outcome.summary = format!("{} | {}", outcome.summary, compose_outcome.summary);
                 }
@@ -350,10 +434,18 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await;
             if !maintenance.is_empty() {
                 outcome.summary = format!("{} | {}", outcome.summary, maintenance.join(" | "));
+            }
+            if !observation_summaries.is_empty() {
+                outcome.summary = format!(
+                    "{} | {}",
+                    outcome.summary,
+                    observation_summaries.join(" | ")
+                );
             }
             if self.dry_run {
                 report_lines.push(format!("    TwoPhase：{}", outcome.summary));
@@ -428,7 +520,9 @@ impl RsiTask for HarnessRsiCycleTask {
                 let signals: Vec<String> = evidence
                     .signals
                     .iter()
-                    .map(|signal| signal.signal_id.clone())
+                    .map(|signal| {
+                        crate::domain::redaction::redact_sensitive_text(&signal.signal_id)
+                    })
                     .collect();
                 report_lines.push(format!(
                     "    证据：{}",
@@ -449,6 +543,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await?;
             if self.dry_run {
@@ -462,6 +557,7 @@ impl RsiTask for HarnessRsiCycleTask {
             }
         }
         // #2065 A：周期 Compose 汇总块——纵观全部采纳仲裁矛盾/合并/精炼
+        let mut compose_applied = false;
         if !all_adoptions.is_empty() {
             if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
                 registry,
@@ -480,7 +576,48 @@ impl RsiTask for HarnessRsiCycleTask {
                 if self.dry_run {
                     report_lines.push(format!("    {}", compose_outcome.summary));
                 }
+                if !self.dry_run && !compose_outcome.adopted.is_empty() {
+                    compose_applied = true;
+                    if let (Some(observation_store), Some(version_store)) = (
+                        self.observation_store.as_deref(),
+                        self.version_store.as_deref(),
+                    ) {
+                        let mut merged = crate::domain::evidence::EvidenceBundle::default();
+                        for evidence in &block_evidences {
+                            merged.signals.extend(evidence.signals.iter().cloned());
+                            merged.sessions_covered += evidence.sessions_covered;
+                        }
+                        record_change_observations(
+                            observation_store,
+                            registry,
+                            version_store,
+                            &compose_outcome.adopted,
+                            &cycle_id,
+                            &merged,
+                        );
+                    }
+                }
                 summary_parts.push(compose_outcome.summary);
+            }
+        }
+        if !self.dry_run && !compose_applied {
+            if let (Some(observation_store), Some(version_store)) = (
+                self.observation_store.as_deref(),
+                self.version_store.as_deref(),
+            ) {
+                let mut merged = crate::domain::evidence::EvidenceBundle::default();
+                for evidence in &block_evidences {
+                    merged.signals.extend(evidence.signals.iter().cloned());
+                    merged.sessions_covered += evidence.sessions_covered;
+                }
+                record_change_observations(
+                    observation_store,
+                    registry,
+                    version_store,
+                    &all_adoptions,
+                    &cycle_id,
+                    &merged,
+                );
             }
         }
         // 组件维护：确定性审计触发后，即使本周期无采纳也清理已有膨胀。
@@ -492,9 +629,11 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
                 self.recorder.as_deref(),
                 self.version_store.as_deref(),
+                self.candidate_store.as_deref().filter(|_| !self.dry_run),
             )
             .await,
         );
+        summary_parts.extend(observation_summaries.clone());
         if summary_parts.is_empty() {
             return Ok(crate::domain::task::CycleOutcome {
                 summary: "无待处理证据块".to_string(),
@@ -581,6 +720,65 @@ fn save_signal_history(path: &std::path::Path, history: &crate::domain::strength
     }
 }
 // #2188（main）：组件维护审计与维护 Compose；sealed 已随实现权治理移除。
+
+fn record_change_observations(
+    store: &crate::domain::change_observation::ChangeObservationStore,
+    registry: &dyn crate::application::ComponentRegistry,
+    version_store: &crate::domain::versioning::ComponentVersionStore,
+    adopted: &[crate::domain::task::AdoptionRecord],
+    cycle_id: &str,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) {
+    for adoption in adopted {
+        let Ok(current) = registry.read(&adoption.id) else {
+            continue;
+        };
+        let Ok(snapshot) = version_store.load(&adoption.id, None) else {
+            continue;
+        };
+        let crate::domain::versioning::SnapshotContent::Existing { raw } = &snapshot.payload else {
+            continue;
+        };
+        let target_signal_ids: Vec<String> = adoption
+            .evidence
+            .iter()
+            .map(|binding| binding.signal_id.clone())
+            .collect();
+        let mut baseline_run_ids = Vec::new();
+        for signal in &evidence.signals {
+            for source in &signal.sources {
+                if !baseline_run_ids.contains(&source.run_id) {
+                    baseline_run_ids.push(source.run_id.clone());
+                }
+            }
+        }
+        if target_signal_ids.is_empty() {
+            continue;
+        }
+        if let Err(error) =
+            store.supersede_component(&adoption.id.to_string(), "被后续 RSI 写入覆盖")
+        {
+            log::warn!(target: crate::LOG_TARGET, "旧 observation 标记 superseded 失败：{}", error.message());
+        }
+        let observation = crate::domain::change_observation::ChangeObservation::new_applied(
+            adoption.id.to_string(),
+            cycle_id.to_string(),
+            crate::domain::change_observation::body_hash(raw),
+            crate::domain::change_observation::body_hash(&current.body),
+            target_signal_ids,
+            evidence
+                .signals
+                .iter()
+                .map(|signal| signal.signal_id.clone())
+                .collect(),
+            baseline_run_ids,
+        );
+        if let Err(error) = store.append(&observation) {
+            log::warn!(target: crate::LOG_TARGET, "写入变更观察失败：{}", error.message());
+        }
+    }
+}
+
 /// 对最终组件做确定性审计并执行维护 Compose；返回摘要（无命中为空）。
 async fn maintain_final_components(
     registry: &mut dyn crate::application::ComponentRegistry,
@@ -589,9 +787,13 @@ async fn maintain_final_components(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    candidate_store: Option<&crate::domain::candidate::RsiCandidateStore>,
 ) -> Vec<String> {
     let mut findings = Vec::new();
     for id in registry.list() {
+        if !crate::domain::component_audit::is_user_level_component(&id) {
+            continue;
+        }
         let Ok(content) = registry.read(&id) else {
             continue;
         };
@@ -636,6 +838,7 @@ async fn maintain_final_components(
         preview_lines,
         recorder,
         version_store,
+        candidate_store,
     )
     .await
     .unwrap_or_else(|error| {
