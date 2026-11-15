@@ -2800,6 +2800,17 @@ async fn run_two_phase_cycle_inner(
                 operations,
             }) => {
                 if execution_evidence_refs_invalid(&evidence_refs, issues.len()) {
+                    if let Some(recorder) = recorder {
+                        recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                            block_index,
+                            stage: "two_phase_execution_refs".to_string(),
+                            message: format!(
+                                "执行结果 evidence_refs 无效（数量 {}，可用 issue {}）",
+                                evidence_refs.len(),
+                                issues.len()
+                            ),
+                        });
+                    }
                     discarded += issues.len();
                     continue;
                 }
@@ -3044,6 +3055,13 @@ async fn run_two_phase_cycle_inner(
         };
         let (reason, edit, promotion) = execution;
         if promotion == PromotionDecision::Reject {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "two_phase_execution_promotion".to_string(),
+                    message: "执行结果 promotion=reject".to_string(),
+                });
+            }
             discarded += issues.len();
             continue;
         }
