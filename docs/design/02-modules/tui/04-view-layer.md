@@ -237,7 +237,7 @@ struct OutputViewState {
     // 选区
     selection_start: Option<(usize, usize)>,  // (line, col)
     selection_end: Option<(usize, usize)>,
-    selection_active: bool,
+    cell_selection: Option<(CellAnchor, CellAnchor)>,  // 表格单元格矩形 (data_row, col)，与字符选区互斥
 
     // 折叠
     collapsed_blocks: HashSet<BlockId>,
@@ -272,6 +272,11 @@ ArrowDown           → scroll_offset += 1（未到尾）；follow_tail = true�
 复制快捷键           → 提取选区文本 → clipboard
 Esc / 新输入         → 清除选区
 ```
+
+表格内按下（未按 Cmd/Alt/Ctrl）→ 吸附到单元格，进入 `cell_selection` 矩形选区；
+拖拽按「行 × 列」扩展，释放即复制。`Cmd/Alt/Ctrl + 拖拽` 跳过吸附，仍走字符级选区。
+blockquote 前缀同样是 `│ `，因此表格判定只看渲染期写入的 `RenderedLine.table_row`，
+不按分隔符猜。
 
 ### 4.2 RunActivityState
 
@@ -447,6 +452,7 @@ struct RenderedLine {
     plain: String,                   // 纯文本（选区复制用）
     spans: Vec<LineSpan>,            // 渲染用 span
     gutter_cols: usize,              // gutter 宽度（选区跳过）
+    table_row: Option<TableRowRef>,  // 表格数据行归属 + 各列字符区间（渲染期产出，选区不解析 │）
 }
 ```
 
@@ -457,6 +463,10 @@ struct RenderedLine {
   → 遍历 RenderedLine.plain（跳过 gutter_cols）
   → join("\n") → clipboard
 ```
+
+单元格选区分支：按 `cell_selection` 的 `(逻辑行, col)` 矩形取格 → 同一数据行（按「块序号 + 数据行号」分组，
+数据行号只在单块内唯一）的折行物理行按列续接回同一格 → 格间 `\t`、行间 `\n`；单格不加分隔符。
+列区间直接取自 `RenderedLine.table_row.cells`（渲染期唯一产出），**NEVER** 反解析 `│` 与 padding。
 
 - `plain ⊆ spans.content`——每个可见字符都在 plain 中（不变量，测试覆盖）
 - gutter 不纳入 plain（选区跳过 chrome）

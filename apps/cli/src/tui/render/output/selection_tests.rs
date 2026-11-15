@@ -388,3 +388,132 @@ fn test_last_visible_anchor_returns_last_screen_line_end() {
     let empty = OutputArea::new();
     assert_eq!(empty.last_visible_anchor(), None);
 }
+
+/// 测试辅助：构造单元格矩形选区（坐标为逻辑行号 + 列序号）。
+fn cell_view(anchor: (usize, usize), focus: (usize, usize)) -> OutputViewState {
+    use crate::tui::view_state::output::CellAnchor;
+    let mut view = OutputViewState::default();
+    view.begin_cell_selection(CellAnchor {
+        line: anchor.0,
+        col: anchor.1,
+    });
+    view.update_cell_selection(CellAnchor {
+        line: focus.0,
+        col: focus.1,
+    });
+    view
+}
+
+fn ascii_cell(len: usize) -> String {
+    ('A'..='Z').cycle().take(len).collect()
+}
+
+#[test]
+fn cell_selection_copies_single_cell_without_separator() {
+    let mut output = OutputArea::new();
+    set_assistant_markdown(
+        &mut output,
+        "| Name | Value |\n| --- | --- |\n| foo | bar |",
+        80,
+    );
+    let view = cell_view((2, 1), (2, 1));
+    assert_eq!(
+        output
+            .selected_text_for_view(&view, &no_live_status())
+            .as_deref(),
+        Some("bar")
+    );
+}
+
+#[test]
+fn cell_selection_copies_rectangle_as_tab_separated_text() {
+    let mut output = OutputArea::new();
+    set_assistant_markdown(
+        &mut output,
+        "| Name | Value |\n| --- | --- |\n| foo | bar |",
+        80,
+    );
+    let view = cell_view((0, 0), (2, 1));
+    assert_eq!(
+        output
+            .selected_text_for_view(&view, &no_live_status())
+            .as_deref(),
+        Some("Name\tValue\nfoo\tbar")
+    );
+}
+
+#[test]
+fn cell_selection_copies_single_column_across_rows() {
+    let mut output = OutputArea::new();
+    set_assistant_markdown(
+        &mut output,
+        "| Name | Value |\n| --- | --- |\n| foo | bar |",
+        80,
+    );
+    let view = cell_view((0, 0), (2, 0));
+    assert_eq!(
+        output
+            .selected_text_for_view(&view, &no_live_status())
+            .as_deref(),
+        Some("Name\nfoo")
+    );
+}
+
+#[test]
+fn cell_selection_joins_wrapped_physical_rows_back_into_one_cell() {
+    let long = ascii_cell(78);
+    let mut output = OutputArea::new();
+    set_assistant_markdown(
+        &mut output,
+        &format!("| {long} | b |\n| --- | --- |\n| x | y |"),
+        80,
+    );
+    // 第一列在 80 宽下会折成多个物理行，它们共享同一 data_row。
+    let view = cell_view((0, 0), (0, 0));
+    assert_eq!(
+        output
+            .selected_text_for_view(&view, &no_live_status())
+            .as_deref(),
+        Some(long.as_str())
+    );
+}
+
+#[test]
+fn cell_selection_ignores_rows_without_table_row_metadata() {
+    let mut output = OutputArea::new();
+    set_plain_lines(&mut output, &[" a │ b "]);
+    let view = cell_view((0, 0), (0, 1));
+    assert_eq!(
+        output.selected_text_for_view(&view, &no_live_status()),
+        None
+    );
+}
+
+#[test]
+fn cell_selection_keeps_separate_tables_on_separate_rows() {
+    // 两个表格块都用块内 data_row 0/1：分组必须按块隔离，否则两表会被拼成同一行。
+    let table = |prefix: &str, block_id: &str| RenderedBlock {
+        block_id: block_id.to_string(),
+        lines: Rc::new(vec![
+            RenderedLine::new(vec![Span::raw(format!(" {prefix}1 │ {prefix}2 "))])
+                .with_table_row_fixture(0),
+            RenderedLine::new(vec![Span::raw("────┼────")]),
+            RenderedLine::new(vec![Span::raw(format!(" {prefix}a │ {prefix}b "))])
+                .with_table_row_fixture(1),
+        ]),
+    };
+    let mut output = OutputArea::new();
+    output.replace_document(RenderedDocument {
+        blocks: vec![table("A", "t1"), table("B", "t2")],
+        root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
+    });
+
+    let view = cell_view((0, 0), (5, 1));
+    assert_eq!(
+        output
+            .selected_text_for_view(&view, &no_live_status())
+            .as_deref(),
+        Some("A1\tA2\nAa\tAb\nB1\tB2\nBa\tBb")
+    );
+}

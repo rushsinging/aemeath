@@ -1,5 +1,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+
+use crate::tui::render::output::rendered::{CellSpan, TableRowRef};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::render::theme;
@@ -42,13 +44,17 @@ pub fn parse_table_cells(line: &str) -> Vec<&str> {
 ///
 /// `available_width` 为终端可用宽度。当单元格内容总宽度超出时，自动按列宽换行。
 /// 换行规则：每个单元格内容超过其列宽时，按列宽切分为多行，行尾不截断。
-pub fn render_table_block(
+/// 渲染表格块，同时返回每个物理行的单元格归属（分隔行为 `None`）。
+///
+/// 单元格内容按列宽折行时，一个数据行会产出多个物理行，这些物理行共享同一序号；
+/// 每行同时给出各列字符区间，选区/复制据此把折行片段拼回同一格，无需再反解析 `│`。
+pub fn render_table_block_with_rows(
     lines: &[&str],
     base_style: Style,
     available_width: usize,
-) -> Vec<Vec<Span<'static>>> {
+) -> (Vec<Vec<Span<'static>>>, Vec<Option<TableRowRef>>) {
     if lines.is_empty() {
-        return vec![];
+        return (vec![], vec![]);
     }
 
     let mut all_cells: Vec<Vec<String>> = Vec::new();
@@ -68,10 +74,11 @@ pub fn render_table_block(
 
     let num_cols = all_cells.iter().map(|r| r.len()).max().unwrap_or(0);
     if num_cols == 0 {
-        return lines
+        let plain_rows = lines
             .iter()
             .map(|l| vec![Span::styled(l.to_string(), base_style)])
             .collect();
+        return (plain_rows, vec![None; lines.len()]);
     }
 
     // 计算列宽：取内容最大宽度，但受 available_width 限制
@@ -79,6 +86,7 @@ pub fn render_table_block(
     let col_widths = constrain_column_widths(&natural_widths, num_cols, available_width);
 
     let mut result = Vec::new();
+    let mut row_refs: Vec<Option<TableRowRef>> = Vec::new();
     let mut data_row_idx = 0;
     let header_style = base_style.add_modifier(Modifier::BOLD);
     let border_style = base_style.fg(theme::BORDER);
@@ -86,17 +94,24 @@ pub fn render_table_block(
     for (i, line) in lines.iter().enumerate() {
         if is_table_separator(line) {
             result.push(separator_spans(&col_widths, border_style));
+            row_refs.push(None);
         } else {
             let cells = if data_row_idx < all_cells.len() {
                 &all_cells[data_row_idx]
             } else {
                 continue;
             };
-            data_row_idx += 1;
             let is_header = separator_idx.is_none_or(|si| i < si);
             let style = if is_header { header_style } else { base_style };
             let row = wrapped_row_spans(cells, &col_widths, style, border_style);
-            result.extend(row);
+            for (spans, cell_spans) in row {
+                row_refs.push(Some(TableRowRef {
+                    data_row: data_row_idx,
+                    cells: cell_spans,
+                }));
+                result.push(spans);
+            }
+            data_row_idx += 1;
         }
     }
 
@@ -120,7 +135,7 @@ pub fn render_table_block(
         );
     }
 
-    result
+    (result, row_refs)
 }
 
 /// 按内容最大宽度计算自然列宽
@@ -178,14 +193,16 @@ fn constrain_column_widths(natural: &[usize], num_cols: usize, available: usize)
     result
 }
 
-/// 将一个数据行的单元格按列宽换行，返回 1-N 行 spans。
+/// 将一个数据行的单元格按列宽换行，返回 1-N 行 `(spans, 各列字符区间)`。
 /// 单元格内容会先解析 inline markdown（`code`、**bold** 等）再换行。
+///
+/// 列区间在拼装 spans 的同一次遍历中累计得到（char 偏移），是选区侧的唯一真相源。
 fn wrapped_row_spans(
     cells: &[String],
     col_widths: &[usize],
     style: Style,
     border_style: Style,
-) -> Vec<Vec<Span<'static>>> {
+) -> Vec<(Vec<Span<'static>>, Vec<CellSpan>)> {
     let num_cols = col_widths.len();
     // 每个单元格解析 inline markdown 得到 styled spans，再按列宽换行
     let wrapped_cells: Vec<Vec<Vec<Span<'static>>>> = (0..num_cols)
@@ -201,32 +218,46 @@ fn wrapped_row_spans(
     let mut rows = Vec::with_capacity(max_lines);
     for line_idx in 0..max_lines {
         let mut spans = Vec::new();
+        let mut cell_ranges = Vec::with_capacity(num_cols);
+        let mut char_pos = 0usize;
         for c in 0..num_cols {
             if c > 0 {
                 spans.push(Span::styled(" │ ".to_string(), border_style));
+                char_pos += " │ ".chars().count();
             } else {
                 spans.push(Span::styled(" ".to_string(), style));
+                char_pos += 1;
             }
             let cell_spans = wrapped_cells[c]
                 .get(line_idx)
                 .cloned()
                 .unwrap_or_else(|| vec![Span::styled(String::new(), style)]);
 
-            // 计算已有宽度，补齐到列宽
+            // 记录该列内容的字符区间（padding 不算内容，选区/复制都不该包含）。
+            let content_chars: usize = cell_spans.iter().map(|s| s.content.chars().count()).sum();
+            let start = char_pos;
+            char_pos += content_chars;
+            cell_ranges.push(CellSpan {
+                start,
+                end: char_pos,
+            });
+
+            // 计算已有宽度，补齐到列宽（padding 每空格 1 char）。
             let cell_width: usize = cell_spans.iter().map(|s| s.content.width()).sum();
+            spans.extend(cell_spans);
             let col_w = col_widths[c];
             if cell_width < col_w {
-                spans.extend(cell_spans);
-                spans.push(Span::styled(" ".repeat(col_w - cell_width), style));
-            } else {
-                spans.extend(cell_spans);
+                let pad = col_w - cell_width;
+                spans.push(Span::styled(" ".repeat(pad), style));
+                char_pos += pad;
             }
 
             if c == num_cols - 1 {
                 spans.push(Span::styled(" ".to_string(), style));
+                char_pos += 1;
             }
         }
-        rows.push(spans);
+        rows.push((spans, cell_ranges));
     }
 
     rows

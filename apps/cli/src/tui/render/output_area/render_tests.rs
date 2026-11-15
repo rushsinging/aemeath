@@ -490,3 +490,141 @@ fn test_render_clears_viewport_with_explicit_base_bg_never_reset() {
         }
     }
 }
+
+#[test]
+fn render_keeps_table_plain_identical_when_line_is_window_first_row() {
+    // 窗口首行曾对表格 plain 做 trim 归一化并写回 rendered_content，
+    // 导致同一行滚到窗口首行后复制文本/选区字符偏移漂移。
+    const TABLE_LINE: &str = " a │ b ";
+    let mut output = OutputArea::new();
+    output.replace_document(RenderedDocument::new(vec![RenderedBlock {
+        block_id: "table".to_string(),
+        lines: Rc::new(
+            (0..30)
+                .map(|index| {
+                    RenderedLine::from_plain(if index == 20 { TABLE_LINE } else { "plain" })
+                })
+                .collect(),
+        ),
+    }]));
+
+    let rect = Rect::new(0, 0, 80, 10);
+    let mut buffer = Buffer::empty(rect);
+
+    // 表格行作为窗口首行：start = 20。
+    let first_row_view = OutputViewState {
+        auto_scroll: false,
+        last_visible_height: 10,
+        scroll_offset: 0,
+        ..Default::default()
+    };
+    output.render(rect, &mut buffer, &first_row_view, &no_live_status());
+    let as_first_row = output.rendered_line_content.get(&20).cloned();
+
+    // 表格行位于窗口中段：start = 15，表格行是第 6 个可见行。
+    let middle_view = OutputViewState {
+        auto_scroll: false,
+        last_visible_height: 10,
+        scroll_offset: 5,
+        ..Default::default()
+    };
+    output.render(rect, &mut buffer, &middle_view, &no_live_status());
+    let as_middle_row = output.rendered_line_content.get(&20).cloned();
+
+    assert_eq!(as_first_row.as_deref(), Some(TABLE_LINE));
+    assert_eq!(as_first_row, as_middle_row);
+}
+
+/// 构造三行表格文档：表头行、分隔行、数据行（均带表格元数据）。
+fn table_document() -> RenderedDocument {
+    RenderedDocument::new(vec![RenderedBlock {
+        block_id: "table".to_string(),
+        lines: Rc::new(vec![
+            RenderedLine::new(vec![Span::raw(" Name │ Value ")]).with_table_row_fixture(0),
+            RenderedLine::new(vec![Span::raw("──────┼───────")]),
+            RenderedLine::new(vec![Span::raw(" foo  │ bar   ")]).with_table_row_fixture(1),
+        ]),
+    }])
+}
+
+fn table_view() -> OutputViewState {
+    OutputViewState {
+        auto_scroll: false,
+        last_visible_height: 10,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn table_cell_at_snaps_click_to_cell() {
+    use crate::tui::view_state::output::CellAnchor;
+
+    let mut output = OutputArea::new();
+    output.replace_document(table_document());
+    let rect = Rect::new(0, 0, 80, 10);
+    let view = table_view();
+    let mut buffer = Buffer::empty(rect);
+    output.render(rect, &mut buffer, &view, &no_live_status());
+
+    // 数据行第 0 列（'f' 位于屏幕列 1）。
+    assert_eq!(
+        output.table_cell_at(2, 1, &rect, &no_live_status()),
+        Some(CellAnchor { line: 2, col: 0 })
+    );
+    // 分隔符归右侧列。
+    assert_eq!(
+        output.table_cell_at(2, 6, &rect, &no_live_status()),
+        Some(CellAnchor { line: 2, col: 1 })
+    );
+    // 表头属于 data_row 0。
+    assert_eq!(
+        output.table_cell_at(0, 1, &rect, &no_live_status()),
+        Some(CellAnchor { line: 0, col: 0 })
+    );
+    // 分隔行不是数据行。
+    assert_eq!(output.table_cell_at(1, 3, &rect, &no_live_status()), None);
+}
+
+#[test]
+fn cell_selection_highlights_only_selected_columns() {
+    use crate::tui::view_state::output::CellAnchor;
+
+    let mut output = OutputArea::new();
+    output.replace_document(table_document());
+    let rect = Rect::new(0, 0, 80, 10);
+    let mut view = table_view();
+    view.begin_cell_selection(CellAnchor { line: 2, col: 1 });
+    let mut buffer = Buffer::empty(rect);
+    output.render(rect, &mut buffer, &view, &no_live_status());
+
+    // 选中的第二列：'b' 位于屏幕列 8。
+    assert_eq!(buffer[(8, 2)].bg, theme::SELECTION_BG);
+    // 未选中的第一列 'f' 保持原底色。
+    assert_ne!(buffer[(1, 2)].bg, theme::SELECTION_BG);
+}
+
+#[test]
+fn cell_selection_highlights_wrapped_continuation_rows() {
+    use crate::tui::view_state::output::CellAnchor;
+
+    let mut output = OutputArea::new();
+    output.replace_document(RenderedDocument::new(vec![RenderedBlock {
+        block_id: "wrapped".to_string(),
+        lines: Rc::new(vec![
+            RenderedLine::new(vec![Span::raw(" abcdef ")]).with_table_row_fixture(0),
+            RenderedLine::new(vec![Span::raw(" cdef   ")]).with_table_row_fixture(0),
+            RenderedLine::new(vec![Span::raw(" x │ y ")]).with_table_row_fixture(1),
+        ]),
+    }]));
+    let rect = Rect::new(0, 0, 80, 10);
+    let mut view = table_view();
+    view.begin_cell_selection(CellAnchor { line: 0, col: 0 });
+    let mut buffer = Buffer::empty(rect);
+    output.render(rect, &mut buffer, &view, &no_live_status());
+
+    // 折行续行与首行同属数据行 0，二者都应是选中底色。
+    assert_eq!(buffer[(1, 0)].bg, theme::SELECTION_BG);
+    assert_eq!(buffer[(1, 1)].bg, theme::SELECTION_BG);
+    // 另一数据行不受影响。
+    assert_ne!(buffer[(1, 2)].bg, theme::SELECTION_BG);
+}
