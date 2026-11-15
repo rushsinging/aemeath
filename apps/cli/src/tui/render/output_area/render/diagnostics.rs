@@ -11,10 +11,3 @@ pub(super) fn diagnostic_plain(value: &str) -> String {
     }
     out
 }
-
-pub(super) fn normalize_rendered_table_plain(plain: &str) -> String {
-    let Some((left, right)) = plain.split_once('│') else {
-        return plain.to_string();
-    };
-    format!("{}  │{}", left.trim_end(), right.trim_end())
-}

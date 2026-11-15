@@ -261,3 +261,19 @@ fn test_apply_gutter_with_frame_caps_huge_depth_without_panic_or_oom() {
     // + marker 槽 2 列 = 514 列总 gutter_cols。不可能 panic。
     assert!(out[0].gutter_cols > GUTTER_WIDTH);
 }
+
+#[test]
+fn test_apply_gutter_preserves_table_row_metadata() {
+    // 真实渲染链 document_renderer → apply_gutter 会重建 RenderedLine；
+    // 若丢失 table_row，表格内按单元格吸附会整体失效（屏幕有框线但点不中）。
+    let line = RenderedLine::new(vec![Span::raw(" a │ b ")]).with_table_row_fixture(1);
+    let view = TextBlockView {
+        key: String::new(),
+        text: String::new(),
+        style: SemanticStyle::Normal,
+    };
+    let out = apply_gutter(&OutputBlockKind::AssistantMessage(view), 0, vec![line]);
+    let table_row = out[0].table_row.as_ref().expect("table_row 必须保留");
+    assert_eq!(table_row.data_row, 1);
+    assert_eq!(table_row.cells.len(), 2, "各列字符区间也必须一并保留");
+}

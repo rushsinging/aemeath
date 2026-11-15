@@ -173,3 +173,89 @@ fn plain_click_on_link_starts_selection_without_opening_url() {
     assert!(effects.is_empty());
     assert!(app.view_state.output.is_selecting());
 }
+
+fn app_with_table() -> App {
+    let mut app = App::new(
+        "test-session".into(),
+        PathBuf::from("/workspace"),
+        "test-model".into(),
+    );
+    let area = Rect::new(0, 0, 80, 10);
+    app.layout.output_area_rect = area;
+    app.output_area.replace_document(RenderedDocument {
+        blocks: vec![RenderedBlock {
+            block_id: "table".into(),
+            lines: Rc::new(vec![
+                RenderedLine::new(vec![Span::raw(" Name │ Value ")]).with_table_row_fixture(0),
+                RenderedLine::new(vec![Span::raw("──────┼───────")]),
+                RenderedLine::new(vec![Span::raw(" foo  │ bar   ")]).with_table_row_fixture(1),
+            ]),
+        }],
+        root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
+    });
+    app.output_area.screen_line_map = vec![
+        (0, sdk::CharIdx::new(0), sdk::CharIdx::new(17)),
+        (1, sdk::CharIdx::new(0), sdk::CharIdx::new(14)),
+        (2, sdk::CharIdx::new(0), sdk::CharIdx::new(14)),
+    ];
+    app
+}
+
+fn mouse_event(kind: MouseEventKind, row: u16, column: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn table_drag_copies_rectangular_cells_with_tabs() {
+    let mut app = app_with_table();
+    let area = app.layout.output_area_rect;
+
+    // 按下在数据行第 0 列（'f'）。
+    app.handle_mouse_event(
+        mouse_event(MouseEventKind::Down(MouseButton::Left), 2, 1),
+        area,
+    );
+    assert!(app.view_state.output.is_cell_selecting());
+
+    // 拖到第 1 列（'b'）。
+    app.handle_mouse_event(
+        mouse_event(MouseEventKind::Drag(MouseButton::Left), 2, 8),
+        area,
+    );
+
+    let effects = app.handle_mouse_event(
+        mouse_event(MouseEventKind::Up(MouseButton::Left), 2, 8),
+        area,
+    );
+
+    assert_eq!(
+        effects,
+        vec![Effect::CopyToClipboard {
+            text: "foo\tbar".to_string()
+        }]
+    );
+    assert!(!app.view_state.output.is_cell_selecting());
+}
+
+#[test]
+fn table_click_with_modifier_keeps_char_selection() {
+    let mut app = app_with_table();
+    let area = app.layout.output_area_rect;
+
+    let event = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 1,
+        row: 2,
+        modifiers: KeyModifiers::ALT,
+    };
+    app.handle_mouse_event(event, area);
+
+    assert!(!app.view_state.output.is_cell_selecting());
+    assert!(app.view_state.output.is_selecting());
+}

@@ -145,8 +145,67 @@ impl super::OutputArea {
         view: &crate::tui::view_state::output::OutputViewState,
         live_status: &LiveStatusViewModel,
     ) -> Option<String> {
+        if view.is_cell_selecting() {
+            return self.selected_cells_text(view);
+        }
         let (start, end) = view.selection_range()?;
         self.selected_text_for_range(start, end, live_status)
+    }
+
+    /// 单元格矩形选区 → Tab 分隔纯文本（行间换行，单格无分隔符）。
+    ///
+    /// 同一数据行折行产生的多个物理行按列续接回同一格。分组键是「块序号 + 数据行号」：
+    /// `RenderedLine.table_row.data_row` 只在单个表格块内唯一，不同表格会重号。
+    fn selected_cells_text(
+        &self,
+        view: &crate::tui::view_state::output::OutputViewState,
+    ) -> Option<String> {
+        let (start, end) = view.cell_selection_range()?;
+        if start.col > end.col {
+            return None;
+        }
+
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut current: Option<(usize, usize, Vec<String>)> = None;
+        for (block_index, data_row, logic_idx) in self.selected_cell_lines(start.line, end.line) {
+            let line = self.document.line_at(logic_idx)?;
+            let Some(table_row) = line.table_row.as_ref() else {
+                continue;
+            };
+            match current.as_mut() {
+                Some((block, row, cols)) if *block == block_index && *row == data_row => {
+                    append_cell_fragments(cols, &line.plain, &table_row.cells, start.col, end.col);
+                }
+                _ => {
+                    flush_cell_row(&mut current, &mut rows);
+                    let mut cols = vec![String::new(); end.col - start.col + 1];
+                    append_cell_fragments(
+                        &mut cols,
+                        &line.plain,
+                        &table_row.cells,
+                        start.col,
+                        end.col,
+                    );
+                    current = Some((block_index, data_row, cols));
+                }
+            }
+        }
+        flush_cell_row(&mut current, &mut rows);
+        if rows.is_empty() {
+            return None;
+        }
+
+        let text = rows
+            .iter()
+            .map(|cols| {
+                cols.iter()
+                    .map(|cell| cell.trim_end())
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(text)
     }
 
     fn selected_text_for_range(
@@ -204,6 +263,35 @@ impl super::OutputArea {
         } else {
             Some(result)
         }
+    }
+}
+
+/// 收口当前正在拼接的单元格行。
+fn flush_cell_row(current: &mut Option<(usize, usize, Vec<String>)>, rows: &mut Vec<Vec<String>>) {
+    if let Some((_, _, cols)) = current.take() {
+        rows.push(cols);
+    }
+}
+
+/// 把物理行中 `[first_col, last_col]` 列的可见片段追加到对应格。
+///
+/// 折行续行的片段直接续接（不插分隔符），保持单元格原文连续。
+fn append_cell_fragments(
+    cols: &mut [String],
+    plain: &str,
+    cells: &[crate::tui::render::output::rendered::CellSpan],
+    first_col: usize,
+    last_col: usize,
+) {
+    let chars: Vec<char> = plain.chars().collect();
+    for (col, span) in cells.iter().enumerate() {
+        if col < first_col || col > last_col {
+            continue;
+        }
+        let Some(target) = cols.get_mut(col - first_col) else {
+            continue;
+        };
+        target.extend(safe_char_slice(&chars, span.start, span.end));
     }
 }
 

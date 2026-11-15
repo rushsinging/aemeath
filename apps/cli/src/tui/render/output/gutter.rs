@@ -181,6 +181,10 @@ pub fn apply_gutter_with_frame(
             } else {
                 line.animation
             };
+            // gutter 是纯显示层包装，必须原样保留行的语义元数据（表格单元格归属），
+            // 否则真实渲染链（document_renderer → apply_gutter）会丢失 table_row，
+            // 表现为表格内无法按单元格吸附。
+            gutted.table_row = line.table_row.clone();
             gutted
         })
         .collect()

@@ -14,6 +14,7 @@ mod render_tests;
 mod resize;
 pub mod selection;
 pub mod spinner;
+pub(crate) mod table_cells;
 pub mod types;
 
 // 重新导出核心类型，方便外部使用
