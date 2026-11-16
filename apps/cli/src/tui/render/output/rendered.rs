@@ -71,6 +71,8 @@ pub struct CellSpan {
 /// 选区侧不再反解析 `│`。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableRowRef {
+    /// 块内表格实例序号（同一消息可有多个 markdown 表格，各自数据行号都从 0 起）。
+    pub table: usize,
     /// 表格内数据行序号（不含分隔行，表头为 0）。
     pub data_row: usize,
     /// 按列序排列的单元格字符区间（与 `plain` 同坐标系）。
@@ -219,6 +221,7 @@ impl RenderedLine {
     #[cfg(test)]
     pub fn with_table_row_fixture(mut self, data_row: usize) -> Self {
         self.table_row = Some(TableRowRef {
+            table: 0,
             data_row,
             cells: crate::tui::render::output::rendered::table_cell_spans_for_test(&self.plain),
         });

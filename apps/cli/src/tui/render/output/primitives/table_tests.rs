@@ -4,7 +4,7 @@ use ratatui::style::Style;
 #[test]
 fn test_table_renders_rows_with_aligned_plain() {
     let src = ["| a | bb |", "|---|----|", "| 1 | 2 |"];
-    let lines = table(&src, Style::default(), 40);
+    let lines = table(&src, Style::default(), 40, 0);
 
     assert!(!lines.is_empty());
     assert!(lines

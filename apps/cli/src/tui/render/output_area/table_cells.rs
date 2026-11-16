@@ -64,16 +64,17 @@ impl super::OutputArea {
         })
     }
 
-    /// 单元格选区命中的表格行：`(块序号, 数据行号, 逻辑行号)`，按文档顺序返回。
+    /// 单元格选区命中的表格行：`(块序号, 表格实例序号, 数据行号, 逻辑行号)`，按文档顺序返回。
     ///
-    /// 选中范围先映射成 `(块, 数据行)` 集合，再把同一数据行折行产生的所有物理行
+    /// 选中范围先映射成 `(块, 表格, 数据行)` 集合，再把同一数据行折行产生的所有物理行
     /// 一并纳入——折行续行可能落在拖拽行范围之外，但语义上属于同一格。
+    /// 表格实例序号不可省：同一消息里多个表格的数据行号都从 0 起。
     pub(crate) fn selected_cell_lines(
         &self,
         start_line: usize,
         end_line: usize,
-    ) -> Vec<(usize, usize, usize)> {
-        let mut keys: Vec<(usize, usize)> = Vec::new();
+    ) -> Vec<(usize, usize, usize, usize)> {
+        let mut keys: Vec<(usize, usize, usize)> = Vec::new();
         let mut logic_idx = 0usize;
         for (block_index, block) in self.document.blocks.iter().enumerate() {
             for line in block.lines.iter() {
@@ -85,7 +86,7 @@ impl super::OutputArea {
                 let Some(table_row) = line.table_row.as_ref() else {
                     continue;
                 };
-                let key = (block_index, table_row.data_row);
+                let key = (block_index, table_row.table, table_row.data_row);
                 if !keys.contains(&key) {
                     keys.push(key);
                 }
@@ -100,8 +101,8 @@ impl super::OutputArea {
         for (block_index, block) in self.document.blocks.iter().enumerate() {
             for line in block.lines.iter() {
                 if let Some(table_row) = line.table_row.as_ref() {
-                    if keys.contains(&(block_index, table_row.data_row)) {
-                        lines.push((block_index, table_row.data_row, logic_idx));
+                    if keys.contains(&(block_index, table_row.table, table_row.data_row)) {
+                        lines.push((block_index, table_row.table, table_row.data_row, logic_idx));
                     }
                 }
                 logic_idx += 1;

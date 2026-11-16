@@ -166,14 +166,18 @@ impl super::OutputArea {
         }
 
         let mut rows: Vec<Vec<String>> = Vec::new();
-        let mut current: Option<(usize, usize, Vec<String>)> = None;
-        for (block_index, data_row, logic_idx) in self.selected_cell_lines(start.line, end.line) {
+        let mut current: Option<(usize, usize, usize, Vec<String>)> = None;
+        for (block_index, table, data_row, logic_idx) in
+            self.selected_cell_lines(start.line, end.line)
+        {
             let line = self.document.line_at(logic_idx)?;
             let Some(table_row) = line.table_row.as_ref() else {
                 continue;
             };
             match current.as_mut() {
-                Some((block, row, cols)) if *block == block_index && *row == data_row => {
+                Some((block, table_idx, row, cols))
+                    if *block == block_index && *table_idx == table && *row == data_row =>
+                {
                     append_cell_fragments(cols, &line.plain, &table_row.cells, start.col, end.col);
                 }
                 _ => {
@@ -186,7 +190,7 @@ impl super::OutputArea {
                         start.col,
                         end.col,
                     );
-                    current = Some((block_index, data_row, cols));
+                    current = Some((block_index, table, data_row, cols));
                 }
             }
         }
@@ -267,8 +271,11 @@ impl super::OutputArea {
 }
 
 /// 收口当前正在拼接的单元格行。
-fn flush_cell_row(current: &mut Option<(usize, usize, Vec<String>)>, rows: &mut Vec<Vec<String>>) {
-    if let Some((_, _, cols)) = current.take() {
+fn flush_cell_row(
+    current: &mut Option<(usize, usize, usize, Vec<String>)>,
+    rows: &mut Vec<Vec<String>>,
+) {
+    if let Some((_, _, _, cols)) = current.take() {
         rows.push(cols);
     }
 }
