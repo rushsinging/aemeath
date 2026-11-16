@@ -517,3 +517,44 @@ fn cell_selection_keeps_separate_tables_on_separate_rows() {
         Some("A1\tA2\nAa\tAb\nB1\tB2\nBa\tBb")
     );
 }
+
+#[test]
+fn cell_selection_keeps_two_tables_in_same_block_separate() {
+    // 同一 assistant 消息里可以有多个 markdown 表格：两个表格的数据行号都从 0 开始，
+    // 分组键必须能区分表格实例，否则选中第一张表会把第二张表同序号的行一起带出来。
+    let text = "| A1 | A2 |\n| --- | --- |\n| a | b |\n\n| C1 | C2 |\n| --- | --- |\n| c | d |";
+    let mut output = OutputArea::new();
+    set_assistant_markdown(&mut output, text, 80);
+
+    let (first_table_data_line, _) = output
+        .document()
+        .blocks
+        .iter()
+        .flat_map(|block| block.lines.iter())
+        .enumerate()
+        .find(|(_, line)| line.plain.contains('│') && line.plain.contains(" a "))
+        .map(|(idx, _)| (idx, 0usize))
+        .expect("第一张表数据行");
+
+    // 渲染期必须给两个表格不同的实例序号。
+    let table_indices: Vec<usize> = output
+        .document()
+        .blocks
+        .iter()
+        .flat_map(|block| block.lines.iter())
+        .filter_map(|line| line.table_row.as_ref().map(|row| row.table))
+        .collect();
+    assert!(
+        table_indices.contains(&0) && table_indices.contains(&1),
+        "同一消息内的两个表格应各自独立编号；实际 {table_indices:?}"
+    );
+
+    let view = cell_view((first_table_data_line, 0), (first_table_data_line, 1));
+    assert_eq!(
+        output
+            .selected_text_for_view(&view, &no_live_status())
+            .as_deref(),
+        Some("a\tb"),
+        "选中第一张表的一行不应把第二张表同序号数据行带出来"
+    );
+}

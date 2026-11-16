@@ -22,6 +22,8 @@ pub fn render_fenced_markdown(
     let blocks = parse_blocks(text);
     let mut output = Vec::new();
 
+    // 同一消息可含多个表格：序号只在本块内递增，供选区按表格实例分组。
+    let mut table_index = 0usize;
     for (index, block) in blocks.iter().enumerate() {
         let gap = if index == 0 {
             policy.leading_gap(block.kind)
@@ -29,7 +31,10 @@ pub fn render_fenced_markdown(
             policy.boundary_gap(blocks[index - 1].kind, block.kind, block.source_gap_before)
         };
         output.extend(std::iter::repeat_with(RenderedLine::default).take(gap as usize));
-        output.extend(render_block(block, base_style, width));
+        output.extend(render_block(block, base_style, width, table_index));
+        if matches!(block.kind, MarkdownElement::Table) {
+            table_index += 1;
+        }
     }
 
     if let Some(last) = blocks.last() {
@@ -41,12 +46,17 @@ pub fn render_fenced_markdown(
     output
 }
 
-fn render_block(block: &MarkdownBlock<'_>, base_style: Style, width: u16) -> Vec<RenderedLine> {
+fn render_block(
+    block: &MarkdownBlock<'_>,
+    base_style: Style,
+    width: u16,
+    table_index: usize,
+) -> Vec<RenderedLine> {
     match block.kind {
         MarkdownElement::Table
             if width >= crate::tui::render::output::constants::NARROW_DISABLE_TABLE_THRESHOLD =>
         {
-            table(&block.lines, base_style, width)
+            table(&block.lines, base_style, width, table_index)
         }
         MarkdownElement::CodeBlock => render_code_block(block, base_style, width),
         _ => markdown(&block.lines.join("\n"), base_style, width),

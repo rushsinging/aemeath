@@ -92,7 +92,7 @@ impl OutputArea {
             .map(|(start, end)| {
                 self.selected_cell_lines(start.line, end.line)
                     .into_iter()
-                    .map(|(_, _, logic_idx)| logic_idx)
+                    .map(|(_, _, _, logic_idx)| logic_idx)
                     .collect()
             })
             .unwrap_or_default();

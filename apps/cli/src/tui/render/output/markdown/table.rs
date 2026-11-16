@@ -1,7 +1,14 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
-use crate::tui::render::output::rendered::{CellSpan, TableRowRef};
+use crate::tui::render::output::rendered::CellSpan;
+
+/// 渲染期的表格行归属（表格实例序号由调用方补齐后写入 `RenderedLine.table_row`）。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TableRowRenderRef {
+    pub data_row: usize,
+    pub cells: Vec<CellSpan>,
+}
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::render::theme;
@@ -52,7 +59,7 @@ pub fn render_table_block_with_rows(
     lines: &[&str],
     base_style: Style,
     available_width: usize,
-) -> (Vec<Vec<Span<'static>>>, Vec<Option<TableRowRef>>) {
+) -> (Vec<Vec<Span<'static>>>, Vec<Option<TableRowRenderRef>>) {
     if lines.is_empty() {
         return (vec![], vec![]);
     }
@@ -86,7 +93,7 @@ pub fn render_table_block_with_rows(
     let col_widths = constrain_column_widths(&natural_widths, num_cols, available_width);
 
     let mut result = Vec::new();
-    let mut row_refs: Vec<Option<TableRowRef>> = Vec::new();
+    let mut row_refs: Vec<Option<TableRowRenderRef>> = Vec::new();
     let mut data_row_idx = 0;
     let header_style = base_style.add_modifier(Modifier::BOLD);
     let border_style = base_style.fg(theme::BORDER);
@@ -105,7 +112,7 @@ pub fn render_table_block_with_rows(
             let style = if is_header { header_style } else { base_style };
             let row = wrapped_row_spans(cells, &col_widths, style, border_style);
             for (spans, cell_spans) in row {
-                row_refs.push(Some(TableRowRef {
+                row_refs.push(Some(TableRowRenderRef {
                     data_row: data_row_idx,
                     cells: cell_spans,
                 }));
