@@ -111,7 +111,7 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     wait_screen_text(&terminal, "列表已展示", Duration::from_secs(10));
 
     // ③ Watch 强制前台：mock 从对话历史提取 bgp_ id，发
-    // BackgroundProcessWatch（无 timeout 入参；框架超时 300s）。阈值=1s
+    // BackgroundProcessWatch（无 timeout 入参；框架超时 600s）。阈值=1s
     // 时若未禁转后台会出占位；强制前台则等到 Bash 终态后渲染 terminal。
     // 真断言流式：bytes from 必须在 terminal（终态 outcome）出现之前
     // 可见——否则会假绿命中结束后的 log_tail。

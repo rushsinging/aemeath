@@ -199,14 +199,14 @@ mod tests {
 
     #[test]
     fn watch_timeouts_clamp_under_framework_cap_with_grace() {
-        assert_eq!(WATCH_TOOL_TIMEOUT_SECS, 300);
+        assert_eq!(WATCH_TOOL_TIMEOUT_SECS, 600);
         assert_eq!(WATCH_INTERNAL_GRACE_SECS, 5);
-        assert_eq!(resolve_watch_wait_secs(None), 295);
+        assert_eq!(resolve_watch_wait_secs(None), 595);
         assert_eq!(resolve_watch_wait_secs(Some(60)), 60);
         assert_eq!(resolve_watch_wait_secs(Some(1)), 1);
         assert_eq!(resolve_watch_wait_secs(Some(0)), 1);
-        assert_eq!(resolve_watch_wait_secs(Some(999)), 295);
-        assert_eq!(resolve_watch_wait_secs(Some(300)), 295);
+        assert_eq!(resolve_watch_wait_secs(Some(999)), 595);
+        assert_eq!(resolve_watch_wait_secs(Some(300)), 300);
         assert!(
             resolve_watch_wait_secs(None) < WATCH_TOOL_TIMEOUT_SECS,
             "逼近框架上限时内部 wait MUST 短于框架 timeout，避免 cleanup unconfirmed"
