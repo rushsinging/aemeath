@@ -189,13 +189,13 @@ fn empty_list_result_shows_placeholder() {
 }
 
 #[test]
-fn watch_header_without_goal_falls_back_to_full_task_id() {
+fn watch_header_without_goal_keeps_tool_name_and_full_task_id() {
     let display = lookup_display("BackgroundProcessWatch").unwrap();
     let input = serde_json::json!({ "task_id": "bgp_07Xwatch1" });
     let header = display.format_header(&input, None);
     assert_eq!(
-        header, "bgp_07Xwatch1",
-        "无 goal 退化完整 task_id：{header}"
+        header, "Watch bgp_07Xwatch1",
+        "无 goal 时 MUST 保留工具名 + 完整 task_id：{header}"
     );
     assert!(
         !header.contains("timeout="),
