@@ -25,7 +25,8 @@ fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Val
     serde_json::from_value(input.clone()).unwrap_or_default()
 }
 
-/// #1964：有 goal → `Watch · {goal}`；无 goal → 完整 `task_id`（纯展示，零业务）。
+/// #1964：有 goal → `Watch · {goal}`；无 goal → `Watch {task_id}`
+/// （工具名一律保留，纯展示，零业务）。
 fn watch_header(goal: &str, task_id: &str) -> String {
     let goal = goal.trim();
     if !goal.is_empty() {
@@ -35,7 +36,7 @@ fn watch_header(goal: &str, task_id: &str) -> String {
         if id.is_empty() {
             "Watch".to_string()
         } else {
-            id.to_string()
+            format!("Watch {id}")
         }
     }
 }
