@@ -644,3 +644,57 @@ fn test_scroll_pin_auto_scroll_true_skips_compensation() {
     };
     assert_eq!(compensated, 0);
 }
+
+#[test]
+fn test_begin_cell_selection_clears_char_selection() {
+    let mut state = OutputViewState::default();
+    state.begin_selection(3, CharIdx::new(2));
+    state.begin_cell_selection(CellAnchor { line: 1, col: 2 });
+
+    assert!(state.is_cell_selecting());
+    assert!(!state.is_selecting());
+    assert_eq!(state.selection_range(), None);
+    assert_eq!(
+        state.cell_selection_range(),
+        Some((
+            CellAnchor { line: 1, col: 2 },
+            CellAnchor { line: 1, col: 2 }
+        ))
+    );
+}
+
+#[test]
+fn test_cell_selection_range_normalizes_focus_before_anchor() {
+    let mut state = OutputViewState::default();
+    state.begin_cell_selection(CellAnchor { line: 3, col: 2 });
+    state.update_cell_selection(CellAnchor { line: 1, col: 4 });
+
+    assert_eq!(
+        state.cell_selection_range(),
+        Some((
+            CellAnchor { line: 1, col: 4 },
+            CellAnchor { line: 3, col: 2 }
+        ))
+    );
+}
+
+#[test]
+fn test_begin_char_selection_replaces_cell_selection() {
+    let mut state = OutputViewState::default();
+    state.begin_cell_selection(CellAnchor { line: 0, col: 1 });
+    state.begin_selection(5, CharIdx::new(1));
+
+    assert!(!state.is_cell_selecting());
+    assert!(state.is_selecting());
+    assert_eq!(state.selection_range(), Some((anchor(5, 1), anchor(5, 1))));
+}
+
+#[test]
+fn test_clear_selection_drops_cell_selection() {
+    let mut state = OutputViewState::default();
+    state.begin_cell_selection(CellAnchor { line: 2, col: 0 });
+    state.clear_selection();
+
+    assert!(!state.is_cell_selecting());
+    assert_eq!(state.cell_selection_range(), None);
+}

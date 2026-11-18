@@ -344,7 +344,7 @@ fn empty_background_source(
 }
 
 /// 后台化开启时 catalog 快照把通用工具默认预算抬到 24h，并同步 schema 文案；
-/// Watch 是例外（永不转后台，固定 300s）。
+/// Watch 是例外（永不转后台，固定 600s）。
 #[tokio::test]
 async fn backgrounding_enabled_catalog_publishes_24h_timeout_with_watch_exception() {
     let temp = tempfile::tempdir().unwrap();
@@ -385,10 +385,10 @@ async fn backgrounding_enabled_catalog_publishes_24h_timeout_with_watch_exceptio
     let watch_descriptor = snapshot
         .find(&ToolName::new("BackgroundProcessWatch"))
         .expect("Watch catalog entry");
-    assert_eq!(watch_descriptor.timeout_secs, 300);
-    assert_eq!(watch_descriptor.max_timeout_secs, 300);
+    assert_eq!(watch_descriptor.timeout_secs, 600);
+    assert_eq!(watch_descriptor.max_timeout_secs, 600);
     assert_eq!(
         watch_descriptor.input_schema["properties"]["timeout"]["description"],
-        json!("Timeout in seconds (default 300, max 300)")
+        json!("Timeout in seconds (default 600, max 600)")
     );
 }

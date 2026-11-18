@@ -1100,3 +1100,40 @@ fn test_tool_result_control_chars_normalized_end_to_end_scene() {
         "tab 应展开为 4 空格"
     );
 }
+
+#[test]
+fn table_rows_keep_cell_metadata_through_real_render_pipeline() {
+    // 全链（document_renderer → apply_gutter）回归：gutter 会重建 RenderedLine，
+    // 曾因漏复制 table_row 让真实 TUI 的表格整条按格吸附失效（L2 直连渲染测不出来）。
+    let long = "长文本单元格的换行与截断策略模块，处理单个单元格内容显著超过列宽时的降级展示逻辑与省略号提示";
+    let text = format!("| 模块名称 | 依赖 |\n| --- | --- |\n| 组件 | runtime |\n| {long} | 输入 |");
+    let mut renderer = OutputDocumentRenderer::default();
+    let vm = vm_with_roots(vec![assistant_node("a", &text)]);
+    let doc = renderer.render_tree(&vm, 80);
+    let lines = &doc.blocks[0].lines;
+
+    let table_rows: Vec<&RenderedLine> = lines.iter().filter(|l| l.table_row.is_some()).collect();
+    assert!(
+        table_rows.len() >= 4,
+        "表格数据行（含折行续行）必须携带 table_row；实际 {} 条",
+        table_rows.len()
+    );
+    assert!(
+        table_rows.iter().any(|line| line.gutter_cols > 0),
+        "真实链必须已加 gutter，否则该测试未覆盖 gutter 重建路径"
+    );
+
+    // 折行续行与首行共享同一数据行号。
+    let data_rows: Vec<usize> = table_rows
+        .iter()
+        .filter_map(|line| line.table_row.as_ref().map(|row| row.data_row))
+        .collect();
+    assert!(
+        data_rows.windows(2).any(|pair| pair[0] == pair[1]),
+        "折行产生的多条物理行应共享 data_row；实际 {data_rows:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.table_row.is_none()),
+        "分隔行不应标记数据行"
+    );
+}

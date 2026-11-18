@@ -93,7 +93,7 @@ pub const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 1800;
 pub const BACKGROUND_TOOL_TIMEOUT_SECS: u64 = 86400;
 
 /// 入参 `timeout` 可设置的上限（秒，24 小时）。Watch 在自己的
-/// `get_timeout_secs` 覆写里收敛到 300。
+/// `get_timeout_secs` 覆写里收敛到 600。
 pub const DEFAULT_TOOL_MAX_TIMEOUT_SECS: u64 = 86400;
 
 /// 框架级通用 `timeout` 入参的 JSON 字段名（秒）。
@@ -106,7 +106,7 @@ pub const TIMEOUT_INPUT_FIELD: &str = "timeout";
 
 /// `BackgroundProcessWatch` 的 Tool 框架超时（秒）。
 /// 省略入参时的 default，同时作为该工具 max / 框架硬上限。
-pub const WATCH_TOOL_TIMEOUT_SECS: u64 = 300;
+pub const WATCH_TOOL_TIMEOUT_SECS: u64 = 600;
 
 /// 内部 `wait_task` 相对框架超时提前收口的 grace（秒），避免撞
 /// `effective deadline; cleanup unconfirmed`。

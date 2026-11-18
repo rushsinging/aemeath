@@ -123,14 +123,14 @@ pub const TOOL_TIMEOUT_GUIDANCE_ENABLED_EN: &str = r#"
 
 # Tool timeout budget
 - Background execution is enabled: tools default to a 24h (86400s) budget, so do not set `timeout` unless necessary — set it only when a shorter cutoff is genuinely wanted.
-- `BackgroundProcessWatch` is the exception: its timeout is capped at 300s regardless."#;
+- `BackgroundProcessWatch` is the exception: its timeout is capped at 600s regardless."#;
 
 /// 后台执行已启用时的 `timeout` guidance（中文）。
 pub const TOOL_TIMEOUT_GUIDANCE_ENABLED_ZH: &str = r#"
 
 # 工具超时预算
 - 后台执行已启用：工具默认预算为 24h（86400s），一般无需设置 `timeout`；只有确实需要更短收口时才显式设置。
-- `BackgroundProcessWatch` 例外：其超时固定上限 300s。"#;
+- `BackgroundProcessWatch` 例外：其超时固定上限 600s。"#;
 
 /// 后台执行未启用时的 `timeout` guidance（英文）。
 pub const TOOL_TIMEOUT_GUIDANCE_DISABLED_EN: &str = r#"

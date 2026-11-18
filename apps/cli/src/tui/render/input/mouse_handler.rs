@@ -122,7 +122,22 @@ impl crate::tui::app::App {
                         })
                         .unwrap_or(false);
 
-                    if is_double {
+                    // 表格内自动吸附到单元格；Cmd/Alt/Ctrl+拖拽保留字符级精确选择。
+                    let cell_anchor = if mouse.modifiers.is_empty() {
+                        let live_status = self.live_status_view_model();
+                        self.output_area
+                            .table_cell_at(row, col, &output_area, &live_status)
+                    } else {
+                        None
+                    };
+
+                    if let Some(anchor) = cell_anchor {
+                        self.view_state.input_sel.clear_selection();
+                        self.view_state.status_sel.clear_selection();
+                        self.view_state.output.begin_cell_selection(anchor);
+                        // 表格内不参与选词双击（双击等于选中整格）。
+                        self.input.last_click = None;
+                    } else if is_double {
                         // 输出区选区真相归 view_state；status/input 清 view_state（S4）。
                         self.view_state.input_sel.clear_selection();
                         self.view_state.status_sel.clear_selection();
@@ -182,7 +197,16 @@ impl crate::tui::app::App {
                 }
             }
             MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
-                if self.view_state.output.is_selecting() {
+                if self.view_state.output.is_cell_selecting() {
+                    // 表格按格扩展：命中表格外的位置保持上一次有效焦点。
+                    let live_status = self.live_status_view_model();
+                    if let Some(anchor) =
+                        self.output_area
+                            .table_cell_at(row, col, &output_area, &live_status)
+                    {
+                        self.view_state.output.update_cell_selection(anchor);
+                    }
+                } else if self.view_state.output.is_selecting() {
                     // 屏幕坐标 → 锚点折算只读借 widget（依赖 render 期 screen_line_map），
                     // 选区真相写入 view_state；行超界时兜底到末尾锚点。
                     let live_status = self.live_status_view_model();
@@ -218,7 +242,15 @@ impl crate::tui::app::App {
                 }
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
-                let text = if self.view_state.output.is_selecting() {
+                let text = if self.view_state.output.is_cell_selecting() {
+                    // 单元格选区：直接按格取文本，取完清空。
+                    let live_status = self.live_status_view_model();
+                    let text = self
+                        .output_area
+                        .selected_text_for_view(&self.view_state.output, &live_status);
+                    self.view_state.output.clear_cell_selection();
+                    text
+                } else if self.view_state.output.is_selecting() {
                     // 结束拖拽：view_state 清 is_selecting 但保留锚点（真相）。
                     self.view_state.output.end_selection();
                     // 取 plain 文本（读 view_state 选区真相 + widget document，#63 gutter 不进 plain）。

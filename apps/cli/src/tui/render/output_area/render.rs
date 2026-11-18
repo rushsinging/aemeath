@@ -14,10 +14,10 @@ use sdk::CharIdx;
 use super::OutputArea;
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::{LineAnimation, RenderedLine};
-use crate::tui::render::output::selection_overlay::apply_selection_overlay;
+use crate::tui::render::output::selection_overlay::{apply_selection_overlay, SelRange};
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::OutputViewState;
-use diagnostics::{diagnostic_plain, normalize_rendered_table_plain};
+use diagnostics::diagnostic_plain;
 use paint::{clear_area, paint_line_fill_styles, trim_line_fill_styles};
 use selection::sel_range_for_line;
 
@@ -86,6 +86,17 @@ impl OutputArea {
 
         clear_area(area, buf);
 
+        // 单元格选区只在交互期存在；每帧算一次命中行（含折行续行），非选区时零开销。
+        let cell_selected_lines: Vec<usize> = view
+            .cell_selection_range()
+            .map(|(start, end)| {
+                self.selected_cell_lines(start.line, end.line)
+                    .into_iter()
+                    .map(|(_, _, _, logic_idx)| logic_idx)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let first_visible_doc_line_plain = self
             .document
             .line_at(start)
@@ -126,11 +137,10 @@ impl OutputArea {
             {
                 self.last_document_line_visits += 1;
             }
-            let mut plain = line.plain.clone();
-            if idx == start && plain.contains('│') {
-                plain = normalize_rendered_table_plain(&plain);
-            }
-            // #520 诊断日志：对表格行（含 │）记录显示宽度与渲染区域宽度的对比
+            let plain = line.plain.clone();
+            // #520 诊断日志：对表格行（含 │）记录显示宽度与渲染区域宽度的对比。
+            // `plain` / `rendered_content` 是选区锚点与复制文本的唯一真相来源，
+            // 任何“归一化后更好看”的二次视图都不得写回这里（历史上因此产生滚动漂移）。
             if plain.contains('│') {
                 let line_disp_w = str_display_width(&plain);
                 crate::tui::log_trace!(
@@ -151,10 +161,12 @@ impl OutputArea {
                 .map(|spinner| spinner.frame)
                 .unwrap_or(0);
             let animated_line = animate_visible_line(line, frame);
-            let spans = apply_selection_overlay(
-                animated_line.as_ref().unwrap_or(line),
-                sel_range_for_line(view, line, idx),
-            );
+            // 字符选区优先；无字符选区时才折算单元格矩形（两者互斥）。
+            let selection = sel_range_for_line(view, line, idx).or_else(|| {
+                self.cell_selection_span_for_line(view, idx, &cell_selected_lines)
+                    .map(|(start, end)| SelRange { start, end })
+            });
+            let spans = apply_selection_overlay(animated_line.as_ref().unwrap_or(line), selection);
             line_fill_styles.push(line.fill_style);
             display_lines.push(Line::from(spans).style(line.style));
         }

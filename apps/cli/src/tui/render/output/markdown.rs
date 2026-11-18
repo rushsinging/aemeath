@@ -13,7 +13,7 @@ mod table;
 #[cfg(test)]
 mod tests;
 
-pub use table::{is_table_row, is_table_separator, render_table_block};
+pub use table::{is_table_row, is_table_separator, render_table_block_with_rows};
 
 /// 将 Markdown 文本解析为 styled Span 后再按显示宽度切分成屏幕行。
 ///

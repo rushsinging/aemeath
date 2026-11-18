@@ -10,6 +10,23 @@ use sdk::CharIdx;
 /// （依赖 render 期的 screen_line_map/document），view_state 只持纯锚点状态。
 pub type SelectionAnchor = (usize, CharIdx);
 
+/// 表格单元格锚点：`(逻辑行号, 列序号)`。
+///
+/// 用逻辑行而非表格数据行序号：`RenderedLine.table_row` 的数据行号只在单个表格块内
+/// 唯一，跨表格会重号；逻辑行在文档内稳定，复制时再按块 + 数据行分组拼接折行。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CellAnchor {
+    pub line: usize,
+    pub col: usize,
+}
+
+/// 单元格矩形选区：`anchor` 为按下点、`focus` 为拖拽终点，取用时归一化。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CellSelection {
+    pub anchor: CellAnchor,
+    pub focus: CellAnchor,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewState {
     pub scroll_offset: usize,
@@ -17,6 +34,8 @@ pub struct OutputViewState {
     pub is_selecting: bool,
     pub selection_start: Option<SelectionAnchor>,
     pub selection_end: Option<SelectionAnchor>,
+    /// 表格单元格矩形选区；与字符选区互斥，任一时刻最多一个生效。
+    pub cell_selection: Option<CellSelection>,
     pub last_visible_height: usize,
     pub last_document_total_lines: usize,
     pub version: u64,
@@ -41,6 +60,7 @@ impl Default for OutputViewState {
             is_selecting: false,
             selection_start: None,
             selection_end: None,
+            cell_selection: None,
             last_visible_height: 0,
             last_document_total_lines: 0,
             version: 0,
@@ -354,6 +374,7 @@ impl OutputViewState {
     /// 等价于 widget `start_selection` 的状态更新部分：
     /// 置 `is_selecting=true`，start/end 同时落在锚点（空选区）。
     pub fn begin_selection(&mut self, line: usize, col: CharIdx) {
+        self.cell_selection = None;
         self.selection_start = Some((line, col));
         self.selection_end = Some((line, col));
         self.is_selecting = true;
@@ -383,12 +404,55 @@ impl OutputViewState {
         self.selection_start = None;
         self.selection_end = None;
         self.is_selecting = false;
+        self.cell_selection = None;
+    }
+
+    /// 开始表格单元格选区：清字符选区，锚点与焦点同落在一个格。
+    pub fn begin_cell_selection(&mut self, anchor: CellAnchor) {
+        self.selection_start = None;
+        self.selection_end = None;
+        self.is_selecting = false;
+        self.cell_selection = Some(CellSelection {
+            anchor,
+            focus: anchor,
+        });
+    }
+
+    /// 拖拽更新单元格选区焦点；无单元格选区时忽略。
+    pub fn update_cell_selection(&mut self, focus: CellAnchor) {
+        if let Some(selection) = self.cell_selection.as_mut() {
+            selection.focus = focus;
+        }
+    }
+
+    /// 归一化后的单元格矩形 `(起点, 终点)`：行优先、同行比列，保证起点 ≤ 终点。
+    pub fn cell_selection_range(&self) -> Option<(CellAnchor, CellAnchor)> {
+        let selection = self.cell_selection?;
+        let (start, end) = if (selection.anchor.line, selection.anchor.col)
+            <= (selection.focus.line, selection.focus.col)
+        {
+            (selection.anchor, selection.focus)
+        } else {
+            (selection.focus, selection.anchor)
+        };
+        Some((start, end))
+    }
+
+    /// 是否处于单元格选区状态。
+    pub fn is_cell_selecting(&self) -> bool {
+        self.cell_selection.is_some()
+    }
+
+    /// 清空单元格选区。
+    pub fn clear_cell_selection(&mut self) {
+        self.cell_selection = None;
     }
 
     /// 整词选区。词边界 `[word_start, word_end)` 由调用方据行内容计算后传入
     /// （边界扫描依赖 render 期行文本，留在 widget `select_word`）。
     /// 与 widget 一致：置 `is_selecting=true` 且 start/end 落在同一逻辑行的词边界。
     pub fn select_word(&mut self, line: usize, word_start: CharIdx, word_end: CharIdx) {
+        self.cell_selection = None;
         self.selection_start = Some((line, word_start));
         self.selection_end = Some((line, word_end));
         self.is_selecting = true;

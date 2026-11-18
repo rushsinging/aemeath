@@ -9,10 +9,10 @@ fn tool_timeout_guidance_switches_with_backgrounding_and_stays_bilingual() {
 
     assert!(enabled_en.contains("86400"));
     assert!(enabled_en.contains("do not set `timeout`"));
-    assert!(enabled_en.contains("300"));
+    assert!(enabled_en.contains("600"));
     assert!(enabled_zh.contains("86400"));
     assert!(enabled_zh.contains("一般无需设置"));
-    assert!(enabled_zh.contains("300"));
+    assert!(enabled_zh.contains("600"));
 
     assert!(disabled_en.contains("1800"));
     assert!(disabled_en.contains("30s"));

@@ -57,6 +57,28 @@ pub enum LineAnimation {
     RunningToolMarker,
 }
 
+/// 表格单元格在该物理行 plain 中的字符区间（半开区间，已去掉左右 padding）。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CellSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// 表格物理行 → 源表格数据行 + 各列字符区间的归属。
+///
+/// 表格渲染会把一个数据行按列宽折成多个物理行，复制时需把这些物理行重新拼回同一格；
+/// 列区间只有渲染期知道（padding 与分隔符布局），因此随 `RenderedLine` 一起携带，
+/// 选区侧不再反解析 `│`。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TableRowRef {
+    /// 块内表格实例序号（同一消息可有多个 markdown 表格，各自数据行号都从 0 起）。
+    pub table: usize,
+    /// 表格内数据行序号（不含分隔行，表头为 0）。
+    pub data_row: usize,
+    /// 按列序排列的单元格字符区间（与 `plain` 同坐标系）。
+    pub cells: Vec<CellSpan>,
+}
+
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），
 /// `plain` 是逻辑纯文本（选中/复制用）。
 ///
@@ -78,6 +100,8 @@ pub struct RenderedLine {
     pub links: Vec<LinkSpan>,
     /// 仅在可视行绘制时按当前 frame 应用的动画元数据。
     pub animation: Option<LineAnimation>,
+    /// 表格数据行归属；非表格数据行（含分隔行）为 None。
+    pub table_row: Option<TableRowRef>,
 }
 
 /// 把 spans 中的控制字符归一化（issue #1670）；含控制字符的 span 被替换为归一化副本，
@@ -112,6 +136,7 @@ impl RenderedLine {
             fill_style: None,
             links: Vec::new(),
             animation: None,
+            table_row: None,
         }
     }
 
@@ -132,6 +157,7 @@ impl RenderedLine {
             fill_style: None,
             links: Vec::new(),
             animation: None,
+            table_row: None,
         }
     }
 
@@ -147,6 +173,7 @@ impl RenderedLine {
             fill_style: None,
             links: Vec::new(),
             animation: None,
+            table_row: None,
         }
     }
 
@@ -166,6 +193,7 @@ impl RenderedLine {
             fill_style: None,
             links,
             animation: None,
+            table_row: None,
         }
     }
 
@@ -181,10 +209,49 @@ impl RenderedLine {
         self
     }
 
+    /// 标记该物理行所属的表格数据行及各行内单元格区间（渲染期唯一生产点）。
+    pub fn with_table_row_ref(mut self, table_row: TableRowRef) -> Self {
+        self.table_row = Some(table_row);
+        self
+    }
+
+    /// 测试夹具：按 `plain` 的 `│` 分隔与两侧 padding 推导单元格区间。
+    ///
+    /// 仅用于构造测试行（产品侧区间由渲染期产出，不再解析文本）。
+    #[cfg(test)]
+    pub fn with_table_row_fixture(mut self, data_row: usize) -> Self {
+        self.table_row = Some(TableRowRef {
+            table: 0,
+            data_row,
+            cells: crate::tui::render::output::rendered::table_cell_spans_for_test(&self.plain),
+        });
+        self
+    }
+
     /// 原地设置整行填充样式。
     pub fn set_fill_style(&mut self, style: Style) {
         self.fill_style = Some(style);
     }
+}
+
+/// 测试夹具：按 `│` 切分 plain 并去掉两侧 padding，得到各列字符区间。
+#[cfg(test)]
+pub(crate) fn table_cell_spans_for_test(plain: &str) -> Vec<CellSpan> {
+    let mut spans = Vec::new();
+    let mut char_start = 0usize;
+    for segment in plain.split('│') {
+        let chars: Vec<char> = segment.chars().collect();
+        let leading = chars.iter().take_while(|c| **c == ' ').count();
+        let trailing = chars.iter().rev().take_while(|c| **c == ' ').count();
+        let content_len = chars.len().saturating_sub(leading + trailing);
+        let start = char_start + leading;
+        spans.push(CellSpan {
+            start,
+            end: start + content_len,
+        });
+        char_start += chars.len() + 1;
+    }
+    spans
 }
 
 /// 一个 block 的渲染产物（多行）。

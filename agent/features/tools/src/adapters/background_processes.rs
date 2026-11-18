@@ -359,7 +359,7 @@ impl TypedTool for BackgroundProcessWatchTool {
         if args.task_id.is_empty() {
             return TypedToolResult::error("task_id is required".to_string());
         }
-        // `timeout` 是框架级通用参数：框架已解析成 effective 值（含 300s 硬上限）
+        // `timeout` 是框架级通用参数：框架已解析成 effective 值（含 600s 硬上限）
         // 写入 scope，执行前从入参摘除；这里只读 scope，**NEVER** 读 input。
         let timeout = Duration::from_secs(resolve_watch_wait_secs(
             ctx.scope().effective_timeout_secs(),
