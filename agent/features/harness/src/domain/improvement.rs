@@ -11,7 +11,7 @@ use crate::constants::{
 };
 use crate::domain::candidate::RsiCandidateStore;
 use crate::domain::changeset::{apply_change_set_with_policy, AppliedEdit, ChangeSet, WritePolicy};
-use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
+use crate::domain::component::{ComponentContent, ComponentId, ComponentKind, ComponentName};
 use crate::domain::component_audit::parse_audit_rules;
 use crate::domain::errors::HarnessError;
 use crate::domain::evidence::truncate_chars;
@@ -1221,6 +1221,190 @@ async fn reconcile_cross_scope_duplicates(
         }
     }
     Ok(removed_rules)
+}
+
+/// 常见成功动作 → 新 skill 的最小可行生成阶段。
+/// 只在 TwoPhase 周期前调用一次；LLM 只产出草案，宿主负责命名、校验、
+/// 去重、快照与落盘。dry-run 只写虚拟 registry 和预览。
+#[derive(Debug, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+enum NewSkillDraft {
+    Create {
+        name: String,
+        body: String,
+        #[serde(default)]
+        reason: String,
+    },
+    NoChange {
+        #[serde(default)]
+        reason: String,
+    },
+}
+
+fn valid_skill_name(name: &str) -> bool {
+    let len = name.chars().count();
+    (2..=50).contains(&len)
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+}
+
+pub async fn generate_skill_from_common_actions(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
+    cycle_id: &str,
+) -> Result<Option<crate::domain::task::AdoptionRecord>, HarnessError> {
+    let mut actions: Vec<_> = evidence
+        .signals
+        .iter()
+        .filter(|signal| signal.kind == crate::domain::evidence::SignalKind::CommonAction)
+        .cloned()
+        .collect();
+    actions.sort_by_key(|signal| std::cmp::Reverse(signal.occurrences));
+    actions.truncate(6);
+    if actions.is_empty() {
+        return Ok(None);
+    }
+    let existing: Vec<(String, String)> = registry
+        .list()
+        .into_iter()
+        .filter(|id| id.kind == ComponentKind::Skill)
+        .filter_map(|id| {
+            registry.read(&id).ok().map(|content| {
+                (
+                    id.name.as_str().to_string(),
+                    content.body.chars().take(300).collect::<String>(),
+                )
+            })
+        })
+        .collect();
+    let existing_summary = existing
+        .iter()
+        .map(|(name, body)| format!("{name}: {}", body.replace('\n', " ")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let action_text = actions
+        .iter()
+        .map(|signal| {
+            format!(
+                "- {} | {}",
+                signal.signal_id,
+                signal.summary.chars().take(300).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        r#"你是 skill 生成器。根据下面跨 session 重复出现的成功动作，决定是否创建一个新的可复用 skill。
+
+只有同时满足以下条件才创建：
+- 动作是可复用的工作流，不是一次性任务；
+- 与现有 skill 不重复、不被现有 skill 覆盖；
+- 能写出明确的触发条件、步骤、验证方式和停止条件；
+- 不能包含具体用户路径、凭据、项目机密或一次性参数。
+
+现有 skill（名称与摘要）：
+{existing_summary}
+
+候选动作：
+{action_text}
+
+只输出一个 JSON 对象：
+{{"decision":"create","name":"lowercase-hyphen-name","reason":"<一句话>","body":"---\ndescription: <非空描述>\n---\n# <标题>\n..."}}
+或：
+{{"decision":"no_change","reason":"<一句话>"}}
+name 只能使用小写字母、数字、连字符，2–50 字符；body MUST 包含 YAML frontmatter 和非空 description。
+不要输出 JSON 以外的任何文字。"#
+    );
+    let completion = complete_with_usage_event(llm, &prompt, "new_skill", 0, recorder).await?;
+    let draft: NewSkillDraft = match parse_first_json_object(&completion.text, "new_skill") {
+        Ok(draft) => draft,
+        Err(error) => {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index: 0,
+                    stage: "new_skill".to_string(),
+                    message: format!("新 skill 草案解析失败：{}", error.message()),
+                });
+            }
+            return Ok(None);
+        }
+    };
+    let NewSkillDraft::Create { name, body, reason } = draft else {
+        if let NewSkillDraft::NoChange { reason } = draft {
+            preview_lines.push(format!("  [new-skill] no_change：{reason}"));
+        }
+        return Ok(None);
+    };
+    if !valid_skill_name(&name) {
+        preview_lines.push(format!("  [new-skill] 拒绝非法名称：{name}"));
+        return Ok(None);
+    }
+    if existing
+        .iter()
+        .any(|(existing_name, _)| existing_name == &name)
+    {
+        preview_lines.push(format!("  [new-skill] 同名 skill 已存在：{name}"));
+        return Ok(None);
+    }
+    let id = ComponentId {
+        kind: ComponentKind::Skill,
+        name: ComponentName::new(name.clone()),
+    };
+    let content = ComponentContent {
+        frontmatter: None,
+        body,
+    };
+    if let Err(error) = registry.validate(&id, &content) {
+        preview_lines.push(format!("  [new-skill] 校验失败：{}", error.message()));
+        return Ok(None);
+    }
+    if dry_run {
+        preview_lines.push(format!(
+            "[dry-run][new-skill] create {id}：{}",
+            reason.chars().take(120).collect::<String>()
+        ));
+    } else {
+        if let Some(version_store) = version_store {
+            version_store.capture(registry, &id, &format!("{cycle_id}-new-skill"), "upsert")?;
+        }
+        registry.write(&id, &content)?;
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::EditApplied {
+                component: id.to_string(),
+                action: "create".to_string(),
+                old_chars: 0,
+                new_chars: content.body.chars().count(),
+            });
+        }
+        preview_lines.push(format!("  [new-skill] create {id}"));
+    }
+    let evidence_bindings = actions
+        .iter()
+        .map(|signal| EvidenceBinding {
+            run_ref: cycle_id.to_string(),
+            signal: signal.kind,
+            excerpt: truncate_chars(&signal.summary, EVIDENCE_EXCERPT_BOUND).unwrap_or_default(),
+            signal_id: signal.signal_id.clone(),
+            source: signal.sources.first().cloned(),
+        })
+        .collect();
+    Ok(Some(crate::domain::task::AdoptionRecord {
+        id,
+        reason: if reason.is_empty() {
+            "从跨 session 常见动作生成 skill".to_string()
+        } else {
+            reason
+        },
+        evidence: evidence_bindings,
+    }))
 }
 
 /// 同组件内新增规则与既有规则的语义重复门禁。

@@ -358,12 +358,35 @@ impl RsiTask for HarnessRsiCycleTask {
             }
             let mut history = load_signal_history(&self.history_path);
             let observation_evidence = merged_evidence.clone();
+            // 常见成功动作先走独立的新建 skill 阶段；普通组件路由不消费
+            // common_action，避免把可复用动作误写成 guardrails/guidance。
+            let generated_skill = crate::domain::improvement::generate_skill_from_common_actions(
+                registry,
+                self.llm.as_ref(),
+                &merged_evidence,
+                self.dry_run,
+                &mut preview_lines,
+                self.recorder.as_deref(),
+                self.version_store.as_deref(),
+                &cycle_id,
+            )
+            .await?;
+            let cycle_evidence = crate::domain::evidence::EvidenceBundle {
+                signals: merged_evidence
+                    .signals
+                    .into_iter()
+                    .filter(|signal| {
+                        signal.kind != crate::domain::evidence::SignalKind::CommonAction
+                    })
+                    .collect(),
+                sessions_covered: merged_evidence.sessions_covered,
+            };
             let run = crate::domain::improvement::run_two_phase_cycle_with_candidates(
                 registry,
                 self.llm.as_ref(),
                 &self.lesson_store,
                 &self.config,
-                merged_evidence,
+                cycle_evidence,
                 self.stream_port.as_ref(),
                 self.dry_run,
                 &mut preview_lines,
@@ -378,6 +401,11 @@ impl RsiTask for HarnessRsiCycleTask {
                 save_signal_history(&self.history_path, &history);
             }
             let mut outcome = run.outcome;
+            if let Some(generated) = generated_skill {
+                let label = generated.id.to_string();
+                outcome.adopted.push(generated);
+                outcome.summary = format!("{} | 新建 skill：{label}", outcome.summary);
+            }
             if !self.dry_run {
                 if let (Some(observation_store), Some(version_store)) = (
                     self.observation_store.as_deref(),

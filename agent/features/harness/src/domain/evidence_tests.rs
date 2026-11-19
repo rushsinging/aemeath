@@ -74,6 +74,43 @@ fn retry_pattern_detected_by_fingerprint() {
         .any(|signal| signal.kind == SignalKind::RetryPattern && signal.summary.contains("×2")));
 }
 
+/// 跨 session 重复成功动作聚合为 common_action，单 session 不触发。
+#[test]
+fn common_action_requires_cross_session_successes() {
+    let event = |session: &str, step: &str| SessionEventRecord {
+        session_id: session.into(),
+        run_id: "r1".into(),
+        step_id: step.into(),
+        tool_name: Some("Bash".into()),
+        is_error: false,
+        error_text: None,
+        result_chars: 10,
+        call_fingerprint: Some("bash:cargo-test".into()),
+    };
+    let bundle = aggregate_evidence(&[
+        event("s1", "step-1"),
+        event("s1", "step-2"),
+        event("s2", "step-3"),
+    ]);
+    let common = bundle
+        .signals
+        .iter()
+        .find(|signal| signal.kind == SignalKind::CommonAction)
+        .expect("跨 session 重复成功动作必须产生 common_action");
+    assert!(common.summary.contains("×3"));
+    assert!(common.summary.contains("2 个 session"));
+
+    let single = aggregate_evidence(&[
+        event("s1", "step-1"),
+        event("s1", "step-2"),
+        event("s1", "step-3"),
+    ]);
+    assert!(!single
+        .signals
+        .iter()
+        .any(|signal| signal.kind == SignalKind::CommonAction));
+}
+
 /// 超长结果按工具聚合计数。
 #[test]
 fn oversized_results_counted_by_tool() {

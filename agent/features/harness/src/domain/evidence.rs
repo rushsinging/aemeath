@@ -27,6 +27,8 @@ pub enum SignalKind {
     OversizedResult,
     /// run 终态分布。
     RunOutcome,
+    /// 跨 session 重复出现的成功工具调用，作为新建 skill 的候选证据。
+    CommonAction,
 }
 
 impl SignalKind {
@@ -37,6 +39,7 @@ impl SignalKind {
             Self::RetryPattern => "retry_pattern",
             Self::OversizedResult => "oversized_result",
             Self::RunOutcome => "run_outcome",
+            Self::CommonAction => "common_action",
         }
     }
 
@@ -47,7 +50,8 @@ impl SignalKind {
             Self::RetryPattern => 1,
             Self::OversizedResult => 2,
             Self::RunOutcome => 3,
-            Self::CycleObservation => 4,
+            Self::CommonAction => 4,
+            Self::CycleObservation => 5,
         }
     }
 }
@@ -186,6 +190,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
     let mut oversized_by_tool: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut fingerprint_counts: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut run_outcomes: HashMap<String, SignalAccumulator> = HashMap::new();
+    let mut common_actions: HashMap<(String, String), SignalAccumulator> = HashMap::new();
     let mut sessions: HashMap<String, usize> = HashMap::new();
 
     for event in events {
@@ -211,6 +216,12 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
                     .entry(fingerprint.clone())
                     .or_default()
                     .observe(event);
+                if !event.is_error {
+                    common_actions
+                        .entry((tool.clone(), fingerprint.clone()))
+                        .or_default()
+                        .observe(event);
+                }
             }
         } else {
             // run 级事件：error_text 承载终态（adapter 约定）
@@ -268,6 +279,41 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
         .collect();
     oversized.sort_by(|a, b| b.summary.cmp(&a.summary));
     signals.extend(oversized);
+
+    let mut common: Vec<_> = common_actions
+        .into_iter()
+        .filter(|(_, entry)| {
+            entry.count >= 3
+                && entry
+                    .sources
+                    .iter()
+                    .map(|source| source.session_id.as_str())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    >= 2
+        })
+        .map(|((tool, fingerprint), entry)| {
+            let session_count = entry
+                .sources
+                .iter()
+                .map(|source| source.session_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            EvidenceSignal {
+                kind: SignalKind::CommonAction,
+                signal_id: format!("common_action:{tool}:{fingerprint}"),
+                summary: format!(
+                    "工具 {tool} 相同参数成功调用 ×{}（跨 {} 个 session，可能是可复用动作）",
+                    entry.count, session_count
+                ),
+                excerpt: None,
+                occurrences: entry.count,
+                sources: entry.sources,
+            }
+        })
+        .collect();
+    common.sort_by_key(|signal| std::cmp::Reverse(signal.occurrences));
+    signals.extend(common);
 
     if !run_outcomes.is_empty() {
         let mut entries: Vec<_> = run_outcomes.into_iter().collect();
