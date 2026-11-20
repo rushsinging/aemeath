@@ -5,7 +5,8 @@
 //! 只看 raw；宿主用 normalized 做计数、重复与回归门禁。
 
 use crate::constants::{
-    COMPONENT_AUDIT_BODY_BUDGET_PERCENT, COMPONENT_AUDIT_MAX_RULES, COMPONENT_AUDIT_MAX_RULE_TOKENS,
+    COMPONENT_AUDIT_BODY_BUDGET_PERCENT, COMPONENT_AUDIT_MAX_RULES, COMPONENT_AUDIT_MAX_RULE_CHARS,
+    COMPONENT_AUDIT_MAX_RULE_TOKENS,
 };
 use crate::domain::component::{ComponentContent, ComponentId, ComponentKind};
 use crate::domain::improvement::component_body_budget_tokens;
@@ -72,10 +73,12 @@ impl AuditSnapshot {
             .iter()
             .filter_map(|rule| {
                 let tokens = share::token_budget::estimate_tokens(&rule.raw);
-                (tokens > COMPONENT_AUDIT_MAX_RULE_TOKENS).then_some(OversizedRule {
-                    line_index: rule.line_start,
-                    tokens,
-                })
+                (tokens > COMPONENT_AUDIT_MAX_RULE_TOKENS
+                    || rule.raw.chars().count() > COMPONENT_AUDIT_MAX_RULE_CHARS)
+                    .then_some(OversizedRule {
+                        line_index: rule.line_start,
+                        tokens,
+                    })
             })
             .collect();
         Self {
@@ -260,6 +263,16 @@ pub(crate) fn parse_audit_rules(body: &str) -> Vec<AuditRuleUnit> {
 }
 
 /// 只对 prose 组件做审计：guardrails/tool-guidance/overlay。
+/// 仅用户级组件进入默认维护：global overlay、guardrails、tool-guidance。
+/// 项目 overlay 只作为证据，不自动改写。
+pub(crate) fn is_user_level_component(id: &ComponentId) -> bool {
+    match id.kind {
+        ComponentKind::Guardrails | ComponentKind::ToolGuidance => true,
+        ComponentKind::SystemPromptOverlay => id.name.as_str() == "global",
+        _ => false,
+    }
+}
+
 pub(crate) fn is_auditable_kind(kind: ComponentKind) -> bool {
     matches!(
         kind,
@@ -302,3 +315,7 @@ pub fn audit_component(
         triggers,
     })
 }
+
+#[cfg(test)]
+#[path = "component_audit_tests.rs"]
+mod tests;

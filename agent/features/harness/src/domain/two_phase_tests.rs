@@ -160,6 +160,53 @@ async fn two_phase_patch_updates_only_anchored_fragment() {
 }
 
 #[tokio::test]
+async fn two_phase_rejects_same_component_semantic_duplicate() {
+    let target = tool_guidance();
+    let original =
+        "# Tool Guidance\n- 同一调用签名不得原样重复；重试前必须核对错误、参数与状态。\n";
+    let mut registry = FakeRegistry::with_entries(vec![(target.clone(), body_content(original))]);
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = LessonStore::new(lesson_dir.path().join("library.jsonl"));
+    let llm = TwoPhaseLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"Bash 失败","issues":[{"evidence_ref":"E0","component_candidate":0,"problem":"重试纪律","direction":"补 patch","route_reason":"工具纪律"}]}"#.to_string(),
+        serde_json::json!({
+            "decision": "propose",
+            "reason": "补重试纪律",
+            "evidence_refs": ["E0"],
+            "operations": [{"op":"replace_exact","old_string":"- 同一调用签名不得原样重复；重试前必须核对错误、参数与状态。","new_string":"- 同一调用签名不得原样重复；重试前必须核对错误、参数与状态。\n- Bash 同签名重复调用不得再次发起。"}]
+        })
+        .to_string(),
+        r#"{"verdicts":[{"index":0,"verdict":"duplicate","reason":"新增规则是已有重试纪律的复述"}]}"#.to_string(),
+    ]);
+    let mut history = crate::domain::strength::SignalHistory::default();
+    let outcome = crate::domain::improvement::run_two_phase_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &RsiConfig::default(),
+        single_project_evidence(),
+        &crate::domain::stream_port::FakeEvidenceStream::default(),
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        &mut history,
+        "cycle-test",
+    )
+    .await
+    .expect("two-phase cycle");
+
+    assert_eq!(outcome.outcome.summary, "采纳 0 / 无变更 0 / 作废 1");
+    assert_eq!(
+        registry
+            .content_of(&target)
+            .map(|content| content.body.clone()),
+        Some(original.to_string()),
+        "同组件语义重复 MUST 整份拒绝，且不写入"
+    );
+}
+
+#[tokio::test]
 async fn two_phase_tool_signal_never_writes_project_overlay() {
     let project = ComponentId {
         kind: ComponentKind::SystemPromptOverlay,
@@ -842,4 +889,92 @@ async fn two_phase_dry_run_previews_without_persisting() {
     assert!(preview
         .iter()
         .any(|line| line.contains("[dry-run][two-phase] upsert tool-guidance/default")));
+}
+
+#[tokio::test]
+async fn common_action_generates_new_skill_with_host_validation() {
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let llm = TwoPhaseLlm::new(vec![serde_json::json!({
+        "decision": "create",
+        "name": "cargo-test-triage",
+        "reason": "跨 session 重复的测试失败处理动作",
+        "body": "---\ndescription: 按 crate 过滤 cargo test 失败并定位首个错误\n---\n# Cargo Test Triage\n\n1. 先按 crate 过滤输出。\n2. 读取首个失败用例。\n"
+    })
+    .to_string()]);
+    let evidence = EvidenceBundle {
+        sessions_covered: 2,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::CommonAction,
+            signal_id: "common_action:Bash:bash:cargo-test".to_string(),
+            summary: "工具 Bash 相同参数成功调用 ×3（跨 2 个 session）".to_string(),
+            excerpt: None,
+            occurrences: 3,
+            sources: vec![EvidenceSourceRef {
+                session_id: "p/s1.dataset".to_string(),
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+            }],
+        }],
+    };
+    let mut preview = Vec::new();
+    let adoption = crate::domain::improvement::generate_skill_from_common_actions(
+        &mut registry,
+        &llm,
+        &evidence,
+        false,
+        &mut preview,
+        None,
+        None,
+        "cycle-test",
+    )
+    .await
+    .expect("generate skill");
+    let adoption = adoption.expect("应生成 skill");
+    assert_eq!(adoption.id.kind, ComponentKind::Skill);
+    assert_eq!(adoption.id.name.as_str(), "cargo-test-triage");
+    assert!(registry
+        .content_of(&adoption.id)
+        .is_some_and(|content| content.body.contains("description:")));
+    assert!(preview.iter().any(|line| line.contains("new-skill")));
+}
+
+#[tokio::test]
+async fn common_action_generation_dry_run_does_not_write() {
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let llm = TwoPhaseLlm::new(vec![serde_json::json!({
+        "decision": "create",
+        "name": "dry-run-skill",
+        "reason": "preview",
+        "body": "---\ndescription: dry run\n---\n# Dry Run\n"
+    })
+    .to_string()]);
+    let evidence = EvidenceBundle {
+        sessions_covered: 2,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::CommonAction,
+            signal_id: "common_action:Bash:dry-run".to_string(),
+            summary: "跨 2 个 session 的同一成功动作".to_string(),
+            excerpt: None,
+            occurrences: 3,
+            sources: Vec::new(),
+        }],
+    };
+    let mut preview = Vec::new();
+    let adoption = crate::domain::improvement::generate_skill_from_common_actions(
+        &mut registry,
+        &llm,
+        &evidence,
+        true,
+        &mut preview,
+        None,
+        None,
+        "cycle-test",
+    )
+    .await
+    .expect("dry-run generate");
+    assert!(adoption.is_some());
+    assert!(registry.writes.is_empty(), "dry-run NEVER 写入 registry");
+    assert!(preview
+        .iter()
+        .any(|line| line.contains("[dry-run][new-skill]")));
 }

@@ -283,3 +283,58 @@ fn verify_pending_persists_and_is_idempotent() {
         .expect("verify again");
     assert!(second.is_empty());
 }
+
+fn watermarked_lesson(target: &str, baseline_runs: Vec<String>) -> LessonEntry {
+    let mut lesson = pending_lesson("watermarked", target);
+    lesson.verification.baseline_run_ids = baseline_runs;
+    lesson
+}
+
+fn evidence_with(run_id: &str, signal_id: &str) -> crate::domain::evidence::EvidenceBundle {
+    crate::domain::evidence::EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![crate::domain::evidence::EvidenceSignal {
+            kind: SignalKind::RepeatedFailure,
+            signal_id: signal_id.to_string(),
+            summary: "sample".to_string(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "proj/s.dataset".to_string(),
+                run_id: run_id.to_string(),
+                step_id: "step-1".to_string(),
+            }],
+        }],
+    }
+}
+
+#[test]
+fn lesson_verification_ignores_historical_run() {
+    let lesson = watermarked_lesson("repeated_failure:Bash:boom", vec!["run-old".to_string()]);
+    let outcome = crate::domain::lesson::judge_verification_with_evidence(
+        &lesson,
+        &evidence_with("run-old", "repeated_failure:Bash:boom"),
+    );
+    assert!(outcome.is_none(), "历史 run 不应触发 ineffective");
+}
+
+#[test]
+fn lesson_verification_uses_new_run() {
+    let lesson = watermarked_lesson("repeated_failure:Bash:boom", vec!["run-old".to_string()]);
+    let outcome = crate::domain::lesson::judge_verification_with_evidence(
+        &lesson,
+        &evidence_with("run-new", "repeated_failure:Bash:boom"),
+    )
+    .expect("new run must verify");
+    assert_eq!(outcome.status, VerificationStatus::Ineffective);
+}
+
+#[test]
+fn lesson_verification_without_baseline_is_never_ineffective() {
+    let lesson = watermarked_lesson("repeated_failure:Bash:boom", Vec::new());
+    let outcome = crate::domain::lesson::judge_verification_with_evidence(
+        &lesson,
+        &evidence_with("run-new", "repeated_failure:Bash:boom"),
+    );
+    assert!(outcome.is_none(), "legacy lesson 不能误判 ineffective");
+}

@@ -1,5 +1,7 @@
 //! Harness 组件树领域模型。
 
+pub mod candidate;
+pub mod change_observation;
 pub mod changeset;
 #[cfg(test)]
 mod changeset_tests;
@@ -28,6 +30,9 @@ pub mod maintenance;
 pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
+pub(crate) mod redaction;
+#[cfg(test)]
+mod redaction_tests;
 pub mod routing;
 #[cfg(test)]
 mod routing_tests;

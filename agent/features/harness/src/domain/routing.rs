@@ -255,6 +255,11 @@ pub fn route_signal(
     candidates: &[ComponentId],
     context: &RouteContext,
 ) -> RouteDecision {
+    if signal.kind == SignalKind::CommonAction {
+        return RouteDecision::Unresolved {
+            reason: "common_action 由新建 skill 阶段处理".to_string(),
+        };
+    }
     if matches!(
         signal.kind,
         SignalKind::RunOutcome | SignalKind::CycleObservation
