@@ -764,14 +764,30 @@ fn record_change_observations(
         let Ok(snapshot) = version_store.load(&adoption.id, None) else {
             continue;
         };
-        let crate::domain::versioning::SnapshotContent::Existing { raw } = &snapshot.payload else {
-            continue;
+        let is_new_component = matches!(
+            &snapshot.payload,
+            crate::domain::versioning::SnapshotContent::Tombstone
+        );
+        let before_hash = match &snapshot.payload {
+            crate::domain::versioning::SnapshotContent::Existing { raw } => {
+                crate::domain::change_observation::body_hash(raw)
+            }
+            crate::domain::versioning::SnapshotContent::Tombstone => {
+                crate::domain::change_observation::body_hash("")
+            }
         };
-        let target_signal_ids: Vec<String> = adoption
-            .evidence
-            .iter()
-            .map(|binding| binding.signal_id.clone())
-            .collect();
+        let target_signal_ids: Vec<String> = if is_new_component {
+            // 新建 skill 的目标不是“让 common_action 消失”：同一个可复用
+            // 动作本来就会持续出现。先建立可审计 observation，等技能使用
+            // 信号接入后再定义更精确的保留/回滚条件。
+            Vec::new()
+        } else {
+            adoption
+                .evidence
+                .iter()
+                .map(|binding| binding.signal_id.clone())
+                .collect()
+        };
         let mut baseline_run_ids = Vec::new();
         for signal in &evidence.signals {
             for source in &signal.sources {
@@ -780,7 +796,7 @@ fn record_change_observations(
                 }
             }
         }
-        if target_signal_ids.is_empty() {
+        if target_signal_ids.is_empty() && !is_new_component {
             continue;
         }
         if let Err(error) =
@@ -791,7 +807,7 @@ fn record_change_observations(
         let observation = crate::domain::change_observation::ChangeObservation::new_applied(
             adoption.id.to_string(),
             cycle_id.to_string(),
-            crate::domain::change_observation::body_hash(raw),
+            before_hash,
             crate::domain::change_observation::body_hash(&current.body),
             target_signal_ids,
             evidence

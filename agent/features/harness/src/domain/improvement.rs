@@ -1354,6 +1354,15 @@ name 只能使用小写字母、数字、连字符，2–50 字符；body MUST �
         preview_lines.push(format!("  [new-skill] 同名 skill 已存在：{name}"));
         return Ok(None);
     }
+    let proposed_text = format!("{name}\n{body}");
+    if existing.iter().any(|(_, existing_body)| {
+        share::memory::dedup::jaccard_similarity(&proposed_text, existing_body) >= 0.80
+    }) {
+        preview_lines.push(format!(
+            "  [new-skill] 与已有 skill 近似重复，拒绝创建：{name}"
+        ));
+        return Ok(None);
+    }
     let id = ComponentId {
         kind: ComponentKind::Skill,
         name: ComponentName::new(name.clone()),
