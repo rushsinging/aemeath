@@ -503,3 +503,30 @@ fn test_clear_removes_image_spans() {
     assert!(doc.image_spans.is_empty());
     assert!(doc.buffer.is_empty());
 }
+
+#[test]
+fn test_move_line_home_and_end_stay_within_logical_line() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("ab\ncd\nef");
+
+    // 第一行中间：行尾停在 '\n' 之前，不跨到第二行
+    doc.move_cursor(1);
+    doc.move_line_end();
+    assert_eq!(doc.cursor, 2);
+    doc.move_line_home();
+    assert_eq!(doc.cursor, 0);
+
+    // 第二行中间
+    doc.move_cursor(4);
+    doc.move_line_end();
+    assert_eq!(doc.cursor, 5);
+    doc.move_line_home();
+    assert_eq!(doc.cursor, 3);
+
+    // 最后一行：行尾即全文末尾
+    doc.move_cursor(7);
+    doc.move_line_end();
+    assert_eq!(doc.cursor, 8);
+    doc.move_line_home();
+    assert_eq!(doc.cursor, 6);
+}

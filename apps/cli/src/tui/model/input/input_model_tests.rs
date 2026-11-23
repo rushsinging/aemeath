@@ -276,7 +276,7 @@ fn test_move_cursor_down_at_last_line_triggers_history() {
 fn test_move_cursor_down_multiline_moves_cursor() {
     let mut model = InputModel::default();
     model.apply(InputIntent::InsertText("line1\nline2".to_string()));
-    model.apply(InputIntent::MoveCursorHome); // 光标到第一行开头
+    model.document.move_cursor(0); // 光标到第一行开头
     assert!(model.document.is_cursor_at_first_line());
     let changes = model.apply(InputIntent::MoveCursorDown);
     // 应移动光标到第二行
@@ -284,4 +284,30 @@ fn test_move_cursor_down_multiline_moves_cursor() {
     assert!(changes
         .iter()
         .any(|c| matches!(c, InputChange::CursorMoved { .. })));
+}
+
+#[test]
+fn test_move_cursor_line_intents_do_not_cross_lines() {
+    let mut model = InputModel::default();
+    model.apply(InputIntent::InsertText("line1\nline2".to_string()));
+
+    // 第一行中间 → 行尾停在换行符之前
+    model.document.move_cursor(2);
+    let changes = model.apply(InputIntent::MoveCursorLineEnd);
+    assert_eq!(model.document.cursor, "line1".len());
+    assert!(changes
+        .iter()
+        .any(|c| matches!(c, InputChange::CursorMoved { .. })));
+
+    // 第二行中间 → 行首停在换行符之后
+    model.document.move_cursor(8);
+    let changes = model.apply(InputIntent::MoveCursorLineHome);
+    assert_eq!(model.document.cursor, "line1\n".len());
+    assert!(changes
+        .iter()
+        .any(|c| matches!(c, InputChange::CursorMoved { .. })));
+
+    // 最后一行行尾即整段末尾
+    model.apply(InputIntent::MoveCursorLineEnd);
+    assert_eq!(model.document.cursor, "line1\nline2".len());
 }

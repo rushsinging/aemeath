@@ -444,7 +444,7 @@ impl ConversationModel {
         Vec::new()
     }
 
-    /// 将光标移到行首或行尾。
+    /// 将光标移到当前逻辑行的行首或行尾（以 `\n` 分界，不跨行）。
     pub(super) fn move_ask_user_chat_cursor_end(
         &mut self,
         to_end: bool,
@@ -457,7 +457,18 @@ impl ConversationModel {
         }) = self.ask_user_timeline_item_mut()
         {
             if *chat_input_active {
-                let target = if to_end { chat_input_text.len() } else { 0 };
+                let cursor = (*chat_input_cursor).min(chat_input_text.len());
+                let target = if to_end {
+                    chat_input_text[cursor..]
+                        .find('\n')
+                        .map(|idx| cursor + idx)
+                        .unwrap_or(chat_input_text.len())
+                } else {
+                    chat_input_text[..cursor]
+                        .rfind('\n')
+                        .map(|idx| idx + 1)
+                        .unwrap_or(0)
+                };
                 if target != *chat_input_cursor {
                     *chat_input_cursor = target;
                     return self.ask_user_updated();
