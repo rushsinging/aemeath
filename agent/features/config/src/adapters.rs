@@ -172,6 +172,9 @@ impl EnvAdapter {
                     .and_then(|value| match value.trim() {
                         "local" => Some(share::config::domain::scoring::ScoringBackend::Local),
                         "bailian" => Some(share::config::domain::scoring::ScoringBackend::Bailian),
+                        "volcengine" => {
+                            Some(share::config::domain::scoring::ScoringBackend::Volcengine)
+                        }
                         _ => None,
                     });
             let bailian_env_field = |key: &str| {
@@ -194,6 +197,26 @@ impl EnvAdapter {
                 full_url: bailian_full_url,
                 model: bailian_model,
             });
+            let volcengine_env_field = |key: &str| {
+                source
+                    .get(key)
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            let volcengine_api_key = volcengine_env_field("AEMEATH_SCORING_VOLCENGINE_API_KEY");
+            let volcengine_base_url = volcengine_env_field("AEMEATH_SCORING_VOLCENGINE_BASE_URL");
+            let volcengine_full_url = volcengine_env_field("AEMEATH_SCORING_VOLCENGINE_FULL_URL");
+            let volcengine_model = volcengine_env_field("AEMEATH_SCORING_VOLCENGINE_MODEL");
+            let volcengine = (volcengine_api_key.is_some()
+                || volcengine_base_url.is_some()
+                || volcengine_full_url.is_some()
+                || volcengine_model.is_some())
+            .then_some(share::config::domain::merge::BailianScoringConfigPatch {
+                api_key: volcengine_api_key,
+                base_url: volcengine_base_url,
+                full_url: volcengine_full_url,
+                model: volcengine_model,
+            });
             (enabled.is_some()
                 || memory_rerank.is_some()
                 || skill_match.is_some()
@@ -204,11 +227,13 @@ impl EnvAdapter {
                 || connect_timeout_secs.is_some()
                 || infer_timeout_secs.is_some()
                 || backend.is_some()
-                || bailian.is_some())
+                || bailian.is_some()
+                || volcengine.is_some())
             .then_some(share::config::domain::merge::ScoringConfigPatch {
                 enabled,
                 backend,
                 bailian,
+                volcengine,
                 memory_rerank,
                 skill_match,
                 policy_triage,

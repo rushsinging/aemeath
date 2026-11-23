@@ -219,3 +219,54 @@ async fn answer_maps_connection_failure_to_transport_kind() {
         "传输层失败必须归传输类 kind：{error}"
     );
 }
+
+#[tokio::test]
+async fn volcengine_client_sends_beta_header_with_bearer_auth() {
+    let mut server = start_mock_server(200, OK_NOUL_BODY).await;
+    let client = VolcengineSystemOneClient::new(
+        server.endpoint.clone(),
+        "ark-test-key".to_string(),
+        "doubao-seed-2-1-lite-260915".to_string(),
+        Duration::from_millis(1500),
+    );
+
+    let answers = client
+        .answer(&sample_state(), &[noul_question()])
+        .await
+        .expect("200 响应应解析成功");
+    assert_eq!(answers.len(), 1);
+
+    let request_text = server.requests.recv().await.expect("请求应到达 server");
+    let lower = request_text.to_ascii_lowercase();
+    assert!(
+        lower.contains("ark-beta-systemone-api: true"),
+        "火山 beta 接口必须携带 ark-beta-systemone-api: true 头：{request_text}"
+    );
+    assert!(
+        lower.contains("authorization: bearer ark-test-key"),
+        "必须携带 Bearer 鉴权头"
+    );
+    assert!(
+        request_text.contains("doubao-seed-2-1-lite-260915"),
+        "请求体应携带方舟决策评估模型名"
+    );
+}
+
+#[tokio::test]
+async fn bailian_client_never_sends_volcengine_beta_header() {
+    let mut server = start_mock_server(200, OK_NOUL_BODY).await;
+    let client = client_for(&server.endpoint);
+
+    client
+        .answer(&sample_state(), &[noul_question()])
+        .await
+        .expect("200 响应应解析成功");
+
+    let request_text = server.requests.recv().await.expect("请求应到达 server");
+    assert!(
+        !request_text
+            .to_ascii_lowercase()
+            .contains("ark-beta-systemone-api"),
+        "百炼请求不得注入火山 beta 头：{request_text}"
+    );
+}

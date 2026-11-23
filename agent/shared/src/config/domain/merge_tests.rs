@@ -70,6 +70,7 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
             "memory_rerank",
             "policy_triage",
             "skill_match",
+            "volcengine",
         ],
         "合并结果不得出现退役 HTTP 顶层字段；backend 驱动配置正常出现在合并面",
     );
@@ -677,4 +678,35 @@ fn language_unspecified_in_patch_keeps_lower_layer_value() {
     );
     let config = apply_patch(base, ConfigPatch::default());
     assert_eq!(config.language, "zh");
+}
+
+#[test]
+fn scoring_volcengine_patch_overrides_set_fields_only() {
+    let global: ConfigPatch = serde_json::from_str(
+        r#"{"scoring":{"backend":"volcengine","volcengine":{"base_url":"https://low.example.com/api/v1"}}}"#,
+    )
+    .expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            volcengine: Some(SystemOneCloudScoringConfigPatch {
+                api_key: Some("ark-high".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let scoring = ConfigSnapshot::new(apply_patch(
+        apply_patch(Config::default(), global),
+        env_layer,
+    ))
+    .scoring()
+    .clone();
+    assert_eq!(scoring.backend, ScoringBackend::Volcengine);
+    assert_eq!(scoring.volcengine.api_key.as_deref(), Some("ark-high"));
+    assert_eq!(
+        scoring.volcengine.base_url.as_deref(),
+        Some("https://low.example.com/api/v1"),
+        "未设置的字段保留低层值"
+    );
 }

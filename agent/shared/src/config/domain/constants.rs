@@ -41,6 +41,12 @@ pub const DEFAULT_SCORING_INFER_TIMEOUT_SECS: u64 = 30;
 /// bailian 驱动默认模型名（百炼决策模型，TypeSafe System One 协议）。
 pub const DEFAULT_BAILIAN_SCORING_MODEL: &str = "decision-model-preview";
 
+/// 火山方舟 System One 决策评估默认模型（beta；见方舟「决策评估」文档）。
+pub const DEFAULT_VOLCENGINE_SCORING_MODEL: &str = "doubao-seed-2-1-lite-260915";
+
+/// 火山方舟 System One 默认基础 URL（端点 = base_url + `/systemone`）。
+pub const DEFAULT_VOLCENGINE_SCORING_BASE_URL: &str = "https://ark.cn-beijing.volces.com/api/v1";
+
 /// local daemon HTTP 监听地址默认值（#2096：UDS 退役，端口显式配置）。
 pub const DEFAULT_SCORING_HTTP_LISTEN: &str = "127.0.0.1:9000";
 
