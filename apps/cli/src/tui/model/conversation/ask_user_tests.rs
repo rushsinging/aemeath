@@ -561,3 +561,42 @@ fn insert_ask_user_chat_text_ignored_outside_chat_input_substate() {
         assert!(chat_input_text.is_empty());
     }
 }
+
+#[test]
+fn test_chat_input_cursor_home_end_stay_within_logical_line() {
+    let mut model = ConversationModel::default();
+    show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+    enable_chat_input(&mut model);
+
+    // 自由输入框当前按单行渲染；这里直接构造多行文本，锁定行级光标语义，
+    // 防止后续改用多行渲染时 Home/End 退化回整段跳转。
+    if let Some(OutputTimelineItem::AskUserBatch {
+        chat_input_text,
+        chat_input_cursor,
+        ..
+    }) = model
+        .timeline
+        .items_mut()
+        .iter_mut()
+        .find(|item| matches!(item, OutputTimelineItem::AskUserBatch { .. }))
+    {
+        *chat_input_text = "ab\ncd".to_string();
+        *chat_input_cursor = 1;
+    }
+
+    model.apply(MoveAskUserChatCursorEnd { to_end: true });
+    if let OutputTimelineItem::AskUserBatch {
+        chat_input_cursor, ..
+    } = timeline_item(&model)
+    {
+        assert_eq!(*chat_input_cursor, 2);
+    }
+
+    model.apply(MoveAskUserChatCursorEnd { to_end: false });
+    if let OutputTimelineItem::AskUserBatch {
+        chat_input_cursor, ..
+    } = timeline_item(&model)
+    {
+        assert_eq!(*chat_input_cursor, 0);
+    }
+}

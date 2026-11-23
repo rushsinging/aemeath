@@ -11,8 +11,10 @@ pub enum InputIntent {
     MoveCursorRight,
     MoveCursorUp,
     MoveCursorDown,
-    MoveCursorHome,
-    MoveCursorEnd,
+    /// 当前逻辑行行首（不跨行）。
+    MoveCursorLineHome,
+    /// 当前逻辑行行尾（不跨行）。
+    MoveCursorLineEnd,
     InsertNewline,
     DeleteBackward,
     DeleteWordBeforeCursor,

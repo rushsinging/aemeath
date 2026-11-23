@@ -33,14 +33,14 @@ impl InputModel {
                     cursor: self.document.cursor,
                 }]
             }
-            InputIntent::MoveCursorHome => {
-                self.document.move_home();
+            InputIntent::MoveCursorLineHome => {
+                self.document.move_line_home();
                 vec![InputChange::CursorMoved {
                     cursor: self.document.cursor,
                 }]
             }
-            InputIntent::MoveCursorEnd => {
-                self.document.move_end();
+            InputIntent::MoveCursorLineEnd => {
+                self.document.move_line_end();
                 vec![InputChange::CursorMoved {
                     cursor: self.document.cursor,
                 }]

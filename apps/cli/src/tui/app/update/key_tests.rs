@@ -739,3 +739,52 @@ fn test_up_arrow_restores_messages_and_commands_in_arrival_order() {
         "还原顺序必须等于提交顺序（#1816）"
     );
 }
+
+#[test]
+fn ctrl_e_and_ctrl_a_stay_within_current_line() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.handle_input_intent(InputIntent::ReplaceText("line1\nline2".to_string()));
+    app.model.input.document.move_cursor(2);
+    let spawn_refs = make_spawn_refs();
+
+    app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        &spawn_refs,
+    );
+    assert_eq!(app.model.input.document.cursor, "line1".len());
+
+    app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        &spawn_refs,
+    );
+    assert_eq!(app.model.input.document.cursor, 0);
+}
+
+#[test]
+fn home_and_end_keys_stay_within_current_line() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.handle_input_intent(InputIntent::ReplaceText("line1\nline2".to_string()));
+    app.model.input.document.move_cursor(8);
+    let spawn_refs = make_spawn_refs();
+
+    app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+    assert_eq!(app.model.input.document.cursor, "line1\nline2".len());
+
+    app.model.input.document.move_cursor(8);
+    app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+    assert_eq!(app.model.input.document.cursor, "line1\n".len());
+}

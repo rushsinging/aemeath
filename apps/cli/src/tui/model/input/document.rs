@@ -95,12 +95,22 @@ impl InputDocument {
         self.cursor = next.min(self.buffer.len());
     }
 
-    pub fn move_home(&mut self) {
-        self.cursor = 0;
+    /// 光标移到当前逻辑行（`\n` 分隔）的行首，不跨越换行符。
+    pub fn move_line_home(&mut self) {
+        let cursor = self.cursor.min(self.buffer.len());
+        self.cursor = self.buffer[..cursor]
+            .rfind('\n')
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
     }
 
-    pub fn move_end(&mut self) {
-        self.cursor = self.buffer.len();
+    /// 光标移到当前逻辑行（`\n` 分隔）的行尾，不跨越换行符。
+    pub fn move_line_end(&mut self) {
+        let cursor = self.cursor.min(self.buffer.len());
+        self.cursor = self.buffer[cursor..]
+            .find('\n')
+            .map(|idx| cursor + idx)
+            .unwrap_or(self.buffer.len());
     }
 
     pub fn delete_backward(&mut self) {

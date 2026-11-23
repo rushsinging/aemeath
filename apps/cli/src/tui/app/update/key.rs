@@ -289,10 +289,10 @@ impl App {
                 }
             }
             (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
-                self.handle_input_intent(InputIntent::MoveCursorHome);
+                self.handle_input_intent(InputIntent::MoveCursorLineHome);
             }
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
-                self.handle_input_intent(InputIntent::MoveCursorEnd);
+                self.handle_input_intent(InputIntent::MoveCursorLineEnd);
             }
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
                 self.handle_input_intent(InputIntent::DeleteWordBeforeCursor);
@@ -304,8 +304,11 @@ impl App {
                 // 删：[reading clipboard image...] —— 同 paste_handler.rs 路径（#fix-tui-image-input-output）
                 return UpdateResult::one(Effect::ReadClipboardImage);
             }
+            (KeyModifiers::NONE, KeyCode::Home) => {
+                self.handle_input_intent(InputIntent::MoveCursorLineHome);
+            }
             (KeyModifiers::NONE, KeyCode::End) => {
-                self.handle_input_intent(InputIntent::MoveCursorEnd);
+                self.handle_input_intent(InputIntent::MoveCursorLineEnd);
             }
             _ => {}
         }
