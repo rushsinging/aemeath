@@ -553,3 +553,84 @@ async fn run_scoring_serve_without_engine_skips_ready_callback() {
         other => panic!("unexpected exit: {other:?}"),
     }
 }
+
+// ── volcengine backend 装配矩阵 ──
+
+fn volcengine_enabled() -> share::config::ScoringConfig {
+    share::config::ScoringConfig {
+        backend: share::config::scoring::ScoringBackend::Volcengine,
+        volcengine: share::config::scoring::VolcengineScoringConfig {
+            api_key: Some("ark-test".into()),
+            ..Default::default()
+        },
+        ..all_enabled()
+    }
+}
+
+#[tokio::test]
+async fn volcengine_assembly_wires_ports_without_manifest_or_daemon() {
+    let source = NeverManifestSource {
+        consulted: AtomicUsize::new(0),
+    };
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly =
+        assemble_daemon_scoring_ports_with(&volcengine_enabled(), &source, &launcher).await;
+
+    assert_eq!(
+        source.consulted.load(Ordering::SeqCst),
+        0,
+        "volcengine 路径不得读取发行 manifest"
+    );
+    assert_eq!(
+        launcher.calls.load(Ordering::SeqCst),
+        0,
+        "volcengine 路径不得拉起 systemone daemon"
+    );
+    assert!(
+        matches!(
+            &assembly.outcome,
+            ScoringStartupOutcome::VolcengineReady { model }
+                if model == share::config::scoring::DEFAULT_VOLCENGINE_SCORING_MODEL
+        ),
+        "outcome={:?}",
+        assembly.outcome
+    );
+    assert!(assembly.assignment.for_memory_rerank.is_some());
+    assert!(assembly.assignment.for_memory_recall.is_some());
+    assert!(assembly.assignment.for_skill_match.is_some());
+    assert!(assembly.assignment.for_policy_triage.is_some());
+    assert!(scoring_startup_notices(&assembly.outcome).is_empty());
+}
+
+#[tokio::test]
+async fn volcengine_assembly_fail_open_on_missing_api_key() {
+    let invalid = share::config::ScoringConfig {
+        volcengine: share::config::scoring::VolcengineScoringConfig::default(),
+        ..volcengine_enabled()
+    };
+    let source = NeverManifestSource {
+        consulted: AtomicUsize::new(0),
+    };
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(&invalid, &source, &launcher).await;
+    assert!(
+        matches!(
+            assembly.outcome,
+            ScoringStartupOutcome::VolcengineConfigInvalid { .. }
+        ),
+        "outcome={:?}",
+        assembly.outcome
+    );
+    assert!(assembly.assignment.for_memory_rerank.is_none());
+    assert_eq!(
+        scoring_startup_notices(&assembly.outcome).len(),
+        1,
+        "缺 key 应产生一条中文提醒"
+    );
+}

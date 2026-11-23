@@ -46,6 +46,7 @@ fn scoring_config_ignores_retired_http_keys() {
             "memory_rerank",
             "policy_triage",
             "skill_match",
+            "volcengine",
         ],
         "序列化面允许场景开关、事件保留、daemon socket/超时与 backend 驱动配置；退役 HTTP 顶层字段不得回归"
     );
@@ -305,7 +306,53 @@ fn scoring_config_serialization_includes_backend_and_bailian() {
             "memory_rerank",
             "policy_triage",
             "skill_match",
+            "volcengine",
         ],
         "序列化面应含 backend 与 bailian 驱动配置"
     );
+}
+
+#[test]
+fn volcengine_config_defaults_resolve_official_endpoint_and_require_key() {
+    let config = VolcengineScoringConfig::default();
+    assert_eq!(config.model, DEFAULT_VOLCENGINE_SCORING_MODEL);
+    assert_eq!(
+        config.resolve_endpoint().expect("默认端点应可解析"),
+        format!("{DEFAULT_VOLCENGINE_SCORING_BASE_URL}/systemone")
+    );
+    assert_eq!(
+        config.validate(),
+        Err(SystemOneCloudConfigError::MissingApiKey)
+    );
+
+    let custom = VolcengineScoringConfig {
+        api_key: Some("ark-test".into()),
+        base_url: Some("https://ark.example.com/api/v1/".into()),
+        full_url: None,
+        model: "doubao-test".into(),
+    };
+    assert_eq!(
+        custom.resolve_endpoint().expect("自定义端点"),
+        "https://ark.example.com/api/v1/systemone"
+    );
+    assert_eq!(custom.validate(), Ok(()));
+
+    let full = VolcengineScoringConfig {
+        full_url: Some("https://ark.example.com/systemone".into()),
+        ..custom
+    };
+    assert_eq!(
+        full.resolve_endpoint().expect("full_url 优先"),
+        "https://ark.example.com/systemone"
+    );
+}
+
+#[test]
+fn scoring_backend_accepts_volcengine() {
+    let config: ScoringConfig =
+        serde_json::from_str(r#"{"backend":"volcengine","volcengine":{"api_key":"ark"}}"#)
+            .expect("volcengine backend 应可解析");
+    assert_eq!(config.backend, ScoringBackend::Volcengine);
+    assert_eq!(config.volcengine.api_key.as_deref(), Some("ark"));
+    assert_eq!(config.volcengine.model, DEFAULT_VOLCENGINE_SCORING_MODEL);
 }

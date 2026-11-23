@@ -3,7 +3,8 @@
 pub use super::constants::{
     DEFAULT_BAILIAN_SCORING_MODEL, DEFAULT_EVENT_RETENTION_DAYS,
     DEFAULT_SCORING_CONNECT_TIMEOUT_SECS, DEFAULT_SCORING_HTTP_LISTEN,
-    DEFAULT_SCORING_INFER_TIMEOUT_SECS,
+    DEFAULT_SCORING_INFER_TIMEOUT_SECS, DEFAULT_VOLCENGINE_SCORING_BASE_URL,
+    DEFAULT_VOLCENGINE_SCORING_MODEL,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +35,14 @@ fn default_bailian_model() -> String {
     DEFAULT_BAILIAN_SCORING_MODEL.to_string()
 }
 
-/// 评分后端驱动：local（UDS daemon，现状默认）或 bailian（百炼决策模型 HTTPS）。
+fn default_volcengine_model() -> String {
+    DEFAULT_VOLCENGINE_SCORING_MODEL.to_string()
+}
+
+/// 评分后端驱动：local（UDS daemon，现状默认）、bailian（百炼决策模型 HTTPS）
+/// 或 volcengine（火山方舟 System One 决策评估 HTTPS，beta）。
 ///
-/// bailian 端点为 TypeSafe System One 协议（`POST {endpoint}`，题型
+/// 两个云端后端都是 TypeSafe System One 协议（`POST {endpoint}`，题型
 /// noul/choice/score），与本地评分语言同构；凭证独立配置，
 /// **NEVER** 与 `models.providers` 混用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -47,6 +53,8 @@ pub enum ScoringBackend {
     Local,
     /// 百炼决策模型（`decision-model-preview`）。
     Bailian,
+    /// 火山方舟 System One 决策评估（beta；需 `ark-beta-systemone-api` 请求头）。
+    Volcengine,
 }
 
 /// bailian 驱动连接配置（#2095）：与 `models.providers` 独立，不混用。
@@ -80,16 +88,19 @@ impl Default for BailianScoringConfig {
     }
 }
 
-/// bailian 端点解析失败原因（装配层 fail-open 提醒用）。
+/// 云端 System One 端点解析失败原因（装配层 fail-open 提醒用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BailianConfigError {
+pub enum SystemOneCloudConfigError {
     /// `base_url` 与 `full_url` 均未配置。
     MissingEndpoint,
     /// `api_key` 未配置。
     MissingApiKey,
 }
 
-impl std::fmt::Display for BailianConfigError {
+/// 历史名称：bailian 驱动沿用的端点错误类型。
+pub type BailianConfigError = SystemOneCloudConfigError;
+
+impl std::fmt::Display for SystemOneCloudConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingEndpoint => formatter.write_str("base_url 与 full_url 均未配置"),
@@ -98,7 +109,75 @@ impl std::fmt::Display for BailianConfigError {
     }
 }
 
-impl std::error::Error for BailianConfigError {}
+impl std::error::Error for SystemOneCloudConfigError {}
+
+/// 火山方舟 System One 决策评估连接配置（beta）：与 `models.providers`
+/// 独立，不混用。
+///
+/// 端点默认 `https://ark.cn-beijing.volces.com/api/v1` + `/systemone`；
+/// 请求固定携带 `ark-beta-systemone-api: true`（beta 必需，由装配层注入）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VolcengineScoringConfig {
+    /// API Key（Bearer 鉴权，backend=volcengine 时必填；须为方舟主站 key）。
+    #[serde(default, alias = "apiKey")]
+    pub api_key: Option<String>,
+
+    /// 基础 URL：请求端点 = `base_url + "/systemone"`（缺省用方舟官方端点）。
+    #[serde(default, alias = "baseUrl")]
+    pub base_url: Option<String>,
+
+    /// 完整端点 URL：设置时优先于 `base_url` 拼接。
+    #[serde(default, alias = "fullUrl")]
+    pub full_url: Option<String>,
+
+    /// 决策评估模型名（默认 [`DEFAULT_VOLCENGINE_SCORING_MODEL`]）。
+    #[serde(default = "default_volcengine_model")]
+    pub model: String,
+}
+
+impl Default for VolcengineScoringConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            base_url: None,
+            full_url: None,
+            model: DEFAULT_VOLCENGINE_SCORING_MODEL.to_string(),
+        }
+    }
+}
+
+impl VolcengineScoringConfig {
+    /// 解析请求端点：`full_url` 优先；否则 `base_url`（缺省方舟官方地址）
+    /// 去尾斜杠后拼 `/systemone`。
+    pub fn resolve_endpoint(&self) -> Result<String, SystemOneCloudConfigError> {
+        if let Some(full_url) = self.full_url.as_deref().map(str::trim) {
+            if !full_url.is_empty() {
+                return Ok(full_url.to_string());
+            }
+        }
+        let base_url = self
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_VOLCENGINE_SCORING_BASE_URL);
+        Ok(format!("{}/systemone", base_url.trim_end_matches('/')))
+    }
+
+    /// 装配前完整性校验：`api_key` 必填（端点有官方缺省值）。
+    pub fn validate(&self) -> Result<(), SystemOneCloudConfigError> {
+        self.resolve_endpoint()?;
+        if self
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+        {
+            return Err(SystemOneCloudConfigError::MissingApiKey);
+        }
+        Ok(())
+    }
+}
 
 impl BailianScoringConfig {
     /// 解析请求端点：`full_url` 优先；否则 `base_url` 去尾斜杠后拼 `/systemone`。
@@ -151,6 +230,7 @@ impl Default for ScoringConfig {
             enabled: true,
             backend: ScoringBackend::Local,
             bailian: BailianScoringConfig::default(),
+            volcengine: VolcengineScoringConfig::default(),
             memory_rerank: false,
             skill_match: false,
             policy_triage: false,
@@ -182,6 +262,11 @@ pub struct ScoringConfig {
     /// `models.providers` 混用）。
     #[serde(default)]
     pub bailian: BailianScoringConfig,
+
+    /// 火山方舟 System One 驱动连接配置（backend=volcengine 时消费；凭证
+    /// 独立，不与 `models.providers` 混用）。
+    #[serde(default)]
+    pub volcengine: VolcengineScoringConfig,
 
     /// 场景开关：记忆检索重排（storage memory 搜索）。
     #[serde(default, alias = "memoryRerank")]

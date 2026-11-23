@@ -62,6 +62,17 @@ pub enum ScoringStartupOutcome {
         /// 中文原因（指向 `scoring.bailian` 配置项）。
         detail: String,
     },
+    /// 火山方舟 System One 云端驱动装配成功（`scoring.backend=volcengine`）。
+    VolcengineReady {
+        /// 决策评估模型名（审计 engine_revision 同源）。
+        model: String,
+    },
+    /// 火山方舟驱动配置缺失/非法（缺 api_key）：fail-open——不装配端口、
+    /// 单条提醒，主聊天 **NEVER** 阻断。
+    VolcengineConfigInvalid {
+        /// 中文原因（指向 `scoring.volcengine` 配置项）。
+        detail: String,
+    },
 }
 
 impl Display for ScoringStartupOutcome {
@@ -84,6 +95,13 @@ impl Display for ScoringStartupOutcome {
                 )
             }
             Self::BailianConfigInvalid { detail } => write!(formatter, "{detail}"),
+            Self::VolcengineReady { model } => {
+                write!(
+                    formatter,
+                    "System One 评分端口已装配（volcengine 云端驱动：{model}）"
+                )
+            }
+            Self::VolcengineConfigInvalid { detail } => write!(formatter, "{detail}"),
         }
     }
 }
@@ -105,7 +123,8 @@ pub(crate) fn scoring_startup_notices(outcome: &ScoringStartupOutcome) -> Vec<St
     match outcome {
         ScoringStartupOutcome::Disabled
         | ScoringStartupOutcome::Ready
-        | ScoringStartupOutcome::BailianReady { .. } => Vec::new(),
+        | ScoringStartupOutcome::BailianReady { .. }
+        | ScoringStartupOutcome::VolcengineReady { .. } => Vec::new(),
         outcome => vec![StartupNotice {
             message: outcome.to_string(),
         }],
@@ -349,6 +368,9 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
         share::config::scoring::ScoringBackend::Bailian => {
             assemble_bailian_ports(scoring, context_slot, context_source)
         }
+        share::config::scoring::ScoringBackend::Volcengine => {
+            assemble_volcengine_ports(scoring, context_slot, context_source)
+        }
         share::config::scoring::ScoringBackend::Local => {
             assemble_local_daemon_ports(scoring, source, launcher, context_slot, context_source)
                 .await
@@ -393,12 +415,84 @@ fn assemble_bailian_ports(
             infer_timeout,
         ));
     let engine_revision = format!("bailian/{}", scoring.bailian.model);
+    let outcome = ScoringStartupOutcome::BailianReady {
+        model: scoring.bailian.model.clone(),
+    };
+    assemble_cloud_ports(
+        scoring,
+        raw_port,
+        &engine_revision,
+        outcome,
+        context_slot,
+        context_source,
+    )
+}
+
+/// 火山方舟分支：配置校验 fail-open；成功时构造带 beta 请求头的 HTTPS
+/// 客户端（engine_revision = `volcengine/{model}`，审计单一真相源）。
+/// **NEVER** 读发行 manifest、**NEVER** 拉起 systemone daemon。
+fn assemble_volcengine_ports(
+    scoring: &share::config::ScoringConfig,
+    context_slot: Arc<systemone::ScoringCallContextSlot>,
+    context_source: Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>,
+) -> ScoringAssembly {
+    if let Err(error) = scoring.volcengine.validate() {
+        return ScoringAssembly {
+            assignment: ScoringPortAssignment::default(),
+            outcome: ScoringStartupOutcome::VolcengineConfigInvalid {
+                detail: format!(
+                    "volcengine 评分驱动配置不完整（{error}）：请在配置文件 scoring.volcengine 补齐 api_key（base_url 缺省为方舟官方端点）"
+                ),
+            },
+            context_slot,
+        };
+    }
+    let endpoint = scoring
+        .volcengine
+        .resolve_endpoint()
+        .expect("validate 已保证端点可解析");
+    let api_key = scoring
+        .volcengine
+        .api_key
+        .clone()
+        .expect("validate 已保证 api_key 存在");
+    let infer_timeout = std::time::Duration::from_secs(scoring.infer_timeout_secs);
+    let raw_port: Arc<dyn systemone::ScoringPort> =
+        Arc::new(systemone::VolcengineSystemOneClient::new(
+            endpoint,
+            api_key,
+            scoring.volcengine.model.clone(),
+            infer_timeout,
+        ));
+    let engine_revision = format!("volcengine/{}", scoring.volcengine.model);
+    let outcome = ScoringStartupOutcome::VolcengineReady {
+        model: scoring.volcengine.model.clone(),
+    };
+    assemble_cloud_ports(
+        scoring,
+        raw_port,
+        &engine_revision,
+        outcome,
+        context_slot,
+        context_source,
+    )
+}
+
+/// 云端驱动共享装配：按场景开关包装校准/审计外壳。
+fn assemble_cloud_ports(
+    scoring: &share::config::ScoringConfig,
+    raw_port: Arc<dyn systemone::ScoringPort>,
+    engine_revision: &str,
+    outcome: ScoringStartupOutcome,
+    context_slot: Arc<systemone::ScoringCallContextSlot>,
+    context_source: Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>,
+) -> ScoringAssembly {
     ScoringAssembly {
         assignment: ScoringPortAssignment {
             for_memory_rerank: scoring.memory_rerank.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &engine_revision,
+                    engine_revision,
                     &scoring_dir(),
                     "memory_rerank",
                     scoring.event_retention_days,
@@ -408,7 +502,7 @@ fn assemble_bailian_ports(
             for_memory_recall: scoring.memory_recall.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &engine_revision,
+                    engine_revision,
                     &scoring_dir(),
                     "memory_recall",
                     scoring.event_retention_days,
@@ -418,7 +512,7 @@ fn assemble_bailian_ports(
             for_skill_match: scoring.skill_match.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &engine_revision,
+                    engine_revision,
                     &scoring_dir(),
                     "skill_match",
                     scoring.event_retention_days,
@@ -428,7 +522,7 @@ fn assemble_bailian_ports(
             for_policy_triage: scoring.policy_triage.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &engine_revision,
+                    engine_revision,
                     &scoring_dir(),
                     "policy_triage",
                     scoring.event_retention_days,
@@ -436,9 +530,7 @@ fn assemble_bailian_ports(
                 )
             }),
         },
-        outcome: ScoringStartupOutcome::BailianReady {
-            model: scoring.bailian.model.clone(),
-        },
+        outcome,
         context_slot,
     }
 }

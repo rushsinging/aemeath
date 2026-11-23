@@ -562,3 +562,32 @@ fn env_adapter_ignores_invalid_tool_background_threshold() {
     let patch = EnvAdapter::read(&source);
     assert!(patch.runtime.is_none());
 }
+
+#[test]
+fn env_adapter_maps_volcengine_backend_and_connection_envs_into_patch() {
+    let source = FakeEnv(HashMap::from([
+        ("AEMEATH_SCORING_BACKEND".into(), "volcengine".into()),
+        (
+            "AEMEATH_SCORING_VOLCENGINE_API_KEY".into(),
+            "ark-env".into(),
+        ),
+        (
+            "AEMEATH_SCORING_VOLCENGINE_MODEL".into(),
+            "doubao-seed-2-1-lite-260915".into(),
+        ),
+    ]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("volcengine env 应产出 patch");
+    assert_eq!(
+        scoring.backend,
+        Some(share::config::domain::scoring::ScoringBackend::Volcengine)
+    );
+    let volcengine = scoring.volcengine.expect("volcengine 子 patch 应存在");
+    assert_eq!(volcengine.api_key.as_deref(), Some("ark-env"));
+    assert_eq!(
+        volcengine.model.as_deref(),
+        Some("doubao-seed-2-1-lite-260915")
+    );
+    assert_eq!(volcengine.base_url, None, "未设置的 env 字段不得伪造");
+    assert_eq!(volcengine.full_url, None);
+}

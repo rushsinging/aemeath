@@ -679,12 +679,15 @@ pub struct ScoringConfigPatch {
     #[serde(default)]
     pub backend: Option<super::scoring::ScoringBackend>,
     #[serde(default)]
-    pub bailian: Option<BailianScoringConfigPatch>,
+    pub bailian: Option<SystemOneCloudScoringConfigPatch>,
+    #[serde(default)]
+    pub volcengine: Option<SystemOneCloudScoringConfigPatch>,
 }
 
-/// `BailianScoringConfig` 的分层合并 patch：仅覆盖显式设置的字段。
+/// 云端 System One 连接配置的分层合并 patch（bailian / volcengine 同构）：
+/// 仅覆盖显式设置的字段。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct BailianScoringConfigPatch {
+pub struct SystemOneCloudScoringConfigPatch {
     #[serde(default, alias = "apiKey")]
     pub api_key: Option<String>,
     #[serde(default, alias = "baseUrl")]
@@ -694,6 +697,9 @@ pub struct BailianScoringConfigPatch {
     #[serde(default)]
     pub model: Option<String>,
 }
+
+/// 历史名称：bailian 连接配置 patch。
+pub type BailianScoringConfigPatch = SystemOneCloudScoringConfigPatch;
 
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
     if let Some(v) = patch.enabled {
@@ -767,6 +773,21 @@ pub(crate) fn apply_scoring_patch(
         }
         if let Some(v) = bailian_patch.model {
             bailian.model = v;
+        }
+    }
+    if let Some(volcengine_patch) = patch.volcengine {
+        let volcengine = &mut base.volcengine;
+        if let Some(v) = volcengine_patch.api_key {
+            volcengine.api_key = Some(v);
+        }
+        if let Some(v) = volcengine_patch.base_url {
+            volcengine.base_url = Some(v);
+        }
+        if let Some(v) = volcengine_patch.full_url {
+            volcengine.full_url = Some(v);
+        }
+        if let Some(v) = volcengine_patch.model {
+            volcengine.model = v;
         }
     }
     base

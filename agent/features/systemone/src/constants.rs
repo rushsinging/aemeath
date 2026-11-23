@@ -1,5 +1,8 @@
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:systemone";
 
+/// 火山方舟 System One beta 必需请求头（#2095 云端驱动）。
+pub(crate) const VOLCENGINE_BETA_HEADER: (&str, &str) = ("ark-beta-systemone-api", "true");
+
 /// Jev 评分端点路径（拼在配置的 base URL 后；仅 HTTP adapter 编译期存在）。
 #[cfg(any(test, feature = "http-adapter"))]
 pub(crate) const SYSTEMONE_PATH: &str = "/v1/systemone";
