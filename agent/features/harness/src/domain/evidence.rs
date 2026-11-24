@@ -183,6 +183,15 @@ impl SignalAccumulator {
     }
 }
 
+type RunAction = (String, String, EvidenceSourceRef);
+type RunSteps = HashMap<(String, String), Vec<RunAction>>;
+type SequenceAccumulator = (
+    usize,
+    std::collections::BTreeSet<String>,
+    EvidenceSourceRef,
+    String,
+);
+
 /// 从事件流聚合一个证据块（纯函数）。
 pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
     let mut signals = Vec::new();
@@ -191,6 +200,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
     let mut fingerprint_counts: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut run_outcomes: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut common_actions: HashMap<(String, String), SignalAccumulator> = HashMap::new();
+    let mut run_steps: RunSteps = HashMap::new();
     let mut sessions: HashMap<String, usize> = HashMap::new();
 
     for event in events {
@@ -221,6 +231,16 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
                         .entry((tool.clone(), fingerprint.clone()))
                         .or_default()
                         .observe(event);
+                }
+                if let Some(source) = EvidenceSourceRef::from_event(event) {
+                    run_steps
+                        .entry((event.session_id.clone(), event.run_id.clone()))
+                        .or_default()
+                        .push((
+                            event.tool_name.clone().unwrap_or_default(),
+                            fingerprint.clone(),
+                            source,
+                        ));
                 }
             }
         } else {
@@ -314,6 +334,46 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
         .collect();
     common.sort_by_key(|signal| std::cmp::Reverse(signal.occurrences));
     signals.extend(common);
+
+    let mut sequences: HashMap<String, SequenceAccumulator> = HashMap::new();
+    for ((session_id, _run_id), actions) in run_steps {
+        if actions.len() < 2 {
+            continue;
+        }
+        let labels: Vec<String> = actions
+            .iter()
+            .map(|(tool, fingerprint, _)| format!("{tool}:{fingerprint}"))
+            .collect();
+        let sequence_key = labels.join(">");
+        let summary = format!("动作序列 {}（{} 步）", labels.join(" → "), labels.len());
+        let entry = sequences.entry(sequence_key.clone()).or_insert_with(|| {
+            (
+                0,
+                std::collections::BTreeSet::new(),
+                actions[0].2.clone(),
+                summary,
+            )
+        });
+        entry.0 += 1;
+        entry.1.insert(session_id);
+    }
+    let mut common_sequences: Vec<EvidenceSignal> = sequences
+        .into_iter()
+        .filter(|(_, (count, sessions, _, _))| *count >= 2 && sessions.len() >= 2)
+        .map(|(key, (count, sessions, source, summary))| EvidenceSignal {
+            kind: SignalKind::CommonAction,
+            signal_id: format!(
+                "common_sequence:{}",
+                key.chars().take(300).collect::<String>()
+            ),
+            summary: format!("{summary} ×{count}（跨 {} 个 session）", sessions.len()),
+            excerpt: Some(key.chars().take(EVIDENCE_EXCERPT_BOUND).collect()),
+            occurrences: count,
+            sources: vec![source],
+        })
+        .collect();
+    common_sequences.sort_by_key(|signal| std::cmp::Reverse(signal.occurrences));
+    signals.extend(common_sequences);
 
     if !run_outcomes.is_empty() {
         let mut entries: Vec<_> = run_outcomes.into_iter().collect();

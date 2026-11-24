@@ -111,6 +111,36 @@ fn common_action_requires_cross_session_successes() {
         .any(|signal| signal.kind == SignalKind::CommonAction));
 }
 
+/// 跨 session 的相同多步骤序列聚合为 common_action。
+#[test]
+fn common_sequence_requires_cross_session_repetition() {
+    let event = |session: &str, run: &str, step: &str, tool: &str, fp: &str| SessionEventRecord {
+        session_id: session.into(),
+        run_id: run.into(),
+        step_id: step.into(),
+        tool_name: Some(tool.into()),
+        is_error: false,
+        error_text: None,
+        result_chars: 10,
+        call_fingerprint: Some(fp.into()),
+    };
+    let bundle = aggregate_evidence(&[
+        event("s1", "r1", "step-1", "Grep", "a"),
+        event("s1", "r1", "step-2", "Read", "b"),
+        event("s2", "r2", "step-1", "Grep", "a"),
+        event("s2", "r2", "step-2", "Read", "b"),
+    ]);
+    let sequence = bundle
+        .signals
+        .iter()
+        .find(|signal| signal.signal_id.starts_with("common_sequence:"))
+        .expect("跨 session 相同序列必须产生 common_sequence");
+    assert!(sequence.summary.contains("动作序列"));
+    assert!(sequence.summary.contains("Grep"));
+    assert!(sequence.summary.contains("Read"));
+    assert!(sequence.summary.contains("×2"));
+}
+
 /// 超长结果按工具聚合计数。
 #[test]
 fn oversized_results_counted_by_tool() {

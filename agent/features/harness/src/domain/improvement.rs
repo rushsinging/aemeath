@@ -1267,6 +1267,12 @@ pub async fn generate_skill_from_common_actions(
         .filter(|signal| signal.kind == crate::domain::evidence::SignalKind::CommonAction)
         .cloned()
         .collect();
+    if actions
+        .iter()
+        .any(|signal| signal.signal_id.starts_with("common_sequence:"))
+    {
+        actions.retain(|signal| signal.signal_id.starts_with("common_sequence:"));
+    }
     actions.sort_by_key(|signal| std::cmp::Reverse(signal.occurrences));
     actions.truncate(6);
     if actions.is_empty() {
@@ -1294,9 +1300,16 @@ pub async fn generate_skill_from_common_actions(
         .iter()
         .map(|signal| {
             format!(
-                "- {} | {}",
+                "- {} | {}\n  摘录: {}",
                 signal.signal_id,
-                signal.summary.chars().take(300).collect::<String>()
+                signal.summary.chars().take(300).collect::<String>(),
+                signal
+                    .excerpt
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .take(300)
+                    .collect::<String>()
             )
         })
         .collect::<Vec<_>>()

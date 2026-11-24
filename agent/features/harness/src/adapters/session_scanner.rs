@@ -126,6 +126,7 @@ impl SessionDatasetScanner {
         let Ok(entries) = std::fs::read_dir(dataset_dir.join("members")) else {
             return report;
         };
+        let mut members: Vec<(u64, String, String, serde_json::Value)> = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() || !member_path_is_inside(&dataset_dir.join("members"), &path) {
@@ -139,7 +140,7 @@ impl SessionDatasetScanner {
                 report.skipped_members += 1;
                 continue;
             };
-            let Some(step) = member.get("step") else {
+            let Some(step) = member.get("step").cloned() else {
                 // 非 step 成员（manifest/state/metadata）——不是事件来源
                 continue;
             };
@@ -159,10 +160,7 @@ impl SessionDatasetScanner {
             };
             // cursor 是回读来源的唯一稳定身份；step 本体不一致时视为损坏成员，
             // NEVER 退化成 unknown 去绑定另一条记录。
-            if let Some(body_step_id) = member
-                .pointer("/step/step_id")
-                .and_then(|value| value.as_str())
-            {
+            if let Some(body_step_id) = step.get("step_id").and_then(|value| value.as_str()) {
                 if body_step_id != cursor_step_id {
                     report.skipped_members += 1;
                     continue;
@@ -172,13 +170,22 @@ impl SessionDatasetScanner {
                 report.skipped_members += 1;
                 continue;
             }
-            Self::extract_step_events(
-                session_id,
-                cursor_run_id,
-                cursor_step_id,
+            let revision = step
+                .pointer("/outcome/committed_revision")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default();
+            members.push((
+                revision,
+                cursor_run_id.to_string(),
+                cursor_step_id.to_string(),
                 step,
-                &mut report.events,
-            );
+            ));
+        }
+        // committed_revision 是 session 内稳定的 step 顺序；不能用目录遍历顺序
+        // 推断工作流序列（目录项顺序不稳定）。
+        members.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.2.cmp(&right.2)));
+        for (_, run_id, step_id, step) in members {
+            Self::extract_step_events(session_id, &run_id, &step_id, &step, &mut report.events);
         }
         report
     }
