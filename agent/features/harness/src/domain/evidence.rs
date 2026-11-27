@@ -29,6 +29,10 @@ pub enum SignalKind {
     RunOutcome,
     /// 跨 session 重复出现的成功工具调用，作为新建 skill 的候选证据。
     CommonAction,
+    /// Skill 工具成功加载某个已注册技能；仅证明被采用，不证明任务效果。
+    SkillUsage,
+    /// Skill 使用后的验证结果，用于 Verified / Ineffective 观察闭环。
+    SkillEffect,
 }
 
 impl SignalKind {
@@ -40,6 +44,8 @@ impl SignalKind {
             Self::OversizedResult => "oversized_result",
             Self::RunOutcome => "run_outcome",
             Self::CommonAction => "common_action",
+            Self::SkillUsage => "skill_usage",
+            Self::SkillEffect => "skill_effect",
         }
     }
 
@@ -51,7 +57,9 @@ impl SignalKind {
             Self::OversizedResult => 2,
             Self::RunOutcome => 3,
             Self::CommonAction => 4,
-            Self::CycleObservation => 5,
+            Self::SkillUsage => 5,
+            Self::SkillEffect => 6,
+            Self::CycleObservation => 7,
         }
     }
 }
@@ -192,6 +200,20 @@ type SequenceAccumulator = (
     String,
 );
 
+fn skill_name_from_fingerprint(fingerprint: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(fingerprint).ok()?;
+    let name = value.get("skill")?.as_str()?.trim();
+    if (2..=100).contains(&name.len())
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':'))
+    {
+        Some(name.to_string())
+    } else {
+        None
+    }
+}
+
 /// 从事件流聚合一个证据块（纯函数）。
 pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
     let mut signals = Vec::new();
@@ -200,6 +222,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
     let mut fingerprint_counts: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut run_outcomes: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut common_actions: HashMap<(String, String), SignalAccumulator> = HashMap::new();
+    let mut skill_usages: HashMap<String, SignalAccumulator> = HashMap::new();
     let mut run_steps: RunSteps = HashMap::new();
     let mut sessions: HashMap<String, usize> = HashMap::new();
 
@@ -241,6 +264,15 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
                             fingerprint.clone(),
                             source,
                         ));
+                }
+            }
+            if tool == "Skill" && !event.is_error {
+                if let Some(skill_name) = event
+                    .call_fingerprint
+                    .as_deref()
+                    .and_then(skill_name_from_fingerprint)
+                {
+                    skill_usages.entry(skill_name).or_default().observe(event);
                 }
             }
         } else {
@@ -374,6 +406,20 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
         .collect();
     common_sequences.sort_by_key(|signal| std::cmp::Reverse(signal.occurrences));
     signals.extend(common_sequences);
+
+    let mut usage: Vec<_> = skill_usages
+        .into_iter()
+        .map(|(skill_name, entry)| EvidenceSignal {
+            kind: SignalKind::SkillUsage,
+            signal_id: format!("skill_usage:{skill_name}"),
+            summary: format!("Skill {skill_name} 成功加载 ×{}（仅证明采用）", entry.count),
+            excerpt: None,
+            occurrences: entry.count,
+            sources: entry.sources,
+        })
+        .collect();
+    usage.sort_by(|left, right| left.signal_id.cmp(&right.signal_id));
+    signals.extend(usage);
 
     if !run_outcomes.is_empty() {
         let mut entries: Vec<_> = run_outcomes.into_iter().collect();

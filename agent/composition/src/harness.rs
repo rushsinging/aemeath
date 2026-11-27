@@ -728,6 +728,33 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
         harness::plan_evidence_stream(entries, &state, &session_runs, params)
     }
 
+    fn task_traces(
+        &self,
+        block: &harness::EvidenceBlockPlan,
+    ) -> Vec<harness::domain::task_trace::TaskTrace> {
+        let mut traces = Vec::new();
+        let mut by_session: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+            Default::default();
+        for run_ref in &block.runs {
+            by_session
+                .entry(run_ref.session_key.as_str())
+                .or_default()
+                .insert(run_ref.run_id.as_str());
+        }
+        for (session_key, run_ids) in by_session {
+            let dataset_dir = self.datasets_root.join(session_key);
+            traces.extend(
+                harness::adapters::session_scanner::SessionDatasetScanner::task_traces(
+                    &dataset_dir,
+                    session_key,
+                )
+                .into_iter()
+                .filter(|trace| run_ids.contains(trace.run_id.as_str())),
+            );
+        }
+        traces
+    }
+
     fn block_evidence(&self, block: &harness::EvidenceBlockPlan) -> harness::EvidenceBundle {
         let mut events = Vec::new();
         // 按 session 分组扫描，块内过滤 run

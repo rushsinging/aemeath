@@ -208,3 +208,45 @@ fn builtin_component_paths_split_agents_knowledge_from_aemeath_home() {
         "全局 overlay 属于用户通用知识"
     );
 }
+
+#[test]
+fn production_evidence_stream_forwards_task_traces() {
+    use harness::domain::stream_port::EvidenceStreamPort;
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = root.path().join("0123456789abcdef/scoped.dataset");
+    let members = dataset.join("members");
+    std::fs::create_dir_all(&members).unwrap();
+    let member = serde_json::json!({
+        "cursor": {"run_id": "run-1", "step_id": "step-1"},
+        "step": {
+            "step_id": "step-1",
+            "accepted_input": {"messages": [{"role": "user", "content": [
+                {"type": "text", "text": "修复并验证缺陷"}
+            ]}]},
+            "outcome": {
+                "committed_revision": 1,
+                "messages": [
+                    {"role": "assistant", "content": [{"type": "tool_use", "id": "call-1",
+                        "name": "Edit", "input": {"file_path": "src/lib.rs"}}]},
+                    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call-1",
+                        "content": {"action": "edited"}, "text": "edited"}]}
+                ]
+            }
+        }
+    });
+    std::fs::write(members.join("m.json"), member.to_string()).unwrap();
+    let stream = super::ProductionEvidenceStream {
+        datasets_root: root.path().to_path_buf(),
+        harness_dir: root.path().join("harness"),
+    };
+    let block = harness::domain::stream::EvidenceBlockPlan {
+        runs: vec![harness::domain::stream::RunRef {
+            session_key: "0123456789abcdef/scoped.dataset".into(),
+            run_id: "run-1".into(),
+        }],
+    };
+    let traces = stream.task_traces(&block);
+    assert_eq!(traces.len(), 1);
+    assert_eq!(traces[0].user_goal, "修复并验证缺陷");
+    assert_eq!(traces[0].changed_files, vec!["src/lib.rs"]);
+}

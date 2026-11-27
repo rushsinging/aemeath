@@ -20,6 +20,12 @@ pub trait EvidenceStreamPort: Send + Sync {
     /// 扫描单块 sessions 并聚合证据（扫描失败降级空证据 NEVER 阻断）。
     fn block_evidence(&self, block: &EvidenceBlockPlan) -> EvidenceBundle;
 
+    /// 读取本块对应的任务轨迹；默认不可用（旧 fake 保持空轨迹）。
+    fn task_traces(&self, block: &EvidenceBlockPlan) -> Vec<crate::domain::task_trace::TaskTrace> {
+        let _ = block;
+        Vec::new()
+    }
+
     /// 回读一个来源 step 的有界 session 上下文；默认不可用（测试桩可注入）。
     fn read_context(&self, source: &EvidenceSourceRef) -> Option<SessionContextExcerpt> {
         let _ = source;
@@ -58,6 +64,8 @@ pub struct FakeEvidenceStream {
     pub advanced: Mutex<Vec<String>>,
     /// 每块返回的固定证据（测试注入；空 = 无证据）。
     pub evidence: Mutex<EvidenceBundle>,
+    /// 可注入的任务轨迹（测试接线与候选筛选）。
+    pub traces: Mutex<Vec<crate::domain::task_trace::TaskTrace>>,
     /// 可注入的来源上下文（测试注入）。
     pub contexts: Mutex<Vec<SessionContextExcerpt>>,
 }
@@ -68,6 +76,7 @@ impl Default for FakeEvidenceStream {
             plans: Mutex::new(Vec::new()),
             advanced: Mutex::new(Vec::new()),
             evidence: Mutex::new(EvidenceBundle::default()),
+            traces: Mutex::new(Vec::new()),
             contexts: Mutex::new(Vec::new()),
         }
     }
@@ -80,6 +89,10 @@ impl EvidenceStreamPort for FakeEvidenceStream {
 
     fn block_evidence(&self, _block: &EvidenceBlockPlan) -> EvidenceBundle {
         self.evidence.lock().expect("evidence lock").clone()
+    }
+
+    fn task_traces(&self, _block: &EvidenceBlockPlan) -> Vec<crate::domain::task_trace::TaskTrace> {
+        self.traces.lock().expect("traces lock").clone()
     }
 
     fn read_context(&self, source: &EvidenceSourceRef) -> Option<SessionContextExcerpt> {

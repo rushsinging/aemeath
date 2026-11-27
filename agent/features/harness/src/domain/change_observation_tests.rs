@@ -313,3 +313,225 @@ fn rollback_supersedes_component_lesson() {
         crate::domain::lesson::LessonStatus::Superseded
     );
 }
+
+#[test]
+fn new_skill_without_usage_evidence_is_not_kept_or_rolled_back() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let observation = ChangeObservation::new_applied(
+        "skill/issue-to-pr".to_string(),
+        "cycle-new".to_string(),
+        body_hash(""),
+        body_hash("new skill"),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    store.append(&observation).expect("append");
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::RetryPattern,
+            signal_id: "retry_pattern:Bash:cargo-test".into(),
+            summary: "unrelated".into(),
+            excerpt: None,
+            occurrences: 1,
+            sources: Vec::new(),
+        }],
+    };
+    evaluate_and_rollback(&store, &mut registry, &versions, &evidence, None);
+    let saved = store.load().expect("load");
+    assert_eq!(saved[0].status, ObservationStatus::Observing);
+    assert_eq!(saved[0].observation_cycles, 0);
+}
+
+#[test]
+fn new_skill_load_waits_for_effect_verification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let observation = ChangeObservation::new_applied(
+        "skill/issue-to-pr".to_string(),
+        "cycle-new".to_string(),
+        body_hash(""),
+        body_hash("new skill"),
+        vec!["skill_usage:issue-to-pr".into()],
+        Vec::new(),
+        vec!["run-before".into()],
+    );
+    store.append(&observation).expect("append");
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::SkillUsage,
+            signal_id: "skill_usage:issue-to-pr".into(),
+            summary: "Skill issue-to-pr 成功加载 ×1（仅证明采用）".into(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project/session.dataset".into(),
+                run_id: "run-after".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    let summaries = evaluate_and_rollback(&store, &mut registry, &versions, &evidence, None);
+    let saved = store.load().expect("load");
+    assert_eq!(saved[0].status, ObservationStatus::Observing);
+    assert!(summaries.join("\n").contains("等待使用效果验证"));
+}
+
+#[test]
+fn new_skill_without_usage_remains_observing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let observation = ChangeObservation::new_applied(
+        "skill/issue-to-pr".to_string(),
+        "cycle-new".to_string(),
+        body_hash(""),
+        body_hash("new skill"),
+        vec!["skill_usage:issue-to-pr".into()],
+        Vec::new(),
+        vec!["run-before".into()],
+    );
+    store.append(&observation).expect("append");
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    evaluate_and_rollback(
+        &store,
+        &mut registry,
+        &versions,
+        &EvidenceBundle::default(),
+        None,
+    );
+    assert_eq!(
+        store.load().unwrap()[0].status,
+        ObservationStatus::Observing
+    );
+}
+
+#[test]
+fn skill_effect_verified_is_distinct_from_load_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let observation = ChangeObservation::new_applied(
+        "skill/issue-to-pr".into(),
+        "cycle-new".into(),
+        body_hash(""),
+        body_hash("new"),
+        vec!["skill_usage:issue-to-pr".into()],
+        Vec::new(),
+        vec!["run-before".into()],
+    );
+    store.append(&observation).expect("append");
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::SkillEffect,
+            signal_id: "skill_effect:issue-to-pr:verified".into(),
+            summary: "Skill issue-to-pr 使用后验证通过".into(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project/session.dataset".into(),
+                run_id: "run-after".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    evaluate_and_rollback(&store, &mut registry, &versions, &evidence, None);
+    assert_eq!(store.load().unwrap()[0].status, ObservationStatus::Verified);
+}
+
+#[test]
+fn repeated_ineffective_skill_rolls_back_to_snapshot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let mut observation = ChangeObservation::new_applied(
+        "skill/issue-to-pr".into(),
+        "cycle-new".into(),
+        body_hash(""),
+        body_hash("new"),
+        vec!["skill_usage:issue-to-pr".into()],
+        Vec::new(),
+        vec!["run-before".into()],
+    );
+    observation.status = ObservationStatus::Ineffective;
+    store.append(&observation).expect("append");
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    let id = crate::domain::component::ComponentId {
+        kind: crate::domain::component::ComponentKind::Skill,
+        name: crate::domain::component::ComponentName::new("issue-to-pr"),
+    };
+    versions
+        .capture(&registry, &id, "cycle-new", "upsert")
+        .expect("snapshot");
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::SkillEffect,
+            signal_id: "skill_effect:issue-to-pr:ineffective".into(),
+            summary: "Skill issue-to-pr 使用后验证失败".into(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project/session.dataset".into(),
+                run_id: "run-after".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    evaluate_and_rollback(&store, &mut registry, &versions, &evidence, None);
+    assert_eq!(
+        store.load().unwrap()[0].status,
+        ObservationStatus::RolledBack
+    );
+}
+
+#[test]
+fn skill_effect_ignores_tests_before_load() {
+    let trace = crate::domain::task_trace::TaskTrace {
+        session_id: "project/session.dataset".into(),
+        run_id: "run-1".into(),
+        user_goal: "验证".into(),
+        changed_files: Vec::new(),
+        actions: vec![
+            crate::domain::task_trace::TaskAction {
+                kind: crate::domain::task_trace::TaskActionKind::Test,
+                tool: "Bash".into(),
+                command: Some("cargo test".into()),
+                success: Some(false),
+                target_path: None,
+                excerpt: None,
+            },
+            crate::domain::task_trace::TaskAction {
+                kind: crate::domain::task_trace::TaskActionKind::Other,
+                tool: "Skill".into(),
+                command: Some(r#"{"skill":"issue-to-pr"}"#.into()),
+                success: None,
+                target_path: None,
+                excerpt: None,
+            },
+            crate::domain::task_trace::TaskAction {
+                kind: crate::domain::task_trace::TaskActionKind::Test,
+                tool: "Bash".into(),
+                command: Some("cargo test".into()),
+                success: Some(true),
+                target_path: None,
+                excerpt: None,
+            },
+        ],
+        verification: Vec::new(),
+        outcome: "Completed".into(),
+        sources: Vec::new(),
+    };
+    let signals = crate::domain::task_trace::skill_effect_signals(&[trace]);
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].signal_id, "skill_effect:issue-to-pr:verified");
+}

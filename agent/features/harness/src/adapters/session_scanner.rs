@@ -11,6 +11,7 @@ use crate::constants::{
 use crate::domain::evidence::{
     truncate_with_marker, EvidenceSourceRef, SessionContextExcerpt, SessionEventRecord,
 };
+use crate::domain::task_trace::{TaskAction, TaskActionKind, TaskTrace, VerificationFact};
 
 use serde::Deserialize;
 use std::io::BufReader;
@@ -273,6 +274,110 @@ impl SessionDatasetScanner {
             });
         }
     }
+    /// 把 dataset 还原成按 run 聚合的任务轨迹。
+    /// 读取目标来自 accepted_input，动作与结果来自 outcome.messages，
+    /// 顺序由 committed_revision 决定，不用目录遍历顺序。
+    pub fn task_traces(dataset_dir: &std::path::Path, session_id: &str) -> Vec<TaskTrace> {
+        let Ok(entries) = std::fs::read_dir(dataset_dir.join("members")) else {
+            return Vec::new();
+        };
+        let mut members: Vec<(u64, String, String, serde_json::Value)> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || !member_path_is_inside(&dataset_dir.join("members"), &path) {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(member) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                continue;
+            };
+            let Some(run_id) = member
+                .pointer("/cursor/run_id")
+                .and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            let Some(step_id) = member
+                .pointer("/cursor/step_id")
+                .and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            let Some(step) = member.get("step").cloned() else {
+                continue;
+            };
+            let revision = step
+                .pointer("/outcome/committed_revision")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default();
+            members.push((revision, run_id.to_string(), step_id.to_string(), step));
+        }
+        members.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.2.cmp(&right.2)));
+        let mut traces: Vec<TaskTrace> = Vec::new();
+        for (_, run_id, step_id, step) in members {
+            let goal = accepted_goal(&step);
+            let actions = outcome_actions(&step);
+            let outcome = step
+                .pointer("/outcome/finalize_cause")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            let verification = actions
+                .iter()
+                .filter(|action| action.kind == TaskActionKind::Test)
+                .map(|action| VerificationFact {
+                    command: action.command.clone().unwrap_or_default(),
+                    success: action.success,
+                    excerpt: action.excerpt.clone(),
+                })
+                .collect::<Vec<_>>();
+            let changed_files = actions
+                .iter()
+                .filter(|action| {
+                    matches!(action.kind, TaskActionKind::Edit | TaskActionKind::Write)
+                })
+                .filter_map(|action| action.target_path.clone())
+                .collect::<Vec<_>>();
+            let source = EvidenceSourceRef {
+                session_id: session_id.to_string(),
+                run_id: run_id.clone(),
+                step_id: step_id.clone(),
+            };
+            if let Some(trace) = traces.last_mut() {
+                if trace.run_id == run_id {
+                    if trace.user_goal.is_empty() {
+                        trace.user_goal = goal;
+                    }
+                    trace.changed_files.extend(changed_files);
+                    trace.actions.extend(actions);
+                    trace.verification.extend(verification);
+                    if !outcome.is_empty() {
+                        trace.outcome = outcome;
+                    }
+                    trace.sources.push(source);
+                    continue;
+                }
+            }
+            traces.push(TaskTrace {
+                session_id: session_id.to_string(),
+                run_id,
+                user_goal: goal,
+                changed_files,
+                actions,
+                verification,
+                outcome,
+                sources: vec![source],
+            });
+        }
+        for trace in &mut traces {
+            trace.changed_files.sort();
+            trace.changed_files.dedup();
+        }
+        traces
+    }
+
     /// 在 datasets root 内安全定位 session；session id 只支持项目布局
     /// `<project>/<session>.dataset`，全部组件 MUST 是 Normal，canonicalize
     /// 后仍在 root 内（防逃逸）。顶层 legacy key NEVER 进入生产回读。
@@ -393,6 +498,121 @@ impl SessionDatasetScanner {
             text,
         })
     }
+}
+
+fn accepted_goal(step: &serde_json::Value) -> String {
+    let Some(messages) = step
+        .pointer("/accepted_input/messages")
+        .and_then(|value| value.as_array())
+    else {
+        return String::new();
+    };
+    let mut parts = Vec::new();
+    for message in messages {
+        let Some(blocks) = message.get("content").and_then(|value| value.as_array()) else {
+            continue;
+        };
+        for block in blocks {
+            if block.get("type").and_then(|value| value.as_str()) != Some("text") {
+                continue;
+            }
+            let text = block
+                .get("text")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            if !text.trim().is_empty() {
+                parts.push(text.chars().take(800).collect::<String>());
+            }
+        }
+    }
+    parts.join("\n")
+}
+
+fn outcome_actions(step: &serde_json::Value) -> Vec<TaskAction> {
+    let Some(messages) = step
+        .pointer("/outcome/messages")
+        .and_then(|value| value.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut inputs: std::collections::HashMap<String, (String, Option<String>, Option<String>)> =
+        std::collections::HashMap::new();
+    let mut actions = Vec::new();
+    for message in messages {
+        let Some(blocks) = message.get("content").and_then(|value| value.as_array()) else {
+            continue;
+        };
+        for block in blocks {
+            match block.get("type").and_then(|value| value.as_str()) {
+                Some("tool_use") => {
+                    let id = block
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    let tool = block
+                        .get("name")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let input = block.get("input");
+                    let command = input
+                        .and_then(|value| value.get("command"))
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.chars().take(600).collect::<String>())
+                        .or_else(|| {
+                            input.map(|value| value.to_string().chars().take(400).collect())
+                        });
+                    let file_path = input
+                        .and_then(|value| value.get("file_path"))
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.chars().take(300).collect::<String>());
+                    inputs.insert(id.to_string(), (tool, command, file_path));
+                }
+                Some("tool_result") => {
+                    let call_id = block
+                        .get("tool_use_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    let (tool, command, file_path) = inputs
+                        .get(call_id)
+                        .cloned()
+                        .unwrap_or_else(|| ("unknown".to_string(), None, None));
+                    let is_error = block
+                        .get("is_error")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
+                    let exit_code = block
+                        .pointer("/content/exit_code")
+                        .and_then(|value| value.as_i64());
+                    let success = if is_error || exit_code.is_some_and(|code| code != 0) {
+                        Some(false)
+                    } else {
+                        exit_code.map(|_| true)
+                    };
+                    let excerpt = block
+                        .get("text")
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.chars().take(240).collect::<String>())
+                        .or_else(|| {
+                            block
+                                .get("content")
+                                .map(|value| value.to_string().chars().take(240).collect())
+                        });
+                    let command_for_kind = command.as_deref().unwrap_or("");
+                    actions.push(TaskAction {
+                        kind: TaskActionKind::from_tool_command(&tool, command_for_kind),
+                        tool,
+                        command,
+                        success,
+                        target_path: file_path,
+                        excerpt,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    actions
 }
 
 /// 追加 accepted_input 中的用户意图摘要。

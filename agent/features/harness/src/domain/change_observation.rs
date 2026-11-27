@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 #[serde(rename_all = "snake_case")]
 pub enum ObservationStatus {
     Observing,
+    /// 已验证使用后的目标结果；仅加载不等于 Verified。
+    Verified,
+    /// 使用后目标验证失败；可进入修订，连续失败才回滚。
+    Ineffective,
     Kept,
     RolledBack,
     /// 被同一组件的后续 RSI/Compose 写入覆盖。
@@ -157,7 +161,12 @@ impl ChangeObservationStore {
         Ok(self
             .load()?
             .into_iter()
-            .filter(|value| value.status == ObservationStatus::Observing)
+            .filter(|value| {
+                matches!(
+                    value.status,
+                    ObservationStatus::Observing | ObservationStatus::Ineffective
+                )
+            })
             .collect())
     }
 
@@ -171,7 +180,12 @@ impl ChangeObservationStore {
         let reason = reason.into();
         let mut count = 0;
         for value in values.iter_mut() {
-            if value.component == component && value.status == ObservationStatus::Observing {
+            if value.component == component
+                && matches!(
+                    value.status,
+                    ObservationStatus::Observing | ObservationStatus::Ineffective
+                )
+            {
                 value.status = ObservationStatus::Superseded;
                 value.last_evaluated_at_secs = Some(now_secs());
                 value.rollback_reason = Some(reason.clone());
@@ -290,6 +304,65 @@ fn target_reappeared(observation: &ChangeObservation, evidence: &EvidenceBundle)
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkillObservationEvidence {
+    LoadedOnly,
+    Verified,
+    Ineffective,
+}
+
+fn skill_usage_observation(
+    observation: &ChangeObservation,
+    evidence: &EvidenceBundle,
+) -> Option<SkillObservationEvidence> {
+    if observation.target_signal_ids.is_empty()
+        || !observation
+            .target_signal_ids
+            .iter()
+            .all(|signal| signal.starts_with("skill_usage:"))
+    {
+        return None;
+    }
+    let skill_name = observation.target_signal_ids[0].trim_start_matches("skill_usage:");
+    if evidence
+        .signals
+        .iter()
+        .any(|signal| signal.signal_id == format!("skill_effect:{skill_name}:ineffective"))
+    {
+        return Some(SkillObservationEvidence::Ineffective);
+    }
+    if evidence
+        .signals
+        .iter()
+        .any(|signal| signal.signal_id == format!("skill_effect:{skill_name}:verified"))
+    {
+        return Some(SkillObservationEvidence::Verified);
+    }
+    if target_reappeared(observation, evidence) {
+        Some(SkillObservationEvidence::LoadedOnly)
+    } else {
+        None
+    }
+}
+
+fn rollback_repeated_ineffective(
+    observation: &mut ChangeObservation,
+    registry: &mut dyn ComponentRegistry,
+    version_store: &ComponentVersionStore,
+) -> Option<String> {
+    let id = crate::parse_component_id(&observation.component)?;
+    let snapshot = version_store
+        .load(&id, Some(&observation.snapshot_cycle))
+        .ok()?;
+    rollback_component(registry, &id, &snapshot).ok()?;
+    observation.status = ObservationStatus::RolledBack;
+    observation.rollback_reason = Some("连续使用后验证失败".to_string());
+    Some(format!(
+        "变更观察：{} 连续使用后验证失败，已自动回滚",
+        observation.component
+    ))
+}
+
 /// 评估并回滚；返回可读摘要。失败只返回错误摘要，不阻断主周期。
 pub fn evaluate_and_rollback(
     store: &ChangeObservationStore,
@@ -303,14 +376,60 @@ pub fn evaluate_and_rollback(
         Err(error) => return vec![format!("变更观察读取失败（跳过）：{}", error.message())],
     };
     let mut summaries = Vec::new();
-    for value in values
-        .iter_mut()
-        .filter(|value| value.status == ObservationStatus::Observing)
-    {
+    for value in values.iter_mut().filter(|value| {
+        matches!(
+            value.status,
+            ObservationStatus::Observing | ObservationStatus::Ineffective
+        )
+    }) {
+        if value.target_signal_hashes.is_empty() && value.target_signal_ids.is_empty() {
+            // 新建 skill 的 trace 记录创建来源，而不是“应消失的目标信号”。
+            // 没有 skill 使用/效果证据前只能审计，不能猜测性 keep/rollback。
+            continue;
+        }
         value.last_evaluated_at_secs = Some(now_secs());
         value.observation_cycles = value.observation_cycles.saturating_add(1);
         let fresh = evidence_from_new_runs(value, evidence);
         let evidence = &fresh;
+        if let Some(effect) = skill_usage_observation(value, evidence) {
+            match effect {
+                SkillObservationEvidence::Verified => {
+                    value.status = ObservationStatus::Verified;
+                    summaries.push(format!(
+                        "变更观察：{} 使用后验证通过，已 Verified",
+                        value.component
+                    ));
+                }
+                SkillObservationEvidence::Ineffective
+                    if value.status == ObservationStatus::Ineffective =>
+                {
+                    if let Some(summary) =
+                        rollback_repeated_ineffective(value, registry, version_store)
+                    {
+                        if let Some(store) = lesson_store {
+                            if let Some(id) = crate::parse_component_id(&value.component) {
+                                let _ = store.retire_for_component(&id);
+                            }
+                        }
+                        summaries.push(summary);
+                    }
+                }
+                SkillObservationEvidence::Ineffective => {
+                    value.status = ObservationStatus::Ineffective;
+                    summaries.push(format!(
+                        "变更观察：{} 使用后验证失败，待修订",
+                        value.component
+                    ));
+                }
+                SkillObservationEvidence::LoadedOnly => {
+                    summaries.push(format!(
+                        "变更观察：{} 已加载，等待使用效果验证",
+                        value.component
+                    ));
+                }
+            }
+            continue;
+        }
         if target_reappeared(value, evidence) {
             let Some(id) = crate::parse_component_id(&value.component) else {
                 value.status = ObservationStatus::Stale;
@@ -466,14 +585,60 @@ pub async fn evaluate_and_rollback_with_llm(
         Err(error) => return vec![format!("变更观察读取失败（跳过）：{}", error.message())],
     };
     let mut summaries = Vec::new();
-    for value in values
-        .iter_mut()
-        .filter(|value| value.status == ObservationStatus::Observing)
-    {
+    for value in values.iter_mut().filter(|value| {
+        matches!(
+            value.status,
+            ObservationStatus::Observing | ObservationStatus::Ineffective
+        )
+    }) {
+        if value.target_signal_hashes.is_empty() && value.target_signal_ids.is_empty() {
+            // 新建 skill 的 trace 记录创建来源，而不是“应消失的目标信号”。
+            // 没有 skill 使用/效果证据前只能审计，不能猜测性 keep/rollback。
+            continue;
+        }
         value.last_evaluated_at_secs = Some(now_secs());
         value.observation_cycles = value.observation_cycles.saturating_add(1);
         let fresh = evidence_from_new_runs(value, evidence);
         let evidence = &fresh;
+        if let Some(effect) = skill_usage_observation(value, evidence) {
+            match effect {
+                SkillObservationEvidence::Verified => {
+                    value.status = ObservationStatus::Verified;
+                    summaries.push(format!(
+                        "变更观察：{} 使用后验证通过，已 Verified",
+                        value.component
+                    ));
+                }
+                SkillObservationEvidence::Ineffective
+                    if value.status == ObservationStatus::Ineffective =>
+                {
+                    if let Some(summary) =
+                        rollback_repeated_ineffective(value, registry, version_store)
+                    {
+                        if let Some(store) = lesson_store {
+                            if let Some(id) = crate::parse_component_id(&value.component) {
+                                let _ = store.retire_for_component(&id);
+                            }
+                        }
+                        summaries.push(summary);
+                    }
+                }
+                SkillObservationEvidence::Ineffective => {
+                    value.status = ObservationStatus::Ineffective;
+                    summaries.push(format!(
+                        "变更观察：{} 使用后验证失败，待修订",
+                        value.component
+                    ));
+                }
+                SkillObservationEvidence::LoadedOnly => {
+                    summaries.push(format!(
+                        "变更观察：{} 已加载，等待使用效果验证",
+                        value.component
+                    ));
+                }
+            }
+            continue;
+        }
         let target_present = target_reappeared(value, evidence);
         let rollback = if target_present {
             true

@@ -357,26 +357,55 @@ impl RsiTask for HarnessRsiCycleTask {
                 ));
             }
             let mut history = load_signal_history(&self.history_path);
-            let observation_evidence = merged_evidence.clone();
-            // 常见成功动作先走独立的新建 skill 阶段；普通组件路由不消费
-            // common_action，避免把可复用动作误写成 guardrails/guidance。
-            let generated_skill = crate::domain::improvement::generate_skill_from_common_actions(
-                registry,
-                self.llm.as_ref(),
-                &merged_evidence,
-                self.dry_run,
-                &mut preview_lines,
-                self.recorder.as_deref(),
-                self.version_store.as_deref(),
-                &cycle_id,
-            )
-            .await?;
+            let mut observation_evidence = merged_evidence.clone();
+            // 任务轨迹优先；common_action 仅在没有合格任务轨迹时作为 fallback。
+            // common_action 仍从普通组件路由中剔除，避免工具纪律误写。
+            let task_traces = blocks
+                .iter()
+                .flat_map(|block| self.stream_port.task_traces(block))
+                .collect::<Vec<_>>();
+            observation_evidence
+                .signals
+                .extend(crate::domain::task_trace::skill_effect_signals(
+                    &task_traces,
+                ));
+            let generated_skill = if let Some(trace) =
+                crate::domain::skill_synthesis::select_skill_candidate(&task_traces)
+            {
+                crate::domain::skill_synthesis::synthesize_skill_from_trace(
+                    registry,
+                    self.llm.as_ref(),
+                    trace,
+                    self.dry_run,
+                    &mut preview_lines,
+                    self.recorder.as_deref(),
+                    self.version_store.as_deref(),
+                    &cycle_id,
+                )
+                .await?
+            } else {
+                crate::domain::improvement::generate_skill_from_common_actions(
+                    registry,
+                    self.llm.as_ref(),
+                    &merged_evidence,
+                    self.dry_run,
+                    &mut preview_lines,
+                    self.recorder.as_deref(),
+                    self.version_store.as_deref(),
+                    &cycle_id,
+                )
+                .await?
+            };
             let cycle_evidence = crate::domain::evidence::EvidenceBundle {
                 signals: merged_evidence
                     .signals
                     .into_iter()
                     .filter(|signal| {
-                        signal.kind != crate::domain::evidence::SignalKind::CommonAction
+                        !matches!(
+                            signal.kind,
+                            crate::domain::evidence::SignalKind::CommonAction
+                                | crate::domain::evidence::SignalKind::SkillUsage
+                        )
                     })
                     .collect(),
                 sessions_covered: merged_evidence.sessions_covered,
@@ -764,10 +793,6 @@ fn record_change_observations(
         let Ok(snapshot) = version_store.load(&adoption.id, None) else {
             continue;
         };
-        let is_new_component = matches!(
-            &snapshot.payload,
-            crate::domain::versioning::SnapshotContent::Tombstone
-        );
         let before_hash = match &snapshot.payload {
             crate::domain::versioning::SnapshotContent::Existing { raw } => {
                 crate::domain::change_observation::body_hash(raw)
@@ -776,18 +801,18 @@ fn record_change_observations(
                 crate::domain::change_observation::body_hash("")
             }
         };
-        let target_signal_ids: Vec<String> = if is_new_component {
-            // 新建 skill 的目标不是“让 common_action 消失”：同一个可复用
-            // 动作本来就会持续出现。先建立可审计 observation，等技能使用
-            // 信号接入后再定义更精确的保留/回滚条件。
-            Vec::new()
-        } else {
-            adoption
-                .evidence
-                .iter()
-                .map(|binding| binding.signal_id.clone())
-                .collect()
-        };
+        let target_signal_ids: Vec<String> =
+            if adoption.id.kind == crate::domain::component::ComponentKind::Skill {
+                // 新 skill 观察真实加载，而不是要求 common_action 消失。
+                // 后续新 run 出现 skill_usage 才标记已采用；效果另行验证。
+                vec![format!("skill_usage:{}", adoption.id.name.as_str())]
+            } else {
+                adoption
+                    .evidence
+                    .iter()
+                    .map(|binding| binding.signal_id.clone())
+                    .collect()
+            };
         let mut baseline_run_ids = Vec::new();
         for signal in &evidence.signals {
             for source in &signal.sources {
@@ -796,7 +821,7 @@ fn record_change_observations(
                 }
             }
         }
-        if target_signal_ids.is_empty() && !is_new_component {
+        if target_signal_ids.is_empty() {
             continue;
         }
         if let Err(error) =

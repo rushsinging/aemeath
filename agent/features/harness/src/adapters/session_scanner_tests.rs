@@ -471,3 +471,74 @@ fn find_dataset_with_members(root: &std::path::Path, depth: usize) -> Option<std
     }
     None
 }
+
+#[test]
+fn task_trace_keeps_goal_ordered_actions_and_verified_exit_codes() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = root.path().join("sample.dataset");
+    let members = dataset.join("members");
+    std::fs::create_dir_all(&members).expect("members");
+    let step = |step_id: &str, revision: u64, command: &str, exit_code: i64, goal: &str| {
+        serde_json::json!({
+            "cursor": {"run_id": "run-1", "step_id": step_id},
+            "step": {
+                "step_id": step_id,
+                "accepted_input": {"messages": [{"role": "user", "content": [
+                    {"type": "text", "text": goal}
+                ]}]},
+                "outcome": {
+                    "finalize_cause": "Completed",
+                    "committed_revision": revision,
+                    "messages": [
+                        {"role": "assistant", "content": [
+                            {"type": "tool_use", "id": format!("call-{step_id}"), "name": "Bash",
+                             "input": {"command": command, "file_path": "src/lib.rs"}}
+                        ]},
+                        {"role": "user", "content": [
+                            {"type": "tool_result", "tool_use_id": format!("call-{step_id}"),
+                             "content": {"exit_code": exit_code}, "text": "done"}
+                        ]}
+                    ]
+                }
+            }
+        })
+    };
+    std::fs::write(
+        members.join("z.json"),
+        step(
+            "step-1",
+            1,
+            "Path('src/lib.rs').write_text('ok')",
+            0,
+            "修复并验证",
+        )
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        members.join("a.json"),
+        step("step-2", 2, "cargo test -p harness", 0, "").to_string(),
+    )
+    .unwrap();
+    let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
+    assert_eq!(traces.len(), 1);
+    let trace = &traces[0];
+    assert_eq!(trace.user_goal, "修复并验证");
+    assert_eq!(trace.changed_files, vec!["src/lib.rs"]);
+    assert!(trace.candidate_score() >= 8);
+    assert_eq!(trace.verification[0].success, Some(true));
+}
+
+#[test]
+fn task_trace_unknown_tool_result_is_not_success() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = make_dataset(root.path());
+    let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
+    let verification = traces
+        .iter()
+        .flat_map(|trace| trace.verification.iter())
+        .find(|fact| fact.command.contains("cargo test"))
+        .expect("test fact");
+    assert_eq!(verification.success, None);
+    assert!(traces.iter().all(|trace| trace.candidate_score() < 8));
+}

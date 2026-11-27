@@ -408,7 +408,7 @@ pub fn parse_fixed_component_execution(
     parse_first_json_object(response_text, "执行应答")
 }
 
-fn parse_first_json_object<T: serde::de::DeserializeOwned>(
+pub(crate) fn parse_first_json_object<T: serde::de::DeserializeOwned>(
     response_text: &str,
     label: &str,
 ) -> Result<T, HarnessError> {

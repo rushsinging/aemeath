@@ -284,6 +284,7 @@ async fn trigger_runs_cycle_and_writes_component_file() {
                 ],
             }],
         }),
+        traces: std::sync::Mutex::new(Vec::new()),
         contexts: std::sync::Mutex::new(Vec::new()),
     };
     tasks

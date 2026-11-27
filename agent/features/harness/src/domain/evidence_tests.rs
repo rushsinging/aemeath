@@ -320,3 +320,24 @@ fn evidence_signal_sources_default_and_round_trip() {
         serde_json::from_str(&serialized).expect("round-trip");
     assert_eq!(parsed, current);
 }
+
+#[test]
+fn successful_skill_load_emits_usage_signal_but_failed_load_does_not() {
+    let mut loaded = tool_event("Skill", None, 100);
+    loaded.call_fingerprint = Some(r#"{"skill":"issue-to-pr"}"#.into());
+    let mut failed = tool_event("Skill", Some("Skill 不存在"), 50);
+    failed.call_fingerprint = Some(r#"{"skill":"missing-skill"}"#.into());
+    let bundle = aggregate_evidence(&[loaded, failed]);
+    let usage: Vec<_> = bundle
+        .signals
+        .iter()
+        .filter(|signal| signal.kind == SignalKind::SkillUsage)
+        .collect();
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].signal_id, "skill_usage:issue-to-pr");
+    assert_eq!(usage[0].occurrences, 1);
+    assert!(!bundle
+        .signals
+        .iter()
+        .any(|signal| signal.signal_id == "skill_usage:missing-skill"));
+}

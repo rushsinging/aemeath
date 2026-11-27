@@ -733,3 +733,94 @@ async fn global_maintenance_applies_without_review() {
     assert_ne!(body, bloated, "维护应直接写入，不再进入 review");
     assert!(body.contains("读取错误与输出后再重试"));
 }
+
+#[tokio::test]
+async fn two_phase_consumes_task_trace_and_previews_new_skill() {
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> =
+        Box::new(FakeRegistry::with_entries(Vec::new()));
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let lesson_dir = tempfile::tempdir().expect("tempdir");
+    let lesson_store = Arc::new(LessonStore::new(lesson_dir.path().join("library.jsonl")));
+    let stream = FakeEvidenceStream::default();
+    stream.plans.lock().unwrap().push(EvidenceBlockPlan {
+        runs: vec![RunRef {
+            session_key: "project/session.dataset".into(),
+            run_id: "run-1".into(),
+        }],
+    });
+    stream
+        .traces
+        .lock()
+        .unwrap()
+        .push(crate::domain::task_trace::TaskTrace {
+            session_id: "project/session.dataset".into(),
+            run_id: "run-1".into(),
+            user_goal: "修复缺陷并验证".into(),
+            changed_files: vec!["src/lib.rs".into()],
+            actions: vec![
+                crate::domain::task_trace::TaskAction {
+                    kind: crate::domain::task_trace::TaskActionKind::Edit,
+                    tool: "Edit".into(),
+                    command: Some("修改实现".into()),
+                    success: Some(true),
+                    target_path: Some("src/lib.rs".into()),
+                    excerpt: None,
+                },
+                crate::domain::task_trace::TaskAction {
+                    kind: crate::domain::task_trace::TaskActionKind::Test,
+                    tool: "Bash".into(),
+                    command: Some("cargo test -p harness".into()),
+                    success: Some(true),
+                    target_path: None,
+                    excerpt: None,
+                },
+                crate::domain::task_trace::TaskAction {
+                    kind: crate::domain::task_trace::TaskActionKind::Pr,
+                    tool: "Bash".into(),
+                    command: Some("gh pr create".into()),
+                    success: Some(true),
+                    target_path: None,
+                    excerpt: None,
+                },
+            ],
+            verification: vec![crate::domain::task_trace::VerificationFact {
+                command: "cargo test -p harness".into(),
+                success: Some(true),
+                excerpt: None,
+            }],
+            outcome: "Completed".into(),
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project/session.dataset".into(),
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+            }],
+        });
+    let llm = PromptRecordingLlm::new(vec![serde_json::json!({
+        "decision": "create",
+        "name": "trace-delivery",
+        "description": "根据真实任务轨迹交付修复",
+        "when_to_use": ["修复需要验证的缺陷"],
+        "steps": ["确认目标", "修改实现", "运行验证"],
+        "verification": ["cargo test -p harness"],
+        "pitfalls": ["不要把工具返回当作任务成功"],
+        "evidence_refs": ["E0"],
+        "reason": "真实轨迹"
+    })
+    .to_string()]);
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry,
+        llm.clone(),
+        lesson_store,
+        RsiConfig::default(),
+    )
+    .with_dry_run()
+    .with_evidence_stream(Box::new(stream));
+    let outcome = task.run_cycle().await.expect("task trace cycle");
+    assert!(outcome
+        .adopted
+        .iter()
+        .any(|record| record.id.name.as_str() == "trace-delivery"));
+    assert!(outcome.summary.contains("trace-delivery"));
+    assert!(outcome.summary.contains("根据真实任务轨迹交付修复"));
+    assert!(llm.prompts.lock().unwrap()[0].contains("修复缺陷并验证"));
+}
