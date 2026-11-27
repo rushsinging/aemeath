@@ -1,5 +1,7 @@
 //! `aemeath rsi` 子命令入口。
 
+use crate::args;
+
 pub(crate) async fn run_rsi_serve_command() {
     let exit = composition::harness::run_rsi_serve(|sock| {
         println!("rsi serve 监听 {}", sock.display());
@@ -67,6 +69,54 @@ pub(crate) fn run_rsi_history_command(component: Option<&str>) {
 /// `rsi rollback`（#2074）。
 pub(crate) fn run_rsi_rollback_command(component: &str, cycle: Option<&str>) {
     match composition::harness::run_rsi_rollback(component, cycle) {
+        composition::harness::RsiRunExit::Done { summary } => println!("{summary}"),
+        composition::harness::RsiRunExit::Failure { message, exit_code } => {
+            eprintln!("{message}");
+            std::process::exit(exit_code);
+        }
+    }
+}
+
+pub(crate) fn run_rsi_review_command(command: Option<args::RsiReviewCommands>) {
+    match command.unwrap_or(args::RsiReviewCommands::List { json: false }) {
+        args::RsiReviewCommands::List { json } => {
+            print_rsi_exit(composition::harness::run_rsi_review_list(json));
+        }
+        args::RsiReviewCommands::Show { id } => {
+            print_rsi_exit(composition::harness::run_rsi_review_show(&id));
+        }
+        args::RsiReviewCommands::Approve {
+            id,
+            yes,
+            resolve,
+            reason,
+        } => {
+            if !yes {
+                print_rsi_exit(composition::harness::run_rsi_review_show(&id));
+                eprint!("确认写入该候选？[y/N] ");
+                use std::io::Write;
+                let _ = std::io::stderr().flush();
+                let mut answer = String::new();
+                let _ = std::io::stdin().read_line(&mut answer);
+                if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                    println!("已取消");
+                    return;
+                }
+            }
+            print_rsi_exit(composition::harness::run_rsi_review_approve(
+                &id,
+                resolve.as_deref(),
+                reason.as_deref(),
+            ));
+        }
+        args::RsiReviewCommands::Reject { id, reason } => {
+            print_rsi_exit(composition::harness::run_rsi_review_reject(&id, &reason));
+        }
+    }
+}
+
+fn print_rsi_exit(exit: composition::harness::RsiRunExit) {
+    match exit {
         composition::harness::RsiRunExit::Done { summary } => println!("{summary}"),
         composition::harness::RsiRunExit::Failure { message, exit_code } => {
             eprintln!("{message}");

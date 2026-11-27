@@ -1,5 +1,7 @@
 //! Harness 组件树领域模型。
 
+pub mod candidate;
+pub mod change_observation;
 pub mod changeset;
 #[cfg(test)]
 mod changeset_tests;
@@ -28,12 +30,18 @@ pub mod maintenance;
 pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
+pub(crate) mod redaction;
+#[cfg(test)]
+mod redaction_tests;
 pub mod routing;
 #[cfg(test)]
 mod routing_tests;
 pub mod scope_dedup;
 #[cfg(test)]
 mod scope_dedup_tests;
+pub mod skill_synthesis;
+#[cfg(test)]
+mod skill_synthesis_tests;
 pub mod stream;
 pub mod stream_port;
 #[cfg(test)]
@@ -42,6 +50,7 @@ pub mod strength;
 pub mod task;
 #[cfg(test)]
 mod task_tests;
+pub mod task_trace;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]

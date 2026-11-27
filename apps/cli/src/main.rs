@@ -101,6 +101,9 @@ async fn main() {
             args::RsiCommands::Rollback { component, cycle } => {
                 subcommand::rsi_command::run_rsi_rollback_command(&component, cycle.as_deref());
             }
+            args::RsiCommands::Review { command } => {
+                subcommand::rsi_command::run_rsi_review_command(command);
+            }
         },
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());

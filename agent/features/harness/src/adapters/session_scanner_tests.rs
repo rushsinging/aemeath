@@ -471,3 +471,139 @@ fn find_dataset_with_members(root: &std::path::Path, depth: usize) -> Option<std
     }
     None
 }
+
+#[test]
+fn task_trace_keeps_goal_ordered_actions_and_verified_exit_codes() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = root.path().join("sample.dataset");
+    let members = dataset.join("members");
+    std::fs::create_dir_all(&members).expect("members");
+    let step = |step_id: &str, revision: u64, command: &str, exit_code: i64, goal: &str| {
+        serde_json::json!({
+            "cursor": {"run_id": "run-1", "step_id": step_id},
+            "step": {
+                "step_id": step_id,
+                "accepted_input": {"messages": [{"role": "user", "content": [
+                    {"type": "text", "text": goal}
+                ]}]},
+                "outcome": {
+                    "finalize_cause": "Completed",
+                    "committed_revision": revision,
+                    "messages": [
+                        {"role": "assistant", "content": [
+                            {"type": "tool_use", "id": format!("call-{step_id}"), "name": "Bash",
+                             "input": {"command": command, "file_path": "src/lib.rs"}}
+                        ]},
+                        {"role": "user", "content": [
+                            {"type": "tool_result", "tool_use_id": format!("call-{step_id}"),
+                             "content": {"exit_code": exit_code}, "text": "done"}
+                        ]}
+                    ]
+                }
+            }
+        })
+    };
+    std::fs::write(
+        members.join("z.json"),
+        step(
+            "step-1",
+            1,
+            "Path('src/lib.rs').write_text('ok')",
+            0,
+            "修复并验证",
+        )
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        members.join("a.json"),
+        step("step-2", 2, "cargo test -p harness", 0, "").to_string(),
+    )
+    .unwrap();
+    let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
+    assert_eq!(traces.len(), 1);
+    let trace = &traces[0];
+    assert_eq!(trace.user_goal, "修复并验证");
+    assert_eq!(trace.changed_files, vec!["src/lib.rs"]);
+    assert!(trace.candidate_score() >= 8);
+    assert_eq!(trace.verification[0].success, Some(true));
+}
+
+#[test]
+fn task_trace_uses_test_output_when_exit_code_missing() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = make_dataset(root.path());
+    let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
+    let verification = traces
+        .iter()
+        .flat_map(|trace| trace.verification.iter())
+        .find(|fact| fact.command.contains("cargo test"))
+        .expect("test fact");
+    assert_eq!(verification.success, Some(true));
+    assert!(traces.iter().all(|trace| trace.candidate_score() < 8));
+}
+
+#[test]
+fn task_trace_splits_distinct_user_goals_in_same_run() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = root.path().join("sample.dataset");
+    let members = dataset.join("members");
+    std::fs::create_dir_all(&members).unwrap();
+    for (index, goal) in ["修复第一个任务", "修复第二个任务"].iter().enumerate() {
+        let step_id = format!("step-{index}");
+        let member = serde_json::json!({
+            "cursor": {"run_id": "run-1", "step_id": step_id},
+            "step": {
+                "step_id": step_id,
+                "accepted_input": {"messages": [{"role": "user", "content": [{"type": "text", "text": goal}]}]},
+                "outcome": {
+                    "committed_revision": index + 1,
+                    "messages": [
+                        {"role": "assistant", "content": [{"type": "tool_use", "id": format!("call-{index}"), "name": "Edit", "input": {"file_path": format!("src/{index}.rs")}}]},
+                        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": format!("call-{index}"), "content": {"action": "edited"}}]}
+                    ]
+                }
+            }
+        });
+        std::fs::write(members.join(format!("{index}.json")), member.to_string()).unwrap();
+    }
+    let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
+    assert_eq!(traces.len(), 2);
+    assert_eq!(traces[0].user_goal, "修复第一个任务");
+    assert_eq!(traces[1].user_goal, "修复第二个任务");
+    assert_ne!(traces[0].trace_id(), traces[1].trace_id());
+}
+
+#[test]
+fn verification_success_requires_test_output_or_exit_code() {
+    assert_eq!(
+        crate::adapters::session_scanner::verification_success(
+            "Bash",
+            "cargo test",
+            false,
+            None,
+            "done"
+        ),
+        None
+    );
+    assert_eq!(
+        crate::adapters::session_scanner::verification_success(
+            "Bash",
+            "cargo test",
+            false,
+            None,
+            "test result: ok. 251 passed"
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        crate::adapters::session_scanner::verification_success(
+            "Bash",
+            "cargo test",
+            false,
+            Some(0),
+            "test result: FAILED"
+        ),
+        Some(false)
+    );
+}

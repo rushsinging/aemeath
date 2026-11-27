@@ -422,6 +422,49 @@ pub enum RsiCommands {
         #[arg(long)]
         cycle: Option<String>,
     },
+    /// 查看、确认或拒绝待审经验候选
+    Review {
+        #[command(subcommand)]
+        command: Option<RsiReviewCommands>,
+    },
+}
+
+/// `aemeath rsi review` 子命令集。
+#[derive(Subcommand)]
+pub enum RsiReviewCommands {
+    /// 列出待审候选
+    List {
+        /// JSON 输出
+        #[arg(long)]
+        json: bool,
+    },
+    /// 查看候选完整内容
+    Show {
+        /// 候选 id（rsc_...）
+        id: String,
+    },
+    /// 确认写入候选
+    Approve {
+        /// 候选 id（rsc_...）
+        id: String,
+        /// 跳过交互确认
+        #[arg(long)]
+        yes: bool,
+        /// 冲突裁决：global 或 project
+        #[arg(long)]
+        resolve: Option<String>,
+        /// 审核备注
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// 拒绝候选
+    Reject {
+        /// 候选 id（rsc_...）
+        id: String,
+        /// 拒绝理由
+        #[arg(long)]
+        reason: String,
+    },
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.

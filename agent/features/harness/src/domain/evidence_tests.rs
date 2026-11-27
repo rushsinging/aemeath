@@ -74,6 +74,73 @@ fn retry_pattern_detected_by_fingerprint() {
         .any(|signal| signal.kind == SignalKind::RetryPattern && signal.summary.contains("×2")));
 }
 
+/// 跨 session 重复成功动作聚合为 common_action，单 session 不触发。
+#[test]
+fn common_action_requires_cross_session_successes() {
+    let event = |session: &str, step: &str| SessionEventRecord {
+        session_id: session.into(),
+        run_id: "r1".into(),
+        step_id: step.into(),
+        tool_name: Some("Bash".into()),
+        is_error: false,
+        error_text: None,
+        result_chars: 10,
+        call_fingerprint: Some("bash:cargo-test".into()),
+    };
+    let bundle = aggregate_evidence(&[
+        event("s1", "step-1"),
+        event("s1", "step-2"),
+        event("s2", "step-3"),
+    ]);
+    let common = bundle
+        .signals
+        .iter()
+        .find(|signal| signal.kind == SignalKind::CommonAction)
+        .expect("跨 session 重复成功动作必须产生 common_action");
+    assert!(common.summary.contains("×3"));
+    assert!(common.summary.contains("2 个 session"));
+
+    let single = aggregate_evidence(&[
+        event("s1", "step-1"),
+        event("s1", "step-2"),
+        event("s1", "step-3"),
+    ]);
+    assert!(!single
+        .signals
+        .iter()
+        .any(|signal| signal.kind == SignalKind::CommonAction));
+}
+
+/// 跨 session 的相同多步骤序列聚合为 common_action。
+#[test]
+fn common_sequence_requires_cross_session_repetition() {
+    let event = |session: &str, run: &str, step: &str, tool: &str, fp: &str| SessionEventRecord {
+        session_id: session.into(),
+        run_id: run.into(),
+        step_id: step.into(),
+        tool_name: Some(tool.into()),
+        is_error: false,
+        error_text: None,
+        result_chars: 10,
+        call_fingerprint: Some(fp.into()),
+    };
+    let bundle = aggregate_evidence(&[
+        event("s1", "r1", "step-1", "Grep", "a"),
+        event("s1", "r1", "step-2", "Read", "b"),
+        event("s2", "r2", "step-1", "Grep", "a"),
+        event("s2", "r2", "step-2", "Read", "b"),
+    ]);
+    let sequence = bundle
+        .signals
+        .iter()
+        .find(|signal| signal.signal_id.starts_with("common_sequence:"))
+        .expect("跨 session 相同序列必须产生 common_sequence");
+    assert!(sequence.summary.contains("动作序列"));
+    assert!(sequence.summary.contains("Grep"));
+    assert!(sequence.summary.contains("Read"));
+    assert!(sequence.summary.contains("×2"));
+}
+
 /// 超长结果按工具聚合计数。
 #[test]
 fn oversized_results_counted_by_tool() {
@@ -252,4 +319,25 @@ fn evidence_signal_sources_default_and_round_trip() {
     let parsed: crate::domain::evidence::EvidenceSignal =
         serde_json::from_str(&serialized).expect("round-trip");
     assert_eq!(parsed, current);
+}
+
+#[test]
+fn successful_skill_load_emits_usage_signal_but_failed_load_does_not() {
+    let mut loaded = tool_event("Skill", None, 100);
+    loaded.call_fingerprint = Some(r#"{"skill":"issue-to-pr"}"#.into());
+    let mut failed = tool_event("Skill", Some("Skill 不存在"), 50);
+    failed.call_fingerprint = Some(r#"{"skill":"missing-skill"}"#.into());
+    let bundle = aggregate_evidence(&[loaded, failed]);
+    let usage: Vec<_> = bundle
+        .signals
+        .iter()
+        .filter(|signal| signal.kind == SignalKind::SkillUsage)
+        .collect();
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].signal_id, "skill_usage:issue-to-pr");
+    assert_eq!(usage[0].occurrences, 1);
+    assert!(!bundle
+        .signals
+        .iter()
+        .any(|signal| signal.signal_id == "skill_usage:missing-skill"));
 }

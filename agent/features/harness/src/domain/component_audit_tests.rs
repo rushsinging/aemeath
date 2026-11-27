@@ -31,6 +31,14 @@ fn oversized_single_rule_triggers() {
 }
 
 #[test]
+fn overlong_rule_chars_trigger() {
+    let body = format!("# Guardrails\n\n- {}\n", "a".repeat(401));
+    let finding = audit_component(&id(ComponentKind::Guardrails, "default"), &content(body))
+        .expect("overlong rule");
+    assert!(finding.triggers.contains(&AuditTrigger::OversizedRule));
+}
+
+#[test]
 fn too_many_rules_trigger() {
     let lines: Vec<String> = (0..41).map(|index| format!("- rule {index}")).collect();
     let body = format!("# Tool Guidance\n\n{}\n", lines.join("\n"));
@@ -62,7 +70,10 @@ fn parser_skips_frontmatter_tables_and_code_blocks() {
     assert_eq!(rules.len(), 3, "{rules:#?}");
     assert_eq!(rules[0].section_path, vec!["Section A".to_string()]);
     assert_eq!(rules[1].normalized, "paragraph rule two");
-    assert_eq!(rules[2].section_path, vec!["Section B".to_string()]);
+    assert_eq!(
+        rules[2].section_path,
+        vec!["Section A".to_string(), "Section B".to_string()]
+    );
     assert!(rules.iter().all(|rule| !rule.raw.contains("not a rule")));
 }
 
@@ -77,8 +88,17 @@ fn duplicate_rule_triggers_audit() {
 
 #[test]
 fn overlay_is_auditable() {
-    let body = format!("# Overlay\n\n- {}\n", "长".repeat(5000));
-    let finding = audit_component(&id(ComponentKind::SystemPromptOverlay, "global"), &content(body))
-        .expect("overlay budget");
+    let body = format!(
+        "# Overlay\n\n{}\n",
+        (0..40)
+            .map(|index| format!("- {} {index}", "长".repeat(500)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let finding = audit_component(
+        &id(ComponentKind::SystemPromptOverlay, "global"),
+        &content(body),
+    )
+    .expect("overlay budget");
     assert!(finding.triggers.contains(&AuditTrigger::BodyBudget));
 }
