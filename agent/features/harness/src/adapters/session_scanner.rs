@@ -337,6 +337,7 @@ impl SessionDatasetScanner {
                 .iter()
                 .filter(|action| {
                     matches!(action.kind, TaskActionKind::Edit | TaskActionKind::Write)
+                        && action.success != Some(false)
                 })
                 .filter_map(|action| action.target_path.clone())
                 .collect::<Vec<_>>();
@@ -345,6 +346,25 @@ impl SessionDatasetScanner {
                 run_id: run_id.clone(),
                 step_id: step_id.clone(),
             };
+            let starts_new_goal = traces.last().is_some_and(|trace| {
+                trace.run_id == run_id
+                    && !goal.is_empty()
+                    && !trace.user_goal.is_empty()
+                    && trace.user_goal != goal
+                    && !trace.actions.is_empty()
+            });
+            if starts_new_goal {
+                traces.push(TaskTrace {
+                    session_id: session_id.to_string(),
+                    run_id: run_id.clone(),
+                    user_goal: goal.clone(),
+                    changed_files: Vec::new(),
+                    actions: Vec::new(),
+                    verification: Vec::new(),
+                    outcome: String::new(),
+                    sources: Vec::new(),
+                });
+            }
             if let Some(trace) = traces.last_mut() {
                 if trace.run_id == run_id {
                     if trace.user_goal.is_empty() {
@@ -586,6 +606,9 @@ fn outcome_actions(step: &serde_json::Value) -> Vec<TaskAction> {
                         .and_then(|value| value.as_i64());
                     let success = if is_error || exit_code.is_some_and(|code| code != 0) {
                         Some(false)
+                    } else if tool == "Skill" {
+                        // Skill 工具错误由 is_error 表示；成功加载没有 shell exit_code。
+                        Some(true)
                     } else {
                         exit_code.map(|_| true)
                     };

@@ -97,7 +97,10 @@ pub struct TaskTrace {
 
 impl TaskTrace {
     pub fn trace_id(&self) -> String {
-        format!("{}#{}", self.session_id, self.run_id)
+        match self.sources.first() {
+            Some(source) => format!("{}#{}:{}", self.session_id, self.run_id, source.step_id),
+            None => format!("{}#{}", self.session_id, self.run_id),
+        }
     }
 
     fn has_action(&self, predicate: impl Fn(&TaskAction) -> bool) -> bool {
@@ -112,11 +115,17 @@ impl TaskTrace {
         }
         let has_edit = self.has_action(|action| {
             matches!(action.kind, TaskActionKind::Edit | TaskActionKind::Write)
+                && action.success != Some(false)
         });
-        let has_test = self
-            .verification
-            .iter()
-            .any(|fact| fact.success == Some(true));
+        let first_edit = self.actions.iter().position(|action| {
+            matches!(action.kind, TaskActionKind::Edit | TaskActionKind::Write)
+                && action.success != Some(false)
+        });
+        let has_test = self.actions.iter().enumerate().any(|(index, action)| {
+            action.kind == TaskActionKind::Test
+                && action.success == Some(true)
+                && first_edit.is_some_and(|edit_index| index > edit_index)
+        });
         let has_git = self.has_action(|action| action.kind == TaskActionKind::Git);
         let has_pr = self.has_action(|action| action.kind == TaskActionKind::Pr);
         let has_ci = self.has_action(|action| action.kind == TaskActionKind::Ci);
@@ -176,18 +185,29 @@ pub fn skill_effect_signals(traces: &[TaskTrace]) -> Vec<EvidenceSignal> {
     let mut latest = std::collections::BTreeMap::<String, (bool, Option<EvidenceSourceRef>)>::new();
     for trace in traces {
         for (index, action) in trace.actions.iter().enumerate() {
+            if action.success != Some(true) {
+                continue;
+            }
             let Some(skill_name) = skill_name_from_action(action) else {
                 continue;
             };
             let verification = trace.actions[index + 1..]
                 .iter()
+                .take_while(|next| next.tool != "Skill")
                 .filter(|next| next.kind == TaskActionKind::Test)
                 .collect::<Vec<_>>();
-            if verification.iter().any(|next| next.success == Some(false)) {
-                latest.insert(skill_name, (false, trace.sources.first().cloned()));
-            } else if verification.iter().any(|next| next.success == Some(true)) {
-                latest.insert(skill_name, (true, trace.sources.first().cloned()));
-            }
+            let Some(last) = verification.last() else {
+                continue;
+            };
+            let Some(verified) = last.success else {
+                continue;
+            };
+            let source = trace
+                .sources
+                .get(index)
+                .or_else(|| trace.sources.last())
+                .cloned();
+            latest.insert(skill_name, (verified, source));
         }
     }
     latest

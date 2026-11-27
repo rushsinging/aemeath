@@ -573,3 +573,61 @@ fn candidate_selection_keeps_reuse_only_trace_for_disposition() {
         .expect("reuse-only trace 应进入承接判定");
     assert_eq!(selected.user_goal, "使用 build_cli.sh");
 }
+
+#[tokio::test]
+async fn revision_rejects_whole_document_rewrite() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("issue-to-pr.md");
+    let raw = "---\ndescription: \"处理 issue\"\n---\n# issue-to-pr\n\n读取 issue。\n";
+    std::fs::write(&path, raw).unwrap();
+    let mut registry = registry_under(dir.path(), &["issue-to-pr"]);
+    let llm = ScriptedLlm::new([
+        r#"{"decision":"revise_existing","skill":"issue-to-pr","reason":"重写"}"#.to_string(),
+        serde_json::json!({
+            "decision":"revise", "evidence_refs":["E0"], "reason":"整篇替换",
+            "operations":[{"op":"replace_exact","old_string":raw,"new_string":"---\ndescription: \"new\"\n---\n# new\n"}]
+        }).to_string(),
+    ]);
+    let adoption = synthesize_skill_from_trace(
+        &mut registry,
+        &llm,
+        &trace("cargo test"),
+        false,
+        &mut Vec::new(),
+        None,
+        Some(&ComponentVersionStore::new(dir.path().join("versions"))),
+        "cycle-whole-rewrite",
+    )
+    .await
+    .expect("reject");
+    assert!(adoption.is_none());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+}
+
+#[tokio::test]
+async fn disposition_redacts_secret_commands_before_llm() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("build-cli.md");
+    std::fs::write(&path, "---\ndescription: \"构建\"\n---\n# build-cli\n").unwrap();
+    let mut registry = registry_under(dir.path(), &["build-cli"]);
+    let mut task = trace("cargo test");
+    task.actions[0].command = Some("sk-very-secret-value cargo test".into());
+    let llm =
+        ScriptedLlm::new([r#"{"decision":"no_action","reason":"证据含敏感信息"}"#.to_string()]);
+    let adoption = synthesize_skill_from_trace(
+        &mut registry,
+        &llm,
+        &task,
+        false,
+        &mut Vec::new(),
+        None,
+        None,
+        "cycle-redact",
+    )
+    .await
+    .expect("no action");
+    assert!(adoption.is_none());
+    let prompt = llm.prompts.lock().unwrap()[0].clone();
+    assert!(!prompt.contains("sk-very-secret-value"));
+    assert!(prompt.contains("sk-***"));
+}

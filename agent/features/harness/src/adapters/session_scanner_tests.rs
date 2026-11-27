@@ -542,3 +542,34 @@ fn task_trace_unknown_tool_result_is_not_success() {
     assert_eq!(verification.success, None);
     assert!(traces.iter().all(|trace| trace.candidate_score() < 8));
 }
+
+#[test]
+fn task_trace_splits_distinct_user_goals_in_same_run() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dataset = root.path().join("sample.dataset");
+    let members = dataset.join("members");
+    std::fs::create_dir_all(&members).unwrap();
+    for (index, goal) in ["修复第一个任务", "修复第二个任务"].iter().enumerate() {
+        let step_id = format!("step-{index}");
+        let member = serde_json::json!({
+            "cursor": {"run_id": "run-1", "step_id": step_id},
+            "step": {
+                "step_id": step_id,
+                "accepted_input": {"messages": [{"role": "user", "content": [{"type": "text", "text": goal}]}]},
+                "outcome": {
+                    "committed_revision": index + 1,
+                    "messages": [
+                        {"role": "assistant", "content": [{"type": "tool_use", "id": format!("call-{index}"), "name": "Edit", "input": {"file_path": format!("src/{index}.rs")}}]},
+                        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": format!("call-{index}"), "content": {"action": "edited"}}]}
+                    ]
+                }
+            }
+        });
+        std::fs::write(members.join(format!("{index}.json")), member.to_string()).unwrap();
+    }
+    let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
+    assert_eq!(traces.len(), 2);
+    assert_eq!(traces[0].user_goal, "修复第一个任务");
+    assert_eq!(traces[1].user_goal, "修复第二个任务");
+    assert_ne!(traces[0].trace_id(), traces[1].trace_id());
+}

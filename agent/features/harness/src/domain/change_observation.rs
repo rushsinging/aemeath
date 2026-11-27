@@ -351,6 +351,23 @@ fn rollback_repeated_ineffective(
     version_store: &ComponentVersionStore,
 ) -> Option<String> {
     let id = crate::parse_component_id(&observation.component)?;
+    let current = registry.read(&id).ok()?;
+    if body_hash(&current.body) != observation.after_hash {
+        observation.status = ObservationStatus::Stale;
+        observation.rollback_reason = Some("组件已被外部修改，未自动回滚".to_string());
+        return Some(format!(
+            "变更观察：{} 当前内容已变化，未自动回滚",
+            observation.component
+        ));
+    }
+    if has_newer_snapshot(version_store, &id, &observation.snapshot_cycle) {
+        observation.status = ObservationStatus::Superseded;
+        observation.rollback_reason = Some("已有更新版本，未自动回滚".to_string());
+        return Some(format!(
+            "变更观察：{} 已有更新版本，未自动回滚",
+            observation.component
+        ));
+    }
     let snapshot = version_store
         .load(&id, Some(&observation.snapshot_cycle))
         .ok()?;

@@ -170,6 +170,10 @@ impl RsiTask for HarnessRsiCycleTask {
             .iter()
             .map(|block| self.stream_port.block_evidence(block))
             .collect();
+        let task_traces = blocks
+            .iter()
+            .flat_map(|block| self.stream_port.task_traces(block))
+            .collect::<Vec<_>>();
         let current_signals: Vec<String> = block_evidences
             .iter()
             .flat_map(|evidence| {
@@ -199,6 +203,11 @@ impl RsiTask for HarnessRsiCycleTask {
                     merged.signals.extend(evidence.signals.iter().cloned());
                     merged.sessions_covered += evidence.sessions_covered;
                 }
+                merged
+                    .signals
+                    .extend(crate::domain::task_trace::skill_effect_signals(
+                        &task_traces,
+                    ));
                 observation_summaries =
                     crate::domain::change_observation::evaluate_and_rollback_with_llm(
                         observation_store,
@@ -360,10 +369,6 @@ impl RsiTask for HarnessRsiCycleTask {
             let mut observation_evidence = merged_evidence.clone();
             // 任务轨迹优先；common_action 仅在没有合格任务轨迹时作为 fallback。
             // common_action 仍从普通组件路由中剔除，避免工具纪律误写。
-            let task_traces = blocks
-                .iter()
-                .flat_map(|block| self.stream_port.task_traces(block))
-                .collect::<Vec<_>>();
             observation_evidence
                 .signals
                 .extend(crate::domain::task_trace::skill_effect_signals(
@@ -783,7 +788,7 @@ fn record_change_observations(
     registry: &dyn crate::application::ComponentRegistry,
     version_store: &crate::domain::versioning::ComponentVersionStore,
     adopted: &[crate::domain::task::AdoptionRecord],
-    cycle_id: &str,
+    _cycle_id: &str,
     evidence: &crate::domain::evidence::EvidenceBundle,
 ) {
     for adoption in adopted {
@@ -831,7 +836,7 @@ fn record_change_observations(
         }
         let observation = crate::domain::change_observation::ChangeObservation::new_applied(
             adoption.id.to_string(),
-            cycle_id.to_string(),
+            snapshot.cycle_id.clone(),
             before_hash,
             crate::domain::change_observation::body_hash(&current.body),
             target_signal_ids,

@@ -454,7 +454,7 @@ fn repeated_ineffective_skill_rolls_back_to_snapshot() {
     let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
     let mut observation = ChangeObservation::new_applied(
         "skill/issue-to-pr".into(),
-        "cycle-new".into(),
+        "cycle-new-skill-trace".into(),
         body_hash(""),
         body_hash("new"),
         vec!["skill_usage:issue-to-pr".into()],
@@ -470,8 +470,9 @@ fn repeated_ineffective_skill_rolls_back_to_snapshot() {
         name: crate::domain::component::ComponentName::new("issue-to-pr"),
     };
     versions
-        .capture(&registry, &id, "cycle-new", "upsert")
+        .capture(&registry, &id, "cycle-new-skill-trace", "upsert")
         .expect("snapshot");
+    registry.write(&id, &content("new")).expect("current");
     let evidence = EvidenceBundle {
         sessions_covered: 1,
         signals: vec![EvidenceSignal {
@@ -514,7 +515,7 @@ fn skill_effect_ignores_tests_before_load() {
                 kind: crate::domain::task_trace::TaskActionKind::Other,
                 tool: "Skill".into(),
                 command: Some(r#"{"skill":"issue-to-pr"}"#.into()),
-                success: None,
+                success: Some(true),
                 target_path: None,
                 excerpt: None,
             },
@@ -534,4 +535,91 @@ fn skill_effect_ignores_tests_before_load() {
     let signals = crate::domain::task_trace::skill_effect_signals(&[trace]);
     assert_eq!(signals.len(), 1);
     assert_eq!(signals[0].signal_id, "skill_effect:issue-to-pr:verified");
+}
+
+#[test]
+fn skill_effect_uses_last_verification_result() {
+    let trace = crate::domain::task_trace::TaskTrace {
+        session_id: "project/session.dataset".into(),
+        run_id: "run-1".into(),
+        user_goal: "验证".into(),
+        changed_files: Vec::new(),
+        actions: vec![
+            crate::domain::task_trace::TaskAction {
+                kind: crate::domain::task_trace::TaskActionKind::Other,
+                tool: "Skill".into(),
+                command: Some(r#"{"skill":"issue-to-pr"}"#.into()),
+                success: Some(true),
+                target_path: None,
+                excerpt: None,
+            },
+            crate::domain::task_trace::TaskAction {
+                kind: crate::domain::task_trace::TaskActionKind::Test,
+                tool: "Bash".into(),
+                command: Some("cargo test".into()),
+                success: Some(false),
+                target_path: None,
+                excerpt: None,
+            },
+            crate::domain::task_trace::TaskAction {
+                kind: crate::domain::task_trace::TaskActionKind::Test,
+                tool: "Bash".into(),
+                command: Some("cargo test".into()),
+                success: Some(true),
+                target_path: None,
+                excerpt: None,
+            },
+        ],
+        verification: Vec::new(),
+        outcome: "Completed".into(),
+        sources: Vec::new(),
+    };
+    let signals = crate::domain::task_trace::skill_effect_signals(&[trace]);
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].signal_id, "skill_effect:issue-to-pr:verified");
+}
+
+#[test]
+fn repeated_ineffective_does_not_overwrite_external_modification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = ChangeObservationStore::new(dir.path().join("changes.jsonl"));
+    let mut observation = ChangeObservation::new_applied(
+        "skill/issue-to-pr".into(),
+        "cycle-new-skill-trace".into(),
+        body_hash(""),
+        body_hash("new"),
+        vec!["skill_usage:issue-to-pr".into()],
+        Vec::new(),
+        vec!["run-before".into()],
+    );
+    observation.status = ObservationStatus::Ineffective;
+    store.append(&observation).expect("append");
+    let id = crate::domain::component::ComponentId {
+        kind: crate::domain::component::ComponentKind::Skill,
+        name: crate::domain::component::ComponentName::new("issue-to-pr"),
+    };
+    let mut registry = FakeRegistry::with_entries(Vec::new());
+    let versions = ComponentVersionStore::new(dir.path().join("versions"));
+    versions
+        .capture(&registry, &id, "cycle-new-skill-trace", "upsert")
+        .unwrap();
+    registry.write(&id, &content("external edit")).unwrap();
+    let evidence = EvidenceBundle {
+        sessions_covered: 1,
+        signals: vec![EvidenceSignal {
+            kind: SignalKind::SkillEffect,
+            signal_id: "skill_effect:issue-to-pr:ineffective".into(),
+            summary: "Skill issue-to-pr 使用后验证失败".into(),
+            excerpt: None,
+            occurrences: 1,
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project/session.dataset".into(),
+                run_id: "run-after".into(),
+                step_id: "step-1".into(),
+            }],
+        }],
+    };
+    evaluate_and_rollback(&store, &mut registry, &versions, &evidence, None);
+    assert_eq!(store.load().unwrap()[0].status, ObservationStatus::Stale);
+    assert_eq!(registry.read(&id).unwrap().body, "external edit");
 }

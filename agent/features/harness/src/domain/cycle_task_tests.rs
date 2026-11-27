@@ -824,3 +824,102 @@ async fn two_phase_consumes_task_trace_and_previews_new_skill() {
     assert!(outcome.summary.contains("根据真实任务轨迹交付修复"));
     assert!(llm.prompts.lock().unwrap()[0].contains("修复缺陷并验证"));
 }
+
+#[tokio::test]
+async fn cycle_start_passes_skill_effect_to_observation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let skill_id = crate::domain::component::ComponentId {
+        kind: crate::domain::component::ComponentKind::Skill,
+        name: crate::domain::component::ComponentName::new("issue-to-pr"),
+    };
+    let registry: Box<dyn crate::application::ComponentRegistry + Send> = Box::new(
+        FakeRegistry::with_entries(vec![(skill_id.clone(), body_content("new"))]),
+    );
+    let registry = Arc::new(AsyncMutex::new(registry));
+    let versions = Arc::new(crate::domain::versioning::ComponentVersionStore::new(
+        dir.path().join("versions"),
+    ));
+    {
+        let guard = registry.lock().await;
+        versions
+            .capture(&**guard, &skill_id, "cycle-old", "upsert")
+            .unwrap();
+    }
+    let observations = Arc::new(
+        crate::domain::change_observation::ChangeObservationStore::new(
+            dir.path().join("changes.jsonl"),
+        ),
+    );
+    observations
+        .append(
+            &crate::domain::change_observation::ChangeObservation::new_applied(
+                skill_id.to_string(),
+                "cycle-old".into(),
+                crate::domain::change_observation::body_hash("new"),
+                crate::domain::change_observation::body_hash("new"),
+                vec!["skill_usage:issue-to-pr".into()],
+                Vec::new(),
+                vec!["run-before".into()],
+            ),
+        )
+        .unwrap();
+    let stream = FakeEvidenceStream::default();
+    stream.plans.lock().unwrap().push(EvidenceBlockPlan {
+        runs: vec![RunRef {
+            session_key: "project/session.dataset".into(),
+            run_id: "run-after".into(),
+        }],
+    });
+    stream
+        .traces
+        .lock()
+        .unwrap()
+        .push(crate::domain::task_trace::TaskTrace {
+            session_id: "project/session.dataset".into(),
+            run_id: "run-after".into(),
+            user_goal: "验证 skill".into(),
+            changed_files: Vec::new(),
+            actions: vec![
+                crate::domain::task_trace::TaskAction {
+                    kind: crate::domain::task_trace::TaskActionKind::Other,
+                    tool: "Skill".into(),
+                    command: Some(r#"{"skill":"issue-to-pr"}"#.into()),
+                    success: Some(true),
+                    target_path: None,
+                    excerpt: None,
+                },
+                crate::domain::task_trace::TaskAction {
+                    kind: crate::domain::task_trace::TaskActionKind::Test,
+                    tool: "Bash".into(),
+                    command: Some("cargo test".into()),
+                    success: Some(true),
+                    target_path: None,
+                    excerpt: None,
+                },
+            ],
+            verification: Vec::new(),
+            outcome: "Completed".into(),
+            sources: vec![crate::domain::evidence::EvidenceSourceRef {
+                session_id: "project/session.dataset".into(),
+                run_id: "run-after".into(),
+                step_id: "step-1".into(),
+            }],
+        });
+    let lesson_store = Arc::new(LessonStore::new(dir.path().join("library.jsonl")));
+    let llm = PromptRecordingLlm::new(Vec::new());
+    let mut task = crate::domain::cycle_task::HarnessRsiCycleTask::new(
+        registry,
+        llm,
+        lesson_store,
+        RsiConfig::default(),
+    )
+    .with_evidence_stream(Box::new(stream))
+    .with_observation_store(observations.clone())
+    .with_version_store(versions);
+    task.run_cycle().await.expect("cycle");
+    let saved = observations.load().unwrap();
+    assert_eq!(
+        saved[0].status,
+        crate::domain::change_observation::ObservationStatus::Verified
+    );
+}

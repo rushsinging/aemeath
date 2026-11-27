@@ -61,6 +61,10 @@ fn candidate(trace: &TaskTrace) -> bool {
         })
 }
 
+fn revision_candidate(trace: &TaskTrace) -> bool {
+    !trace.actions.is_empty() && trace.verification.iter().any(|fact| fact.success.is_some())
+}
+
 fn trace_prompt(trace: &TaskTrace, existing: &[(String, String)]) -> String {
     let goal = redact_sensitive_text(&trace.user_goal);
     let mut selected_indices = std::collections::BTreeSet::new();
@@ -404,7 +408,8 @@ async fn decide_skill_disposition(
                 action
                     .command
                     .as_deref()
-                    .unwrap_or("")
+                    .map(redact_sensitive_text)
+                    .unwrap_or_default()
                     .chars()
                     .take(200)
                     .collect::<String>()
@@ -497,6 +502,37 @@ struct SkillRevisionContext<'a> {
     cycle_id: &'a str,
 }
 
+fn validate_revision_operations(
+    raw: &str,
+    operations: &[crate::domain::changeset::PatchOperation],
+) -> Result<(), String> {
+    if operations.len() > 8 {
+        return Err("单次修订最多 8 个 patch 操作".to_string());
+    }
+    let raw_chars = raw.chars().count();
+    for operation in operations {
+        let (anchor_chars, replacement_chars) = match operation {
+            crate::domain::changeset::PatchOperation::ReplaceExact {
+                old_string,
+                new_string,
+            } => (old_string.chars().count(), new_string.chars().count()),
+            crate::domain::changeset::PatchOperation::InsertAfterAnchor { anchor, new_text } => {
+                (anchor.chars().count(), new_text.chars().count())
+            }
+            crate::domain::changeset::PatchOperation::DeleteExact { old_string } => {
+                (old_string.chars().count(), 0)
+            }
+        };
+        if anchor_chars * 3 > raw_chars {
+            return Err("单次 patch 锚点不得超过原文三分之一，禁止整篇替换".to_string());
+        }
+        if replacement_chars > raw_chars * 2 {
+            return Err("patch 新内容不得超过原文两倍".to_string());
+        }
+    }
+    Ok(())
+}
+
 async fn revise_skill_from_trace(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
@@ -556,6 +592,10 @@ async fn revise_skill_from_trace(
             return Ok(None);
         }
     };
+    if let Err(message) = validate_revision_operations(&raw, &draft.operations) {
+        reject_synthesis(preview_lines, context.recorder, message);
+        return Ok(None);
+    }
     let patched = match crate::domain::changeset::apply_patch_operations(&raw, &draft.operations) {
         Ok(body) => body,
         Err(error) => {
@@ -567,6 +607,10 @@ async fn revise_skill_from_trace(
             return Ok(None);
         }
     };
+    if patched == raw {
+        preview_lines.push(format!("  [skill-disposition] 修订内容未变化 {id}"));
+        return Ok(None);
+    }
     let content = ComponentContent {
         frontmatter: None,
         body: patched.clone(),
@@ -689,6 +733,14 @@ pub async fn synthesize_skill_from_trace(
             preview_lines,
             recorder,
             format!("新建候选轨迹不合格：{}", trace.trace_id()),
+        );
+        return Ok(None);
+    }
+    if disposition == SkillDisposition::ReviseExisting && !revision_candidate(trace) {
+        reject_synthesis(
+            preview_lines,
+            recorder,
+            format!("修订缺少可判定的验证证据：{}", trace.trace_id()),
         );
         return Ok(None);
     }
