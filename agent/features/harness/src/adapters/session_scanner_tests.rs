@@ -530,7 +530,7 @@ fn task_trace_keeps_goal_ordered_actions_and_verified_exit_codes() {
 }
 
 #[test]
-fn task_trace_unknown_tool_result_is_not_success() {
+fn task_trace_uses_test_output_when_exit_code_missing() {
     let root = tempfile::tempdir().expect("tempdir");
     let dataset = make_dataset(root.path());
     let traces = SessionDatasetScanner::task_traces(&dataset, "sample.dataset");
@@ -539,7 +539,7 @@ fn task_trace_unknown_tool_result_is_not_success() {
         .flat_map(|trace| trace.verification.iter())
         .find(|fact| fact.command.contains("cargo test"))
         .expect("test fact");
-    assert_eq!(verification.success, None);
+    assert_eq!(verification.success, Some(true));
     assert!(traces.iter().all(|trace| trace.candidate_score() < 8));
 }
 
@@ -572,4 +572,38 @@ fn task_trace_splits_distinct_user_goals_in_same_run() {
     assert_eq!(traces[0].user_goal, "修复第一个任务");
     assert_eq!(traces[1].user_goal, "修复第二个任务");
     assert_ne!(traces[0].trace_id(), traces[1].trace_id());
+}
+
+#[test]
+fn verification_success_requires_test_output_or_exit_code() {
+    assert_eq!(
+        crate::adapters::session_scanner::verification_success(
+            "Bash",
+            "cargo test",
+            false,
+            None,
+            "done"
+        ),
+        None
+    );
+    assert_eq!(
+        crate::adapters::session_scanner::verification_success(
+            "Bash",
+            "cargo test",
+            false,
+            None,
+            "test result: ok. 251 passed"
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        crate::adapters::session_scanner::verification_success(
+            "Bash",
+            "cargo test",
+            false,
+            Some(0),
+            "test result: FAILED"
+        ),
+        Some(false)
+    );
 }

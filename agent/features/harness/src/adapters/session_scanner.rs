@@ -548,6 +548,34 @@ fn accepted_goal(step: &serde_json::Value) -> String {
     parts.join("\n")
 }
 
+pub(crate) fn verification_success(
+    tool: &str,
+    command: &str,
+    is_error: bool,
+    exit_code: Option<i64>,
+    result_text: &str,
+) -> Option<bool> {
+    if is_error || exit_code.is_some_and(|code| code != 0) {
+        return Some(false);
+    }
+    if TaskActionKind::from_tool_command(tool, command) == TaskActionKind::Test {
+        let normalized = result_text.to_ascii_lowercase();
+        if normalized.contains("test result: failed")
+            || normalized.contains("error: test failed")
+            || normalized.contains("panicked at")
+        {
+            return Some(false);
+        }
+        if normalized.contains("test result: ok") {
+            return Some(true);
+        }
+    }
+    if tool == "Skill" {
+        return Some(true);
+    }
+    exit_code.map(|_| true)
+}
+
 fn outcome_actions(step: &serde_json::Value) -> Vec<TaskAction> {
     let Some(messages) = step
         .pointer("/outcome/messages")
@@ -604,24 +632,25 @@ fn outcome_actions(step: &serde_json::Value) -> Vec<TaskAction> {
                     let exit_code = block
                         .pointer("/content/exit_code")
                         .and_then(|value| value.as_i64());
-                    let success = if is_error || exit_code.is_some_and(|code| code != 0) {
-                        Some(false)
-                    } else if tool == "Skill" {
-                        // Skill 工具错误由 is_error 表示；成功加载没有 shell exit_code。
-                        Some(true)
-                    } else {
-                        exit_code.map(|_| true)
-                    };
-                    let excerpt = block
+                    let result_text = block
                         .get("text")
                         .and_then(|value| value.as_str())
-                        .map(|value| value.chars().take(240).collect::<String>())
-                        .or_else(|| {
-                            block
-                                .get("content")
-                                .map(|value| value.to_string().chars().take(240).collect())
-                        });
+                        .map(str::to_string)
+                        .or_else(|| block.get("content").map(|value| value.to_string()))
+                        .unwrap_or_default();
+                    let excerpt = if result_text.is_empty() {
+                        None
+                    } else {
+                        Some(result_text.chars().take(240).collect::<String>())
+                    };
                     let command_for_kind = command.as_deref().unwrap_or("");
+                    let success = verification_success(
+                        &tool,
+                        command_for_kind,
+                        is_error,
+                        exit_code,
+                        &result_text,
+                    );
                     actions.push(TaskAction {
                         kind: TaskActionKind::from_tool_command(&tool, command_for_kind),
                         tool,
